@@ -589,8 +589,7 @@ class TestDiscoverSingle:
             "llm_discovery.pipeline.discover_models",
             lambda base_url, api_key: _TRACER_MODELS,
         )
-        monkeypatch.setattr("llm_discovery.pipeline.load_shared_secrets", lambda config: None)
-        monkeypatch.setattr("llm_discovery.pipeline.load_discovery_secrets", lambda config: None)
+        monkeypatch.setattr("llm_discovery.pipeline.load_all_secrets", lambda config=None: None)
         monkeypatch.setenv("AGNES_AI_API_KEY", "fake-judge-key")
         monkeypatch.setenv("GROQ_API_KEY", "fake-provider-key")
 
@@ -615,8 +614,7 @@ class TestDiscoverSingle:
             "llm_discovery.pipeline.discover_models",
             lambda base_url, api_key: _TRACER_MODELS,
         )
-        monkeypatch.setattr("llm_discovery.pipeline.load_shared_secrets", lambda config: None)
-        monkeypatch.setattr("llm_discovery.pipeline.load_discovery_secrets", lambda config: None)
+        monkeypatch.setattr("llm_discovery.pipeline.load_all_secrets", lambda config=None: None)
         monkeypatch.setenv("AGNES_AI_API_KEY", "fake-judge-key")
         monkeypatch.setenv("GROQ_API_KEY", "fake-provider-key")
 
@@ -639,8 +637,7 @@ class TestDiscoverSingle:
             "llm_discovery.pipeline.discover_models",
             lambda base_url, api_key: [{"id": "openai/whisper-tiny"}],
         )
-        monkeypatch.setattr("llm_discovery.pipeline.load_shared_secrets", lambda config: None)
-        monkeypatch.setattr("llm_discovery.pipeline.load_discovery_secrets", lambda config: None)
+        monkeypatch.setattr("llm_discovery.pipeline.load_all_secrets", lambda config=None: None)
         monkeypatch.setenv("AGNES_AI_API_KEY", "fake-judge-key")
         monkeypatch.setenv("GROQ_API_KEY", "fake-provider-key")
 
@@ -674,8 +671,7 @@ class TestDiscoverAllProvidersIsolation:
             "llm_discovery.pipeline.discover_models",
             fake_discover_models,
         )
-        monkeypatch.setattr("llm_discovery.pipeline.load_shared_secrets", lambda config: None)
-        monkeypatch.setattr("llm_discovery.pipeline.load_discovery_secrets", lambda config: None)
+        monkeypatch.setattr("llm_discovery.pipeline.load_all_secrets", lambda config=None: None)
         # Set judge key + all provider keys so every provider passes
         # the key check and reaches discover_models.
         monkeypatch.setenv("AGNES_AI_API_KEY", "fake-judge-key")

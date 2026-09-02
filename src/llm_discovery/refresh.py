@@ -12,6 +12,11 @@ import httpx
 from .benchmarks import BenchmarkDataCache
 from .catalogs import ArtificialAnalysisCatalog, ModelsDevCatalog
 
+try:
+    from .secrets import load_all_secrets
+except ImportError:  # allow running without secrets module in minimal env
+    load_all_secrets = None  # type: ignore
+
 DATA_DIR = Path("data")
 DEFAULT_AA_URL = "https://artificialanalysis.ai/api/v2/data/llms/models"
 DEFAULT_MODELS_DEV_URL = "https://models.dev/catalog.json"
@@ -79,6 +84,11 @@ def _normalize_aa_payload(raw: Any) -> dict[str, Any]:
 
 
 def fetch_artificial_analysis(api_key=None, url=DEFAULT_AA_URL, timeout=30):
+    if load_all_secrets is not None and api_key is None and not os.getenv("AA_API_KEY"):
+        try:
+            load_all_secrets()
+        except Exception:
+            pass
     headers = {"Accept": "application/json"}
     key = api_key or os.getenv("AA_API_KEY") or os.getenv("ARTIFICIAL_ANALYSIS_API_KEY") or os.getenv("ARTIFICIALANALYSIS_API_KEY")
     if key:
@@ -160,6 +170,11 @@ def refresh_benchmarks(aa_path=DATA_DIR / "artificial_analysis_models.json", mod
 
 def refresh_all(data_dir=DATA_DIR, aa_api_key=None, aa_url=DEFAULT_AA_URL, models_dev_url=DEFAULT_MODELS_DEV_URL, backup=True, dry_run=False, only=None):
     """Refresh all JSON catalogs in order: AA, models.dev, then benchmarks (derived)."""
+    if load_all_secrets is not None:
+        try:
+            load_all_secrets()
+        except Exception:
+            pass  # explicit env vars still work; 401 hint covers missing key
     data_dir = Path(data_dir)
     only_set = set(only) if only else {"aa", "models_dev", "benchmarks"}
     results = {}

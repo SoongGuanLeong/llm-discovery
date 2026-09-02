@@ -17,7 +17,7 @@ from .evidence_collector import EvidenceCollector
 from .judge import Judge
 from .model_resolver import ModelResolver, resolve_model
 from .policy_gate import PolicyGate
-from .secrets import load_discovery_secrets, load_shared_secrets
+from .secrets import load_all_secrets, load_discovery_secrets, load_shared_secrets  # noqa: keep aliases for patch compat
 
 
 def evaluate_model(
@@ -212,8 +212,7 @@ def discover_single(
     provider = resolve_provider(provider_config, models_dev)
     if provider.discovery_strategy == "bazaarlink":
         return _auto_free_record(provider_name)
-    load_shared_secrets(config.infisical)
-    load_discovery_secrets(config.infisical)
+    load_all_secrets(config.infisical)
     llm_api_key = os.environ.get(config.judge_llm.secret)
     if not llm_api_key:
         raise RuntimeError(f"Missing API key environment variable: {config.judge_llm.secret}")
@@ -277,8 +276,7 @@ def discover_provider(
             "drop": [],
             "error": [],
         }
-    load_shared_secrets(config.infisical)
-    load_discovery_secrets(config.infisical)
+    load_all_secrets(config.infisical)
     llm_api_key = os.environ.get(config.judge_llm.secret)
     if not llm_api_key:
         raise RuntimeError(f"Missing API key environment variable: {config.judge_llm.secret}")

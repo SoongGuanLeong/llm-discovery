@@ -58,3 +58,13 @@ def load_discovery_secrets(config: InfisicalConfig) -> None:
         raise RuntimeError(f"Missing environment variable: {config.discovery_project_id_env}")
 
     _load_project_secrets(project_id, config.environment)
+
+
+def load_all_secrets(config: InfisicalConfig | None = None) -> None:
+    """Single injection path: load shared + discovery projects."""
+    if config is None:
+        from .config import load_config
+
+        config = load_config().infisical
+    load_shared_secrets(config)
+    load_discovery_secrets(config)

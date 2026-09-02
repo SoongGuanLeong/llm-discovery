@@ -26,6 +26,12 @@ def normalize_model_id(value: str) -> str:
     """
     value = value.lower().strip()
     value = value.rsplit("/", 1)[-1]
+    # Strip free markers (:free, -free, _free, /free) before normalization
+    value = re.sub(r"[:/_-]free$", "", value)
+    # Strip nvidia- hyphen prefix to match AA slugs (nvidia/nemotron vs nvidia-nemotron)
+    # Other providers (llama, minimax) keep their family prefix; only nvidia AA uses provider hyphen
+    if value.startswith("nvidia-"):
+        value = value[len("nvidia-"):]
     value = value.replace(".", "-")
     value = re.sub(r"[^a-z0-9]+", "-", value)
     value = re.sub(r"-+", "-", value)

@@ -80,7 +80,7 @@ def _normalize_aa_payload(raw: Any) -> dict[str, Any]:
 
 def fetch_artificial_analysis(api_key=None, url=DEFAULT_AA_URL, timeout=30):
     headers = {"Accept": "application/json"}
-    key = api_key or os.getenv("ARTIFICIAL_ANALYSIS_API_KEY") or os.getenv("AA_API_KEY") or os.getenv("ARTIFICIALANALYSIS_API_KEY")
+    key = api_key or os.getenv("AA_API_KEY") or os.getenv("ARTIFICIAL_ANALYSIS_API_KEY") or os.getenv("ARTIFICIALANALYSIS_API_KEY")
     if key:
         headers["x-api-key"] = key
     resp = httpx.get(url, headers=headers, timeout=timeout, follow_redirects=True)
@@ -178,7 +178,7 @@ def main():
     parser.add_argument("--data-dir", type=Path, default=DATA_DIR, help="Data directory (default: data)")
     parser.add_argument("--aa-url", default=DEFAULT_AA_URL, help="AA API URL")
     parser.add_argument("--models-dev-url", default=DEFAULT_MODELS_DEV_URL, help="models.dev catalog URL")
-    parser.add_argument("--aa-api-key", default=None, help="AA API key (or env ARTIFICIAL_ANALYSIS_API_KEY)")
+    parser.add_argument("--aa-api-key", default=None, help="AA API key (or env AA_API_KEY)")
     parser.add_argument("--no-backup", action="store_true", help="Disable .bak backup")
     parser.add_argument("--dry-run", action="store_true", help="Fetch and validate but do not write")
     parser.add_argument("--only", nargs="*", choices=["aa", "models_dev", "benchmarks"], help="Only refresh selected catalogs")
@@ -191,7 +191,7 @@ def main():
         body = e.response.text[:500] if e.response is not None else ""
         print(f"HTTP {status} from {e.request.url if e.request else '?' }\n{body}")
         if status == 401:
-            print("AA requires API key: set ARTIFICIAL_ANALYSIS_API_KEY env or --aa-api-key")
+            print("AA requires API key: set AA_API_KEY env or --aa-api-key")
         raise SystemExit(1)
     except Exception as e:
         print(f"Refresh failed: {e}")

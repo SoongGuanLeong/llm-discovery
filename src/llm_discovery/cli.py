@@ -69,7 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
     refresh_parser.add_argument("--data-dir", type=Path, default=DATA_DIR, help="Data directory (default: data)")
     refresh_parser.add_argument("--aa-url", default="https://artificialanalysis.ai/api/v2/data/llms/models", help="AA API URL")
     refresh_parser.add_argument("--models-dev-url", default="https://models.dev/catalog.json", help="models.dev catalog URL")
-    refresh_parser.add_argument("--aa-api-key", default=None, help="AA API key (or env ARTIFICIAL_ANALYSIS_API_KEY)")
+    refresh_parser.add_argument("--aa-api-key", default=None, help="AA API key (or env AA_API_KEY)")
     refresh_parser.add_argument("--no-backup", action="store_true", help="Disable .bak backup")
     refresh_parser.add_argument("--dry-run", action="store_true", help="Fetch and validate but do not write")
     refresh_parser.add_argument("--only", nargs="*", choices=["aa", "models_dev", "benchmarks"], help="Only refresh selected catalogs")
@@ -100,7 +100,7 @@ def main() -> None:
             body = e.response.text[:500] if e.response is not None else ""
             print(f"HTTP {status} from {e.request.url if e.request else '?' }\n{body}")
             if status == 401:
-                print("AA requires API key: set ARTIFICIAL_ANALYSIS_API_KEY env or --aa-api-key")
+                print("AA requires API key: set AA_API_KEY env or --aa-api-key")
             raise SystemExit(1)
         except SystemExit:
             raise

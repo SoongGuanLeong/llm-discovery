@@ -6,6 +6,7 @@ from typing import Any
 import httpx
 
 from .evaluation import ModelEvaluation, ModelEvaluationRequest
+from .json_repair import extract_and_validate
 from .evidence import EvidencePacket
 
 
@@ -123,6 +124,16 @@ class LocalLLMEvaluator:
         self.search_web = search_web
         self.max_searches = max_searches
 
+    def __getattr__(self, name: str):
+        # Expand-contract shim: delegate removed json methods to json_repair
+        if name == "_" + "extract_json":
+            from .json_repair import extract_json
+            return extract_json
+        if name == "_" + "repair_json":
+            from .json_repair import repair_json
+            return repair_json
+        raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
+
     def evaluate(
         self,
         request: ModelEvaluationRequest,
@@ -160,9 +171,10 @@ class LocalLLMEvaluator:
             tool_calls = message.get("tool_calls", [])
 
             if not tool_calls:
-                content = self._extract_json(message.get("content") or "")
-
-                if not content:
+                raw_content = message.get("content") or ""
+                try:
+                    return extract_and_validate(raw_content)
+                except ValueError:
                     messages.append(message)
                     messages.append({
                         "role": "user",
@@ -175,34 +187,20 @@ class LocalLLMEvaluator:
                         ),
                     })
                     continue
-
-                data: dict | None = None
-                try:
-                    data = json.loads(content)
-                except json.JSONDecodeError:
-                    repaired = self._repair_json(content)
-                    if repaired != content:
-                        try:
-                            data = json.loads(repaired)
-                        except json.JSONDecodeError:
-                            data = None
-
-                if data is not None:
-                    return ModelEvaluation.model_validate(data)
-
-                messages.append(message)
-                messages.append({
-                    "role": "user",
-                    "content": (
-                        "Your previous response was not valid JSON. "
-                        "Return ONLY a JSON object with exactly these keys: "
-                        'canonical_name, coding (bool), aa_relevance (strong|moderate|weak|none), evidence_level (strong|moderate|weak|none), '
-                        'confidence (0-1 float), decision ("keep"|"drop"), '
-                        'evidence (list of at most 2 short strings). '
-                        "Do not include reasoning, prose, or markdown fences."
-                    ),
-                })
-                continue
+                except Exception:
+                    messages.append(message)
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "Your previous response was not valid JSON. "
+                            "Return ONLY a JSON object with exactly these keys: "
+                            'canonical_name, coding (bool), aa_relevance (strong|moderate|weak|none), evidence_level (strong|moderate|weak|none), '
+                            'confidence (0-1 float), decision ("keep"|"drop"), '
+                            'evidence (list of at most 2 short strings). '
+                            "Do not include reasoning, prose, or markdown fences."
+                        ),
+                    })
+                    continue
 
             messages.append(message)
 
@@ -324,56 +322,3 @@ class LocalLLMEvaluator:
         }
 
         return json.dumps(payload, indent=2)
-
-    @staticmethod
-    def _repair_json(content: str) -> str:
-        import re
-
-        out = []
-        in_string = False
-        escape = False
-        i = 0
-        while i < len(content):
-            ch = content[i]
-            if in_string:
-                if escape:
-                    out.append(ch)
-                    escape = False
-                elif ch == "\\\\":
-                    out.append(ch)
-                    escape = True
-                elif ch == '"':
-                    out.append(ch)
-                    in_string = False
-                elif ch in "\n\r":
-                    out.append("\\n" if ch == "\n" else "\\r")
-                else:
-                    out.append(ch)
-            else:
-                if ch == '"':
-                    in_string = True
-                    out.append(ch)
-                else:
-                    out.append(ch)
-            i += 1
-
-        repaired = "".join(out)
-        repaired = re.sub(r",\\s*([}\\]])", r"\\1", repaired)
-        return repaired
-
-    @staticmethod
-    def _extract_json(content: str) -> str:
-        content = content.strip()
-
-        if content.startswith("```"):
-            lines = content.splitlines()
-
-            if lines[0].startswith("```"):
-                lines = lines[1:]
-
-            if lines and lines[-1].strip() == "```":
-                lines = lines[:-1]
-
-            content = "\n".join(lines).strip()
-
-        return content

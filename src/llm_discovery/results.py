@@ -31,11 +31,13 @@ def save_result(
 
 
 # Exact, ordered schema for the user-editable keep-list YAML (T2, issue #3).
+# tier + category mirror each other (category = spec wording, tier = internal). Both written for spec compliance.
 YAML_SCHEMA_KEYS = [
     "provider",
     "model_id",
     "decision",
     "tier",
+    "category",
     "aa_model_id",
     "aa_score",
     "confidence",
@@ -82,6 +84,7 @@ class SingleModelWriter:
             "model_id": record["provider_model_id"],
             "decision": record["decision"],
             "tier": record.get("tier", record.get("category")),
+            "category": record.get("category", record.get("tier")),
             "aa_model_id": record.get("aa_model_id"),
             "aa_score": record.get("aa_score"),
             "confidence": record["confidence"],
@@ -114,6 +117,7 @@ class ProviderBatchWriter:
             "model_id": rec["provider_model_id"],
             "decision": rec["decision"],
             "tier": rec.get("tier", rec.get("category")),
+            "category": rec.get("category", rec.get("tier")),
             "aa_model_id": rec.get("aa_model_id"),
             "aa_score": rec.get("aa_score"),
             "coding_score": rec.get("coding_score"),

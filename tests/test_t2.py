@@ -382,13 +382,14 @@ class TestYamlResult:
         data = yaml.safe_load(path.read_text())
         assert set(data.keys()) == set(YAML_SCHEMA_KEYS)
         assert list(data.keys()) == [
-            "provider", "model_id", "decision", "tier",
+            "provider", "model_id", "decision", "tier", "category",
             "aa_model_id", "aa_score", "confidence", "evidence_level", "evidence", "coding_assessment",
         ]
         assert data["provider"] == "groq"
         assert data["model_id"] == "llama-3.3-70b-versatile"
         assert data["decision"] == "keep"
         assert data["tier"] == "max"
+        assert data["category"] == "max"  # spec alias
         assert data["aa_model_id"] == "aa-llama-3.3-70b-versatile"
         assert data["aa_score"] == 55.0
         assert data["confidence"] == 0.95

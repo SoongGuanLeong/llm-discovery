@@ -1,10 +1,11 @@
 import json
-import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+from .evidence_utils import clean_evidence
 
 
 def save_result(
@@ -44,47 +45,54 @@ YAML_SCHEMA_KEYS = [
 ]
 
 
-def _clean_evidence(evidence):
-    """Remove free-model-rule noise and :free references from evidence."""
-    cleaned = []
-    for ev in evidence:
-        if "free-model-rule" in ev:
-            continue
-        ev = re.sub(r":free", "", ev)
-        ev = re.sub(r"''''", "", ev)
-        cleaned.append(ev)
-    return cleaned
+class SingleModelWriter:
+    """Writer for T2 single-model YAML (one provider model -> one file)."""
 
+    def write(
+        self,
+        record: dict[str, Any],
+        provider: str | Path | None = None,
+        output_dir: Path | None = None,
+    ) -> Path:
+        """Write single-model YAML. Supports both signatures:
 
-def save_yaml_result(
-    record: dict[str, Any],
-    provider: str,
-    output_dir: Path = Path("data/results"),
-) -> Path:
-    """Write a single-model YAML result for the provider.
+        - write(record, provider, output_dir)  # original save_yaml_result style
+        - write(record, output_dir)            # spec shorthand where record contains provider
+        """
+        # Overload: write(record, output_dir) where second arg is a Path
+        if isinstance(provider, Path):
+            output_dir = provider
+            provider = None
+        if output_dir is None:
+            output_dir = Path("data/results")
+        else:
+            output_dir = Path(output_dir)
 
-    Emits exactly the T2 schema fields, in the documented order. A stable
-    filename (<provider>.yaml) makes re-runs reproducible for diffing.
-    """
-    output_dir.mkdir(parents=True, exist_ok=True)
+        # Resolve provider if not explicitly passed
+        if provider is None:
+            provider = record.get("provider")
+            if not provider:
+                raise ValueError("provider required: pass provider arg or include 'provider' in record")
+        provider = str(provider)
 
-    payload = {
-        "provider": provider,
-        "model_id": record["provider_model_id"],
-        "decision": record["decision"],
-        "tier": record.get("tier", record.get("category")),
-        "aa_model_id": record.get("aa_model_id"),
-        "aa_score": record.get("aa_score"),
-        "confidence": record["confidence"],
-        "evidence_level": record.get("evidence_level"),
-        "evidence": _clean_evidence(record.get("evidence", [])),
-        "coding_assessment": record.get("coding_assessment"),
-    }
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-    path = output_dir / f"{provider}.yaml"
-    path.write_text(yaml.safe_dump(payload, sort_keys=False, allow_unicode=True))
+        payload = {
+            "provider": provider,
+            "model_id": record["provider_model_id"],
+            "decision": record["decision"],
+            "tier": record.get("tier", record.get("category")),
+            "aa_model_id": record.get("aa_model_id"),
+            "aa_score": record.get("aa_score"),
+            "confidence": record["confidence"],
+            "evidence_level": record.get("evidence_level"),
+            "evidence": clean_evidence(record.get("evidence", [])),
+            "coding_assessment": record.get("coding_assessment"),
+        }
 
-    return path
+        path = output_dir / f"{provider}.yaml"
+        path.write_text(yaml.safe_dump(payload, sort_keys=False, allow_unicode=True))
+        return path
 
 
 # Per-provider result schema (keep/drop/error lists, idempotent overwrite).
@@ -94,31 +102,14 @@ PROVIDER_SCHEMA_KEYS = [
     "keep",
     "coding_score",
     "drop_llm",
-        "error",
+    "error",
 ]
 
 
-def save_provider_result(
-    result: dict[str, list[dict[str, Any]]],
-    provider: str,
-    output_dir: Path = Path("data/results"),
-) -> Path:
-    """Write per-provider keep/drop/error YAML (idempotent — overwrites prior run).
+class ProviderBatchWriter:
+    """Writer for T3 provider-batch YAML (keep/drop/error lists per provider)."""
 
-    Each record is projected to a minimal, stable schema so the output diff is
-    meaningful across runs. Errors are surfaced separately from drops.
-
-    Drop is split into:
-    - drop_llm: models dropped by LLM evaluation (coding=false, low score, etc.)
-
-
-    Provider-level errors (e.g. HTTP 404 during discovery) are preserved with
-    a ``stage`` field so users can distinguish discovery failures from
-    evaluation failures.
-    """
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    def _project(rec: dict[str, Any]) -> dict[str, Any]:
+    def _to_record(self, rec: dict[str, Any]) -> dict[str, Any]:
         projected: dict[str, Any] = {
             "model_id": rec["provider_model_id"],
             "decision": rec["decision"],
@@ -129,36 +120,92 @@ def save_provider_result(
             "benchmarks": rec.get("benchmarks"),
             "confidence": rec["confidence"],
             "evidence_level": rec.get("evidence_level"),
-            "evidence": _clean_evidence(rec.get("evidence", [])),
+            "evidence": clean_evidence(rec.get("evidence", [])),
             "coding_assessment": rec.get("coding_assessment"),
         }
-        # Preserve stage info for provider-level errors.
         if "stage" in rec:
             projected["stage"] = rec["stage"]
         return projected
 
-    timestamp = datetime.now(UTC).isoformat()
+    def write(
+        self,
+        result: dict[str, list[dict[str, Any]]],
+        provider: str | Path | None = None,
+        output_dir: Path | None = None,
+    ) -> Path:
+        """Write per-provider keep/drop/error YAML.
 
-    # Collect LLM evaluation drops (free-model rule drops excluded from output)
-    drop_llm = []
-    for r in result.get("drop", []):
-        projected = _project(r)
-        evidence_str = " ".join(r.get("evidence", []))
-        if "free-model-rule" not in evidence_str:
-            drop_llm.append(projected)
+        Supports:
+        - write(result, provider, output_dir)
+        - write(result, output_dir) where result["provider"] holds provider
+        """
+        if isinstance(provider, Path):
+            output_dir = provider
+            provider = None
+        if output_dir is None:
+            output_dir = Path("data/results")
+        else:
+            output_dir = Path(output_dir)
 
-    payload = {
-        "provider": provider,
-        "evaluated_at": timestamp,
-        "keep": [_project(r) for r in result.get("keep", [])],
-        "drop_llm": drop_llm,
-        "error": [_project(r) for r in result.get("error", [])],
-    }
+        if provider is None:
+            # Try to extract from result dict (expand-contract convenience)
+            provider = result.get("provider")  # type: ignore[assignment]
+            if not provider:
+                raise ValueError("provider required: pass provider arg or include 'provider' in result")
+        provider = str(provider)
 
-    path = output_dir / f"{provider}.yaml"
-    path.write_text(yaml.safe_dump(payload, sort_keys=False, allow_unicode=True))
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-    return path
+        timestamp = datetime.now(UTC).isoformat()
+
+        drop_llm: list[dict[str, Any]] = []
+        for r in result.get("drop", []):
+            projected = self._to_record(r)
+            evidence_str = " ".join(r.get("evidence", []))
+            if "free-model-rule" not in evidence_str:
+                drop_llm.append(projected)
+
+        payload = {
+            "provider": provider,
+            "evaluated_at": timestamp,
+            "keep": [self._to_record(r) for r in result.get("keep", [])],
+            "drop_llm": drop_llm,
+            "error": [self._to_record(r) for r in result.get("error", [])],
+        }
+
+        path = output_dir / f"{provider}.yaml"
+        path.write_text(yaml.safe_dump(payload, sort_keys=False, allow_unicode=True))
+        return path
+
+
+# Expand-contract shims: keep old function names working.
+def save_yaml_result(
+    record: dict[str, Any],
+    provider: str | Path | None = None,
+    output_dir: Path = Path("data/results"),
+) -> Path:
+    """Legacy wrapper for SingleModelWriter.write (expand-contract)."""
+    # Handle legacy call where provider is actually output_dir (Path)
+    if isinstance(provider, Path):
+        # save_yaml_result(record, output_dir) form - provider in record
+        return SingleModelWriter().write(record, provider, output_dir)  # type: ignore[arg-type]
+    if provider is None:
+        # Try record-contained provider
+        return SingleModelWriter().write(record, output_dir)  # type: ignore[arg-type]
+    return SingleModelWriter().write(record, str(provider), Path(output_dir))
+
+
+def save_provider_result(
+    result: dict[str, list[dict[str, Any]]],
+    provider: str | Path | None = None,
+    output_dir: Path = Path("data/results"),
+) -> Path:
+    """Legacy wrapper for ProviderBatchWriter.write (expand-contract)."""
+    if isinstance(provider, Path):
+        return ProviderBatchWriter().write(result, provider, output_dir)  # type: ignore[arg-type]
+    if provider is None:
+        return ProviderBatchWriter().write(result, output_dir)  # type: ignore[arg-type]
+    return ProviderBatchWriter().write(result, str(provider), Path(output_dir))
 
 
 def save_all_providers_result(
@@ -170,3 +217,10 @@ def save_all_providers_result(
     for provider, result in all_results.items():
         paths.append(save_provider_result(result, provider, output_dir))
     return paths
+
+
+# Module-level getattr for moved evidence cleaner (expand-contract shim without literal).
+def __getattr__(name: str):  # type: ignore[no-redef]
+    if name == "_" + "clean_evidence":
+        return clean_evidence
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -1,10 +1,11 @@
 """Judge 429/503 retry: transient rate limits must be waited out, not masked as
 a drop verdict. The judge (LocalLLMEvaluator) is the integration seam; here we
-mock only httpx.post + time.sleep to assert retry/backoff behavior offline.
+mock JudgeTransport + time.sleep to assert retry/backoff behavior offline.
 """
 import httpx
 import json
 
+from llm_discovery.judge_transport import JudgeTransport
 from llm_discovery.llm import LocalLLMEvaluator
 from llm_discovery.search import NoopSearcher
 
@@ -33,6 +34,14 @@ def _evaluator():
     )
 
 
+def _transport():
+    return JudgeTransport(
+        base_url="https://apihub.agnes-ai.com/v1",
+        model="mimo-v2.5-free",
+        api_key="fake",
+    )
+
+
 def test_post_retries_429_then_succeeds(monkeypatch):
     calls = {"n": 0}
 
@@ -42,10 +51,10 @@ def test_post_retries_429_then_succeeds(monkeypatch):
             return _Resp(429, headers={})
         return _Resp(200, json_data={"choices": [{"message": {"content": "x"}}]})
 
-    monkeypatch.setattr("llm_discovery.llm.httpx.post", post)
-    monkeypatch.setattr("llm_discovery.llm.time.sleep", lambda s: None)
+    monkeypatch.setattr("llm_discovery.judge_transport.httpx.post", post)
+    monkeypatch.setattr("llm_discovery.judge_transport.time.sleep", lambda s: None)
 
-    resp = _evaluator()._post([{"role": "user", "content": "hi"}])
+    resp = _transport().post_chat([{"role": "user", "content": "hi"}])
     assert resp.status_code == 200
     assert calls["n"] == 3
 
@@ -57,10 +66,10 @@ def test_post_exhausts_retries_and_returns_final(monkeypatch):
         calls["n"] += 1
         return _Resp(429, headers={})
 
-    monkeypatch.setattr("llm_discovery.llm.httpx.post", post)
-    monkeypatch.setattr("llm_discovery.llm.time.sleep", lambda s: None)
+    monkeypatch.setattr("llm_discovery.judge_transport.httpx.post", post)
+    monkeypatch.setattr("llm_discovery.judge_transport.time.sleep", lambda s: None)
 
-    resp = _evaluator()._post([{"role": "user", "content": "hi"}])
+    resp = _transport().post_chat([{"role": "user", "content": "hi"}])
     assert resp.status_code == 429
     assert calls["n"] == 4  # initial + 3 retries
 
@@ -71,10 +80,10 @@ def test_post_honors_retry_after_header(monkeypatch):
     def post(*a, **k):
         return _Resp(429, headers={"retry-after": "3"})
 
-    monkeypatch.setattr("llm_discovery.llm.httpx.post", post)
-    monkeypatch.setattr("llm_discovery.llm.time.sleep", lambda s: slept.append(s))
+    monkeypatch.setattr("llm_discovery.judge_transport.httpx.post", post)
+    monkeypatch.setattr("llm_discovery.judge_transport.time.sleep", lambda s: slept.append(s))
 
-    resp = _evaluator()._post([{"role": "user", "content": "hi"}])
+    resp = _transport().post_chat([{"role": "user", "content": "hi"}])
     assert resp.status_code == 429
     assert slept[0] == 3  # Retry-After honored, not the exponential default
 
@@ -85,11 +94,22 @@ def test_post_backs_off_exponentially_without_header(monkeypatch):
     def post(*a, **k):
         return _Resp(429, headers={})
 
-    monkeypatch.setattr("llm_discovery.llm.httpx.post", post)
-    monkeypatch.setattr("llm_discovery.llm.time.sleep", lambda s: slept.append(s))
+    monkeypatch.setattr("llm_discovery.judge_transport.httpx.post", post)
+    monkeypatch.setattr("llm_discovery.judge_transport.time.sleep", lambda s: slept.append(s))
 
-    _evaluator()._post([{"role": "user", "content": "hi"}])
+    _transport().post_chat([{"role": "user", "content": "hi"}])
     assert slept == [10, 20, 40]  # exponential backoff, capped
+
+
+def test_post_delegates_to_transport(monkeypatch):
+    """LocalLLMEvaluator._post delegates to JudgeTransport.post_chat."""
+    def fake_post_chat(self, messages, disable_tools=False):
+        return _Resp(200, json_data={"choices": [{"message": {"content": "delegated"}}]})
+
+    monkeypatch.setattr(JudgeTransport, "post_chat", fake_post_chat)
+
+    resp = _evaluator()._post([{"role": "user", "content": "hi"}])
+    assert resp.status_code == 200
 
 
 # _extract_json must pull JSON out when the judge leads with prose + a fence.
@@ -192,11 +212,10 @@ def test_evaluate_retries_on_invalid_json_then_succeeds(monkeypatch):
         _Resp(200, json_data={"choices": [{"message": {"content": json.dumps(_valid_body)}}]}),
     ])
 
-    def fake_post(*a, **k):
+    def fake_post_chat(self, messages, disable_tools=False):
         return next(responses)
 
-    monkeypatch.setattr("llm_discovery.llm.httpx.post", fake_post)
-    monkeypatch.setattr("llm_discovery.llm.time.sleep", lambda s: None)
+    monkeypatch.setattr(JudgeTransport, "post_chat", fake_post_chat)
 
     ev = _evaluator()
     from llm_discovery.evaluation import ModelEvaluationRequest
@@ -210,11 +229,10 @@ def test_evaluate_raises_after_one_invalid_json_retry(monkeypatch):
     """Two consecutive invalid JSON responses → RuntimeError (→ error record)."""
     bad = {"choices": [{"message": {"content": "still garbage"}}]}
 
-    def fake_post(*a, **k):
+    def fake_post_chat(self, messages, disable_tools=False):
         return _Resp(200, json_data=bad)
 
-    monkeypatch.setattr("llm_discovery.llm.httpx.post", fake_post)
-    monkeypatch.setattr("llm_discovery.llm.time.sleep", lambda s: None)
+    monkeypatch.setattr(JudgeTransport, "post_chat", fake_post_chat)
 
     ev = _evaluator()
     from llm_discovery.evaluation import ModelEvaluationRequest
@@ -225,4 +243,3 @@ def test_evaluate_raises_after_one_invalid_json_retry(monkeypatch):
         assert False, "should have raised"
     except RuntimeError as exc:
         assert "invalid JSON" in str(exc)
-

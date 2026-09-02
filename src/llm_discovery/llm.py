@@ -6,8 +6,9 @@ from typing import Any
 import httpx
 
 from .evaluation import ModelEvaluation, ModelEvaluationRequest
-from .json_repair import extract_and_validate
 from .evidence import EvidencePacket
+from .judge_transport import JudgeTransport
+from .json_repair import extract_and_validate
 
 
 SYSTEM_PROMPT = """\\
@@ -123,6 +124,11 @@ class LocalLLMEvaluator:
         self.min_score = min_score
         self.search_web = search_web
         self.max_searches = max_searches
+        self.transport = JudgeTransport(
+            base_url=self.base_url,
+            model=self.model,
+            api_key=self.api_key,
+        )
 
     def __getattr__(self, name: str):
         # Expand-contract shim: delegate removed json methods to json_repair
@@ -244,42 +250,8 @@ class LocalLLMEvaluator:
         messages: list[dict[str, Any]],
         disable_tools: bool = False,
     ) -> httpx.Response:
-        """POST a chat completion, retrying transient 429/503 with backoff.
-
-        Honors a server-sent Retry-After header when present, otherwise backs off
-        exponentially (10 -> 20 -> 40s, capped at 60s). After exhausting retries
-        the final 429/503 response is returned so the caller's raise_for_status
-        surface the failure honestly instead of silently dropping the model.
-
-        When "disable_tools" is set, "tool_choice" is forced to "none" so
-        the LLM must emit a final text response without further tool calls. This
-        is used after the search budget is exhausted to break tool-call loops.
-        """
-        url = f"{self.base_url}/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "tools": TOOLS,
-            "temperature": 0,
-            "max_tokens": 1200,
-            "tool_choice": "none" if disable_tools else "auto",
-        }
-
-        backoff = 10
-        for attempt in range(4):
-            response = httpx.post(url, headers=headers, json=payload, timeout=120)
-            if response.status_code not in (429, 503):
-                return response
-            retry_after = response.headers.get("retry-after")
-            wait = int(retry_after) if retry_after and retry_after.isdigit() else backoff
-            if attempt < 3:
-                time.sleep(min(wait, 60))
-            backoff = min(backoff * 2, 60)
-        return response
+        """Delegate to JudgeTransport. Retry/backoff lives in transport."""
+        return self.transport.post_chat(messages, disable_tools=disable_tools)
 
     def _execute_tool(
         self,

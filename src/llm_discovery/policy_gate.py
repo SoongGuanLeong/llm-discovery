@@ -157,16 +157,13 @@ class PolicyGate:
         )
         evaluation["tier"] = tier
 
-        # --- Router override: always keep regardless of coding/tier ---
+        # --- Router override: always keep + flash regardless of coding/tier ---
         if _is_router_model(model_id):
-            # Router keep overrides any drop; preserve max if already max, else flash
-            if tier != "max":
-                tier = "flash"
-            evaluation["tier"] = tier
+            evaluation["tier"] = "flash"
             evaluation["decision"] = "keep"
             evaluation["coding"] = True
             evaluation.setdefault("evidence", []).append("Router model: always keep (routing meta-model)")
-            print(f"  [evaluate] {model_id}: ROUTER override -> KEEP {tier}")
+            print(f"  [evaluate] {model_id}: ROUTER override -> KEEP flash")
             return evaluation
 
         # --- Python policy: map LLM decision to final decision ---

@@ -225,8 +225,10 @@ def discover_single(
         models = discover_cloudflare_models(account_id, api_key)
     else:
         models = discover_models(base_url, api_key)
-    eval_models = models
-    dropped_models = []
+    # Free-model filter: applied FIRST, before any LLM evaluation
+    eval_models, dropped_models = _split_by_free_rule(models)
+    if dropped_models:
+        print(f"[{provider_name}] Free-model filter: dropped {len(dropped_models)} non-free, keeping {len(eval_models)} free")
     model = pick_tracer_model(eval_models, aa, config.artificial_analysis.min_score)
     searcher = make_searcher(
         brave_api_key=os.environ.get("BRAVE_API_KEY"),
@@ -296,8 +298,10 @@ def discover_provider(
         print(f"[{provider_name}] Discovery failed: {exc}")
         return provider_error_result(provider_name, exc)
     print(f"[{provider_name}] Discovered {len(models)} models")
-    eval_models = models
-    dropped_models = []
+    # Free-model filter: applied FIRST — dropped models skip LLM and YAML
+    eval_models, dropped_models = _split_by_free_rule(models)
+    if dropped_models:
+        print(f"[{provider_name}] Free-model filter: dropped {len(dropped_models)} non-free, keeping {len(eval_models)} free")
     searcher = make_searcher(
         brave_api_key=os.environ.get("BRAVE_API_KEY"),
         disabled=os.environ.get("DISABLE_WEB_SEARCH") == "1",
@@ -348,10 +352,10 @@ def discover_provider(
                 result["drop"].append(evaluation)
             else:
                 result["error"].append(evaluation)
-    for m in dropped_models:
-        record = deterministic_drop_record(m["id"], m.get("_drop_reason", "free-model-rule"), cache)
-        result["drop"].append(record)
-        print(f"[{provider_name}] DROP (deterministic) {m['id']} - {m.get('_drop_reason', 'free-model-rule')}")
+    # Dropped non-free models are completely omitted: no LLM, no YAML
+    if dropped_models:
+        for m in dropped_models:
+            print(f"[{provider_name}] SKIP (free-model-rule) {m['id']}")
     for bucket in result.values():
         bucket.sort(key=lambda r: r["provider_model_id"])
     print(f"[{provider_name}] Done: KEEP={len(result['keep'])} DROP={len(result['drop'])} ERROR={len(result['error'])}")
@@ -446,19 +450,47 @@ def provider_error_result(name: str, exc: Exception) -> dict[str, list[dict[str,
 _provider_error_result = provider_error_result
 
 
+FREE_MARKERS = (":free", "-free", "_free")
+
+
+def _is_free_model(model_id: str) -> bool:
+    """Return True if model_id contains any free marker."""
+    return any(marker in model_id for marker in FREE_MARKERS)
+
+
 def _has_free_name(models: list[dict[str, Any]]) -> bool:
-    """Return True if any model id contains the literal substring ':free'."""
-    return any(":free" in m.get("id", "") for m in models)
+    """Return True if any model id contains a free marker."""
+    return any(_is_free_model(m.get("id", "")) for m in models)
+
+
+def _split_by_free_rule(
+    models: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split models into (keep, dropped) by free-model rule.
+
+    If any model id contains a free marker (``:free``, ``-free``, ``_free``),
+    only free models are kept; non-free models are returned as dropped and
+    must NOT be sent to the LLM nor written to YAML.
+    """
+    if not _has_free_name(models):
+        return models, []
+    free_models = [m for m in models if _is_free_model(m.get("id", ""))]
+    non_free = [m for m in models if m not in free_models]
+    return free_models, non_free
 
 
 def _apply_free_model_rule(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Drop every model that does NOT have ':free' in its id if at least one does."""
-    if not _has_free_name(models):
+    """Legacy mutating helper — now delegates to _split_by_free_rule.
+
+    Mutates dropped models with ``_deterministic_drop`` / ``_drop_reason`` for
+    backward compatibility, but callers should prefer ``_split_by_free_rule``
+    which filters BEFORE LLM evaluation.
+    """
+    free_models, non_free = _split_by_free_rule(models)
+    if not non_free:
         return models
-    free_models = [m for m in models if ":free" in m.get("id", "")]
-    non_free = [m for m in models if m not in free_models]
-    reasons = [f"free-model-rule: all non-free models dropped because {free_models[0]['id'] if free_models else 'a free model'} has ':free' in its id"]
+    reason = f"free-model-rule: all non-free models dropped because {free_models[0]['id'] if free_models else 'a free model'} has a free marker in its id"
     for m in non_free:
         m["_deterministic_drop"] = True
-        m["_drop_reason"] = ";".join(reasons)
+        m["_drop_reason"] = reason
     return models

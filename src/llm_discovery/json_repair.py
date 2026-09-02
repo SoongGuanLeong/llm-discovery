@@ -6,14 +6,25 @@ from .evaluation import ModelEvaluation
 
 def extract_json(content: str) -> str:
     content = content.strip()
-    if content.startswith("```"):
-        lines = content.splitlines()
-        if lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        content = "\n".join(lines).strip()
-    return content
+    if not content:
+        return content
+    # 1. Fenced block anywhere: ``` + optional json + captured inner + ```
+    fence_re = re.compile(r"```(?:json)?\s*([\s\S]*?)\s*```")
+    m = fence_re.search(content)
+    if m:
+        inner = m.group(1).strip()
+        if inner:
+            return inner
+    # 2. Extract JSON object via raw_decode from first {
+    decoder = json.JSONDecoder()
+    idx = content.find("{")
+    if idx != -1:
+        try:
+            _, end = decoder.raw_decode(content, idx)
+            return content[idx:end].strip()
+        except json.JSONDecodeError:
+            pass
+    return content.strip()
 
 
 _extract_json = extract_json

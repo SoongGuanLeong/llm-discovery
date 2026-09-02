@@ -237,7 +237,7 @@ class LocalLLMEvaluator:
                     }
                 )
 
-        raise RuntimeError("LLM failed to return a final evaluation")
+        raise RuntimeError("LLM failed to return a final evaluation: invalid JSON after retries")
 
     def _post(
         self,

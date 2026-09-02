@@ -26,6 +26,14 @@ Delete `src/llm_discovery/evaluate.py`. The LLM-judge pipeline is the sole evalu
 - One less dead path; no dual policy interpretation.
 - `git log --all -- src/llm_discovery/evaluate.py` retains history if fallback needed.
 
+## Deviation: bounded concurrency stays ThreadPool
+Original spec asked "bounded async concurrency" to replace 2s sleep throttle.
+Implemented as bounded `ThreadPoolExecutor(max_workers=4)` with sync `httpx` +
+`JudgeTransport` retry/backoff. Keeps existing sync evaluator seam and deterministic
+sort; avoids larger `asyncio` + `httpx.AsyncClient` migration (would require async
+Judge, async tests, and transport rewrite). Sleep-per-model already removed;
+ThreadPool provides bounded concurrency without seq throttle. Decision confirmed 2026-09-02: keep ThreadPool, defer async migration.
+
 ## References
 - Issue #6 T5 Deodorise: "delete or retire the dead `evaluate.py` (AA-only variant) if the LLM-judge pipeline is the chosen path"
 - Blocked by #4 T3 (async + determinism) — now closed, so retirement is safe.

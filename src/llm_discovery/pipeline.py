@@ -1,227 +1,61 @@
-"""End-to-end discovery pipeline.
+"""End-to-end discovery pipeline — thin coordinator.
 
-Two entry points share one per-model engine (evaluate_model) so the T1 flash/max
-logic lives in exactly one place:
+evaluate_model is now <30 lines coordinating four seamed adapters:
+  EvidenceCollector.collect(), ModelResolver.resolve(), Judge.evaluate(), PolicyGate.apply()
 
-- discover_single  - T2 tracer bullet: ONE provider model -> one record.
-- discover_provider - T3 path: every provider model -> {keep, drop, error}.
-
-The LLM judge (LocalLLMEvaluator) is the integration seam: it needs the provider
-key + judge key from the user's local Infisical. Unit tests inject a fake
-evaluator; the real path is run by the user (see issue #3).
-
-Architecture:
-- Evidence is collected DETERMINISTICALLY from local catalogs + web search
-- LLM judge receives STRUCTURED evidence and SYNTHESIZES a decision
-- Evidence polarity (positive/negative/neutral) is explicitly represented
-- "unknown" is a last resort after multiple evidence-gathering attempts
+Other entry points (discover_single, discover_provider, discover_all_providers)
+retain isolation but delegate per-model work to evaluate_model.
 """
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
-from .catalogs import ArtificialAnalysisCatalog, ModelsDevCatalog
-from .benchmarks import BenchmarkDataCache, build_benchmark_profile, compute_coding_score, has_critical_weakness
-from .categorize import categorize_model
-from .discovery import discover_models, discover_cloudflare_models
-from .evaluation import ModelEvaluationRequest
-from .llm import LocalLLMEvaluator
-from .provider import resolve_provider
-from .resolver import resolve_model
-from .results import save_provider_result
-from .search import make_searcher
+# Thin coordinator seams — 4 adapters (12 → 4 explicit seam imports)
+from .discovery import discover_cloudflare_models, discover_models
+from .evidence_collector import EvidenceCollector
+from .judge import Judge
+from .model_resolver import ModelResolver, resolve_model
+from .policy_gate import PolicyGate
 from .secrets import load_discovery_secrets, load_shared_secrets
-from .evidence import EvidenceCollector
 
 
 def evaluate_model(
     model: dict[str, Any],
     provider_name: str,
-    aa: ArtificialAnalysisCatalog,
-    models_dev: ModelsDevCatalog,
-    evaluator: LocalLLMEvaluator,
+    aa: Any,
+    models_dev: Any,
+    evaluator: Any,
     min_score: float,
     max_score: float,
-    cache: BenchmarkDataCache | None = None,
+    cache: Any | None = None,
 ) -> dict[str, Any]:
-    """Judge one model and apply the T1 flash/max tiering.
+    """Judge one model and apply tiering (thin coordinator, <30 lines).
 
-    Deterministic pre-filtering drops specialised / non-coding models before
-    the judge is called.  Judge failures produce "decision: "error"" (not
-    "decision: "drop"") so they can be retried or reviewed.
-
-    Returns a record dict with:
-      - decision: keep | drop | error
-      - tier: max | flash | drop | error
-      - aa_score, aa_model_id, aa_name, aa_slug (verified against local catalog)
+    Coordinates four adapters. All policy/benchmark/categorize logic lives
+    in PolicyGate; evidence in EvidenceCollector; resolution in ModelResolver;
+    LLM request + transport in Judge.
     """
     model_id = model["id"]
     print(f"  [evaluate] {model_id}: starting...")
-
-    # --- Build benchmark profile from local catalogs ------------------------
-    profile = build_benchmark_profile(model_id, provider_name, cache)
-    benchmarks_dict = profile.to_dict() if profile.scores else {}
-    coding_score, score_confidence, score_reasons = compute_coding_score(profile) if profile.scores else (None, 0.0, ["No benchmark data"])
-    has_weakness, weakness_reason = has_critical_weakness(profile) if profile.scores else (False, None)
-
-    if profile.scores:
-        print(f"  [evaluate] {model_id}: benchmarks={profile.available_benchmarks()}, coding_score={coding_score}, confidence={score_confidence}")
-
-    # --- Build structured evidence packet ---
     resolution = resolve_model(model_id, aa, models_dev, cache)
-    evidence_packet = EvidenceCollector(provider_name).collect(model, cache, models_dev, resolution)
-
-    # --- Deterministic pre-filter: specialised models -----------------------
-    if evidence_packet.is_specialized():
-        reason = evidence_packet.deterministic_flags[0] if evidence_packet.deterministic_flags else "specialized_model"
+    packet = EvidenceCollector(provider_name).collect(model, cache, models_dev, resolution)
+    if packet.is_specialized():
+        reason = packet.deterministic_flags[0] if packet.deterministic_flags else "specialized_model"
         print(f"  [evaluate] {model_id}: DROP (deterministic) - {reason}")
         return deterministic_drop_record(model_id, reason, cache)
-
-    # --- AA match ---
-    aa_match = evidence_packet.aa_match
-
-    # --- Determine if we need additional evidence gathering ---
-    # Stage 1: deterministic evidence is already in evidence_packet
-    # Stage 2: if evidence is weak, we could trigger web search (handled by LLM evaluator)
-    has_strong_evidence = evidence_packet.has_strong_evidence()
-    has_negative_evidence = evidence_packet.has_negative_evidence()
-
-    request = ModelEvaluationRequest(
-        provider=provider_name,
-        model_id=model_id,
-        provider_metadata=model,
-        aa_match=aa_match,
-        benchmarks=benchmarks_dict,
-    )
-
-    print(f"  [evaluate] {model_id}: calling LLM judge (evidence: {len(evidence_packet.benchmarks)} benchmarks, strong={has_strong_evidence})...")
+    judge = Judge(evaluator)
     try:
-        llm_result = evaluator.evaluate(request, evidence_packet)
+        llm_result = judge.evaluate(provider_name, model, packet, cache)
     except Exception as exc:  # noqa: BLE001 — judge/transport errors → error, not drop
         print(f"  [evaluate] {model_id}: ERROR - {exc}")
-        error_rec = _llm_error_record(model_id, exc)
-        error_rec["coding_score"] = coding_score
-        error_rec["benchmarks"] = benchmarks_dict
-        return error_rec
-
-    # Deterministic AA fields from resolution (already carries aa_model, no second lookup)
-    aa_model = resolution.aa_model
-    if aa_model is not None:
-        aa_model_id = aa_model.get("id")
-        aa_name = aa_model.get("name")
-        aa_slug = aa_model.get("slug")
-        verified_score = _aa_score(aa_model)
-    else:
-        aa_model_id = None
-        aa_name = None
-        aa_slug = None
-        verified_score = None
-
-    evaluation: dict[str, Any] = {
-        "provider_model_id": model_id,
-        "source": "llm",
-        "coding": llm_result.coding,
-        "canonical_name": llm_result.canonical_name,
-        "aa_model_id": aa_model_id,
-        "aa_name": aa_name,
-        "aa_slug": aa_slug,
-        "aa_score": verified_score,
-        "coding_score": coding_score,
-        "benchmarks": benchmarks_dict,
-        "confidence": llm_result.confidence,
-        "decision": llm_result.decision,  # keep | drop | unknown
-        "evidence_level": llm_result.evidence_level,
-        "evidence": llm_result.evidence,
-        "coding_assessment": llm_result.coding_assessment.model_dump() if llm_result.coding_assessment else None,
-    }
-
-    # Critical weakness check: SWE-bench < 20% forces drop
-    if has_weakness:
-        print(f"  [evaluate] {model_id}: CRITICAL WEAKNESS - {weakness_reason}")
-        evaluation["critical_weakness"] = weakness_reason
-
-    # --- Deterministic coding override ---
-    # If we have strong benchmark evidence of coding capability, override LLM's coding=False
-    # Strong evidence = coding_score >= 35 (coding_min) OR SWE-bench >= 50% OR Terminal-Bench >= 50%
-    deterministic_coding = llm_result.coding
-    deterministic_coding_reason = None
-    if not deterministic_coding and profile.scores:
-        # Check coding_score (multi-signal weighted)
-        if coding_score is not None and coding_score >= 35.0:
-            deterministic_coding = True
-            deterministic_coding_reason = f"coding_score={coding_score:.1f} >= 35 (coding_min)"
-        # Check SWE-bench specifically
-        elif benchmarks_dict.get("swe_bench_verified", {}).get("score", 0) >= 50.0:
-            sb_score = benchmarks_dict["swe_bench_verified"]["score"]
-            deterministic_coding = True
-            deterministic_coding_reason = f"SWE-bench Verified={sb_score:.1f}% >= 50%"
-        # Check Terminal-Bench specifically
-        elif benchmarks_dict.get("terminal_bench", {}).get("score", 0) >= 50.0:
-            tb_score = benchmarks_dict["terminal_bench"]["score"]
-            deterministic_coding = True
-            deterministic_coding_reason = f"Terminal-Bench={tb_score:.1f}% >= 50%"
-        # Check Terminal-Bench 2.1
-        elif benchmarks_dict.get("terminal_bench_2_1", {}).get("score", 0) >= 50.0:
-            tb_score = benchmarks_dict["terminal_bench_2_1"]["score"]
-            deterministic_coding = True
-            deterministic_coding_reason = f"Terminal-Bench 2.1={tb_score:.1f}% >= 50%"
-
-    if deterministic_coding != llm_result.coding and deterministic_coding_reason:
-        print(f"  [evaluate] {model_id}: OVERRIDE LLM non-coding -> coding (deterministic: {deterministic_coding_reason})")
-        evaluation["evidence"] = evaluation.get("evidence", []) + [f"Deterministic override: {deterministic_coding_reason}"]
-
-    tier = categorize_model(
-        coding=deterministic_coding,
-        aa_score=verified_score,
-        min_score=min_score,
-        max_score=max_score,
-        judge_decision=llm_result.decision,
-        model_id=model_id,
-        coding_score=coding_score if profile.scores else None,
-        has_critical_weakness=has_weakness,
-    )
-    evaluation["tier"] = tier
-
-    # Python policy: map LLM decision to final decision
-    # keep -> keep, drop -> drop, unknown -> drop (insufficient evidence)
-    # error preserved
-    # HARD GATE: coding=False or tier=drop forces drop regardless of LLM decision
-    # BUT: deterministic coding evidence overrides LLM non-coding AND LLM drop
-    if not deterministic_coding:
-        evaluation["decision"] = "drop"
-        evaluation["tier"] = "drop"
-        evaluation.setdefault("evidence", []).append("Model assessed as non-coding (LLM + deterministic); forced drop")
-    elif tier == "drop":
-        evaluation["decision"] = "drop"
-        evaluation.setdefault("evidence", []).append("Tier assessment below minimum; forced drop")
-    elif deterministic_coding and not llm_result.coding:
-        # Deterministic evidence proves coding capability, override LLM non-coding
-        evaluation["decision"] = "keep"
-        evaluation.setdefault("evidence", []).append("Deterministic evidence overrides LLM assessment")
-    elif llm_result.decision == "error":
-        evaluation["decision"] = "error"
-    elif llm_result.decision == "keep":
-        evaluation["decision"] = "keep"
-    elif llm_result.decision == "drop":
-        evaluation["decision"] = "drop"
-    elif llm_result.decision == "unknown":
-        evaluation["decision"] = "drop"
-        evaluation["tier"] = "drop"
-        evaluation.setdefault("evidence", []).append("Insufficient evidence to determine coding quality; defaulted to drop")
-    else:
-        evaluation["decision"] = "drop"
-
-    print(f"  [evaluate] {model_id}: {evaluation['decision'].upper()} {tier} (coding={llm_result.coding}, coding_score={coding_score}, aa_score={verified_score}, evidence_level={llm_result.evidence_level})")
-    return evaluation
+        return PolicyGate(min_score, max_score, cache).error_record(model_id, exc, provider_name)
+    gate = PolicyGate(min_score, max_score, cache)
+    return gate.apply(llm_result, resolution, model_id, provider_name)
 
 
 def _llm_error_record(model_id: str, exc: Exception, coding_score: float = 0.0, benchmarks: dict = None) -> dict[str, Any]:
-    """Judge failure → decision=error, tier=error (NOT drop).
-
-    This ensures failed evaluations are surfaced for retry / manual review
-    instead of being silently excluded from the output catalog.
-    """
+    """Judge failure → decision=error, tier=error (NOT drop)."""
     return {
         "provider_model_id": model_id,
         "source": "llm_error",
@@ -243,11 +77,9 @@ def _llm_error_record(model_id: str, exc: Exception, coding_score: float = 0.0, 
 
 
 def deterministic_drop_record(model_id: str, reason: str, cache=None) -> dict[str, Any]:
-    """Pre-filter drop (specialised / non-coding models, free-model-rule).
+    """Pre-filter drop (specialised / non-coding models)."""
+    from .benchmarks import BenchmarkDataCache, build_benchmark_profile, compute_coding_score
 
-    Public API for deterministic drop records. Use this in tests instead of
-    the private _deterministic_drop_record helper.
-    """
     profile = build_benchmark_profile(model_id, "", cache)
     benchmarks_dict = profile.to_dict() if profile.scores else {}
     coding_score, _, _ = compute_coding_score(profile) if profile.scores else (None, 0.0, [])
@@ -270,7 +102,7 @@ def deterministic_drop_record(model_id: str, reason: str, cache=None) -> dict[st
         "coding_assessment": None,
     }
 
-# Backward compatibility alias
+
 _deterministic_drop_record = deterministic_drop_record
 
 
@@ -294,10 +126,7 @@ def _aa_score(aa_model: dict[str, Any] | None) -> float | None:
 
 
 def _aa_match(resolution: Any) -> dict[str, Any] | None:
-    """The deterministic AA match handed to the judge as verified context.
-    
-    Returns a dict with matched status, model_id, and score, or None if no match.
-    """
+    """The deterministic AA match handed to the judge as verified context."""
     if resolution.aa_model is None:
         return {"matched": False, "model_id": None, "score": None}
     aa_model = resolution.aa_model
@@ -325,26 +154,19 @@ def _aa_candidates(resolution: Any) -> list[dict[str, Any]]:
 
 def pick_tracer_model(
     models: list[dict[str, Any]],
-    aa: ArtificialAnalysisCatalog,
+    aa: Any,
     min_score: float,
 ) -> dict[str, Any]:
-    """Deterministically pick ONE provider model to trace.
+    """Deterministically pick ONE provider model to trace."""
+    from .model_resolver import resolve_model as _resolve
 
-    Prefers models that resolve to an AA model whose intelligence index is at or
-    above min_score; among those (or, failing that, among all resolvable scored
-    models) it picks the highest score, tie-broken by model id ascending. If
-    nothing resolves, it returns the first model by id. Selection uses only the
-    offline AA catalog, so it is reproducible across runs.
-    """
     scored: list[tuple[float, str, dict[str, Any]]] = []
     for model in sorted(models, key=lambda m: m["id"]):
-        score = _aa_score(resolve_model(model["id"], aa).aa_model)
+        score = _aa_score(_resolve(model["id"], aa).aa_model)
         if score is not None:
             scored.append((score, model["id"], model))
-
     if not scored:
         return sorted(models, key=lambda m: m["id"])[0]
-
     preferred = [t for t in scored if t[0] >= min_score]
     pool = preferred or scored
     pool.sort(key=lambda t: (-t[0], t[1]))
@@ -352,14 +174,7 @@ def pick_tracer_model(
 
 
 def _auto_free_record(provider_name: str) -> dict[str, Any]:
-    """Auto-free provider: skip evaluation, return auto:free routing recommendation.
-
-    Some providers (e.g. BazaarLink) act as dynamic free-model routers rather
-    than exposing a static catalog.  Evaluating every underlying model is
-    pointless and wasteful; instead we store "auto:free" as the selected
-    model identifier so downstream consumers know to route requests through
-    the provider's own free-model selection.
-    """
+    """Auto-free provider: skip evaluation, return auto:free routing recommendation."""
     return {
         "provider_model_id": "auto:free",
         "source": "auto_free",
@@ -383,46 +198,36 @@ def _auto_free_record(provider_name: str) -> dict[str, Any]:
 def discover_single(
     provider_name: str,
     config: Any,
-    aa: ArtificialAnalysisCatalog,
-    models_dev: ModelsDevCatalog,
+    aa: Any,
+    models_dev: Any,
 ) -> dict[str, Any]:
     """T2 tracer bullet: enumerate a provider, evaluate ONE model, return record."""
+    from .benchmarks import BenchmarkDataCache
+    from .llm import LocalLLMEvaluator
+    from .provider import resolve_provider
+    from .search import make_searcher
+
     provider_config = _resolve_provider_config(provider_name, config)
     provider = resolve_provider(provider_config, models_dev)
-
     if provider.discovery_strategy == "bazaarlink":
         return _auto_free_record(provider_name)
-
     load_shared_secrets(config.infisical)
     load_discovery_secrets(config.infisical)
-
     llm_api_key = os.environ.get(config.judge_llm.secret)
     if not llm_api_key:
-        raise RuntimeError(
-            f"Missing API key environment variable: {config.judge_llm.secret}"
-        )
+        raise RuntimeError(f"Missing API key environment variable: {config.judge_llm.secret}")
     api_key = os.environ.get(provider.secret)
     if not api_key:
         raise RuntimeError(f"Missing API key environment variable: {provider.secret}")
-
     base_url = os.path.expandvars(provider.base_url)
-
     if provider.discovery == "cloudflare":
         account_id = os.environ["CLOUDFLARE_ACCOUNT_ID"]
         models = discover_cloudflare_models(account_id, api_key)
     else:
         models = discover_models(base_url, api_key)
-
-    # Free-model rule: DISABLED - too aggressive, drops all non-free models
-    # if any free model exists. Each model should be evaluated on its own merits.
-    # models = _apply_free_model_rule(models)
     eval_models = models
     dropped_models = []
-
     model = pick_tracer_model(eval_models, aa, config.artificial_analysis.min_score)
-
-    # Deterministic facts flow FROM pipeline TO LLM. Web search is enabled by
-    # default via DuckDuckGo (no key); set DISABLE_WEB_SEARCH=1 to disable.
     searcher = make_searcher(
         brave_api_key=os.environ.get("BRAVE_API_KEY"),
         disabled=os.environ.get("DISABLE_WEB_SEARCH") == "1",
@@ -434,11 +239,8 @@ def discover_single(
         min_score=config.artificial_analysis.min_score,
         search_web=searcher.search,
     )
-
-    # Build benchmark cache
     cache = BenchmarkDataCache()
     cache.collect_from_local(aa, models_dev)
-
     return evaluate_model(
         model=model,
         provider_name=provider_name,
@@ -454,20 +256,19 @@ def discover_single(
 def discover_provider(
     provider_name: str,
     config: Any,
-    aa: ArtificialAnalysisCatalog,
-    models_dev: ModelsDevCatalog,
+    aa: Any,
+    models_dev: Any,
     max_workers: int = 4,
 ) -> dict[str, list[dict[str, Any]]]:
-    """T3 path: evaluate every model for a provider in parallel.
-
-    Judge calls run concurrently via a thread pool (I/O-bound HTTP).  Each
-    model evaluation is independent, so ordering is normalised afterwards for
-    deterministic output.
-    """
+    """T3 path: evaluate every model for a provider in parallel."""
     print(f"[{provider_name}] Starting discovery...")
+    from .benchmarks import BenchmarkDataCache
+    from .llm import LocalLLMEvaluator
+    from .provider import resolve_provider
+    from .search import make_searcher
+
     provider_config = _resolve_provider_config(provider_name, config)
     provider = resolve_provider(provider_config, models_dev)
-
     if provider.discovery_strategy == "bazaarlink":
         print(f"[{provider_name}] bazaarlink strategy -> auto:free")
         return {
@@ -475,21 +276,15 @@ def discover_provider(
             "drop": [],
             "error": [],
         }
-
     load_shared_secrets(config.infisical)
     load_discovery_secrets(config.infisical)
-
     llm_api_key = os.environ.get(config.judge_llm.secret)
     if not llm_api_key:
-        raise RuntimeError(
-            f"Missing API key environment variable: {config.judge_llm.secret}"
-        )
+        raise RuntimeError(f"Missing API key environment variable: {config.judge_llm.secret}")
     api_key = os.environ.get(provider.secret)
     if not api_key:
         raise RuntimeError(f"Missing API key environment variable: {provider.secret}")
-
     base_url = os.path.expandvars(provider.base_url)
-
     try:
         if provider.discovery == "cloudflare":
             account_id = os.environ["CLOUDFLARE_ACCOUNT_ID"]
@@ -501,17 +296,9 @@ def discover_provider(
     except Exception as exc:  # noqa: BLE001 — provider-level failure
         print(f"[{provider_name}] Discovery failed: {exc}")
         return provider_error_result(provider_name, exc)
-
     print(f"[{provider_name}] Discovered {len(models)} models")
-
-    # Free-model rule: DISABLED - too aggressive
-    # free_count = sum(1 for m in models if ":free" in m.get("id", ""))
-    # if free_count > 0:
-    #     print(f"[{provider_name}] Free-model rule triggered: {free_count} model(s) have ':free' in id")
-    # models = _apply_free_model_rule(models)
     eval_models = models
     dropped_models = []
-
     searcher = make_searcher(
         brave_api_key=os.environ.get("BRAVE_API_KEY"),
         disabled=os.environ.get("DISABLE_WEB_SEARCH") == "1",
@@ -523,17 +310,13 @@ def discover_provider(
         min_score=config.artificial_analysis.min_score,
         search_web=searcher.search,
     )
-
-    # Build benchmark cache once for all models
     cache = BenchmarkDataCache()
     cache.collect_from_local(aa, models_dev)
     key_signals = ("aa_intelligence", "swe_bench_verified", "livecodebench", "humaneval")
     coverage_stats = {sig: sum(1 for e in cache._data.values() if sig in e.get("benchmarks", {})) for sig in key_signals}
     print(f"[{provider_name}] Benchmark cache: {len(cache._data)} models | coverage: {coverage_stats}")
-
     print(f"[{provider_name}] Evaluating {len(eval_models)} model(s) with {max_workers} worker(s)...")
     result: dict[str, list[dict[str, Any]]] = {"keep": [], "drop": [], "error": []}
-
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         future_to_model = {
             pool.submit(
@@ -557,7 +340,6 @@ def discover_provider(
                 evaluation = future.result()
             except Exception as exc:  # noqa: BLE001 — catch-all for thread errors
                 evaluation = _llm_error_record(model["id"], exc)
-
             decision = evaluation["decision"]
             tier = evaluation.get("tier", "?")
             print(f"[{provider_name}] [{completed}/{len(eval_models)}] {decision.upper():4} {tier:5} {model['id']}")
@@ -567,68 +349,45 @@ def discover_provider(
                 result["drop"].append(evaluation)
             else:
                 result["error"].append(evaluation)
-
-    # Add deterministically dropped models to drop bucket
     for m in dropped_models:
         record = deterministic_drop_record(m["id"], m.get("_drop_reason", "free-model-rule"), cache)
         result["drop"].append(record)
         print(f"[{provider_name}] DROP (deterministic) {m['id']} - {m.get('_drop_reason', 'free-model-rule')}")
-
-    # Deterministic ordering for idempotent output.
     for bucket in result.values():
         bucket.sort(key=lambda r: r["provider_model_id"])
-
     print(f"[{provider_name}] Done: KEEP={len(result['keep'])} DROP={len(result['drop'])} ERROR={len(result['error'])}")
     return result
 
 
 def discover_all_providers(
     config: Any,
-    aa: ArtificialAnalysisCatalog,
-    models_dev: ModelsDevCatalog,
+    aa: Any,
+    models_dev: Any,
     max_workers: int = 4,
     output_dir: Path = Path("data/results"),
 ) -> dict[str, dict[str, list[dict[str, Any]]]]:
-    """T3 path for every configured provider.
-
-    Each provider is an isolated failure boundary: a broken endpoint
-    (e.g. HTTP 404) for one provider must never abort the run for the
-    others.  Failed providers are recorded with stage + error details
-    instead of being silently swallowed.
-
-    Each provider's YAML file is saved immediately after evaluation
-    completes so results are visible progressively — not only after
-    the entire batch finishes.  A progress summary line is printed
-    for each provider.
-
-    Returns "{provider_name: {"keep": [...], "drop": [...], "error": [...]}}"
-    or "{"status": "error", "stage": "discovery", "error": {...}}" for
-    providers that failed before evaluation could start.
-    """
+    """T3 path for every configured provider."""
     output_dir.mkdir(parents=True, exist_ok=True)
-    all_results: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    from .results import save_provider_result
 
+    all_results: dict[str, dict[str, list[dict[str, Any]]]] = {}
     for provider_config in config.providers:
         name = provider_config.name
         print(f"\n=== {name} ===")
         try:
-            result = discover_provider(
-                name, config, aa, models_dev, max_workers
-            )
+            result = discover_provider(name, config, aa, models_dev, max_workers)
         except Exception as exc:  # noqa: BLE001 — provider is isolated boundary
             _log_provider_error(name, exc)
             result = provider_error_result(name, exc)
             all_results[name] = result
             save_provider_result(result, name, output_dir)
             continue
-
         all_results[name] = result
         keep = len(result["keep"])
         drop = len(result["drop"])
         err = len(result.get("error", []))
         print(f"  KEEP: {keep}  DROP: {drop}  ERROR: {err}")
         save_provider_result(result, name, output_dir)
-
     return all_results
 
 
@@ -641,27 +400,12 @@ def _log_provider_error(name: str, exc: Exception) -> None:
 
 
 def classify_provider_error(exc: Exception) -> tuple[str, str]:
-    """Return a short stage label and a human-readable detail string.
-
-    Public API for provider error classification. Use this in tests instead of
-    the private _classify_provider_error helper.
-
-
-    The stage tells the user *where* the failure occurred:
-    "discovery"  — HTTP error or transport issue during model listing
-    "authentication" — missing or invalid API key
-    "evaluation"  — the LLM judge failed (empty response, bad JSON, etc.)
-    "unknown"     — everything else
-    """
+    """Return a short stage label and a human-readable detail string."""
     msg = str(exc)
-    # Authentication / missing key.
     if "Missing API key" in msg or "401" in msg or "403" in msg:
         return ("authentication", msg)
-    # The LLM judge failed during evaluation (check first — timeout
-    # inside an evaluation message should still be evaluation).
     if "LLM" in msg or "evaluation" in msg.lower():
         return ("evaluation", msg)
-    # HTTP-level failures during model discovery.
     if "404" in msg:
         return ("discovery", f"HTTP 404 — endpoint may not exist. {msg}")
     if "connection" in msg.lower() or "refused" in msg.lower():
@@ -671,16 +415,11 @@ def classify_provider_error(exc: Exception) -> tuple[str, str]:
     return ("unknown", msg)
 
 
-# Backward compatibility alias
 _classify_provider_error = classify_provider_error
 
 
 def provider_error_result(name: str, exc: Exception) -> dict[str, list[dict[str, Any]]]:
-    """Return an error-shaped result for a provider that failed entirely.
-
-    Public API for provider error results. Use this in tests instead of
-    the private _provider_error_result helper.
-    """
+    """Return an error-shaped result for a provider that failed entirely."""
     stage, detail = classify_provider_error(exc)
     return {
         "keep": [],
@@ -705,7 +444,6 @@ def provider_error_result(name: str, exc: Exception) -> dict[str, list[dict[str,
     }
 
 
-# Backward compatibility alias
 _provider_error_result = provider_error_result
 
 
@@ -715,12 +453,7 @@ def _has_free_name(models: list[dict[str, Any]]) -> bool:
 
 
 def _apply_free_model_rule(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Drop every model that does NOT have ':free' in its id if at least one
-    model DOES have ':free' in its id.  The free model(s) themselves keep
-    their normal evaluation path.
-
-    This is a deterministic local filter (no LLM).
-    """
+    """Drop every model that does NOT have ':free' in its id if at least one does."""
     if not _has_free_name(models):
         return models
     free_models = [m for m in models if ":free" in m.get("id", "")]

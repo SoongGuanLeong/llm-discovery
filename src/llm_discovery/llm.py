@@ -147,11 +147,12 @@ class LocalLLMEvaluator:
         ]
 
         search_count = 0
-        max_iterations = self.max_searches + 2
+        max_iterations = self.max_searches + 4
+        disable_next = False
 
         for _ in range(max_iterations):
             for attempt in range(3):
-                response = self._post(messages, disable_tools=False)
+                response = self._post(messages, disable_tools=disable_next)
                 if response.status_code not in (429, 503):
                     break
                 retry_after = response.headers.get("retry-after")
@@ -159,7 +160,9 @@ class LocalLLMEvaluator:
                 if attempt < 2:
                     time.sleep(min(wait, 60))
             else:
-                return response
+                raise RuntimeError(f"Judge transport failed after retries: HTTP {response.status_code}")
+            # reset after use
+            disable_next = False
 
             response.raise_for_status()
 
@@ -182,6 +185,7 @@ class LocalLLMEvaluator:
                             "No prose, no markdown fences."
                         ),
                     })
+                    disable_next = True
                     continue
                 except Exception:
                     messages.append(message)
@@ -196,6 +200,7 @@ class LocalLLMEvaluator:
                             "Do not include reasoning, prose, or markdown fences."
                         ),
                     })
+                    disable_next = True
                     continue
 
             messages.append(message)

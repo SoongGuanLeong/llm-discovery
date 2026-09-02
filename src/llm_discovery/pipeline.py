@@ -373,6 +373,9 @@ def discover_all_providers(
     output_dir.mkdir(parents=True, exist_ok=True)
     from .results import save_provider_result
 
+    # Single secret injection for the batch — per-provider calls are no-ops via idempotent cache.
+    load_all_secrets(config.infisical)
+
     all_results: dict[str, dict[str, list[dict[str, Any]]]] = {}
     for provider_config in config.providers:
         name = provider_config.name

@@ -65,12 +65,49 @@ def build_parser() -> argparse.ArgumentParser:
     )
     provider_models.add_argument("provider_id")
 
+    refresh_parser = subparsers.add_parser("refresh", help="Refresh catalog snapshots (AA + models.dev + benchmarks).")
+    refresh_parser.add_argument("--data-dir", type=Path, default=DATA_DIR, help="Data directory (default: data)")
+    refresh_parser.add_argument("--aa-url", default="https://artificialanalysis.ai/api/v2/data/llms/models", help="AA API URL")
+    refresh_parser.add_argument("--models-dev-url", default="https://models.dev/catalog.json", help="models.dev catalog URL")
+    refresh_parser.add_argument("--aa-api-key", default=None, help="AA API key (or env ARTIFICIAL_ANALYSIS_API_KEY)")
+    refresh_parser.add_argument("--no-backup", action="store_true", help="Disable .bak backup")
+    refresh_parser.add_argument("--dry-run", action="store_true", help="Fetch and validate but do not write")
+    refresh_parser.add_argument("--only", nargs="*", choices=["aa", "models_dev", "benchmarks"], help="Only refresh selected catalogs")
+
     return parser
 
 
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
+
+    if args.catalog == "refresh":
+        from .refresh import refresh_all
+        import httpx
+        try:
+            results = refresh_all(
+                data_dir=args.data_dir,
+                aa_api_key=args.aa_api_key,
+                aa_url=args.aa_url,
+                models_dev_url=args.models_dev_url,
+                backup=not args.no_backup,
+                dry_run=args.dry_run,
+                only=args.only,
+            )
+            print("Done:", ", ".join(f"{k}={v or 'dry-run'}" for k, v in results.items()))
+        except httpx.HTTPStatusError as e:
+            status = e.response.status_code if e.response is not None else "?"
+            body = e.response.text[:500] if e.response is not None else ""
+            print(f"HTTP {status} from {e.request.url if e.request else '?' }\n{body}")
+            if status == 401:
+                print("AA requires API key: set ARTIFICIAL_ANALYSIS_API_KEY env or --aa-api-key")
+            raise SystemExit(1)
+        except SystemExit:
+            raise
+        except Exception as e:
+            print(f"Refresh failed: {e}")
+            raise SystemExit(1)
+        return
 
     aa = ArtificialAnalysisCatalog(
         DATA_DIR / "artificial_analysis_models.json"

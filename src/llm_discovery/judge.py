@@ -10,7 +10,7 @@ Request building (ModelEvaluationRequest) lives here, not in pipeline.
 """
 from typing import Any
 
-from .benchmarks import BenchmarkDataCache, build_benchmark_profile
+from .benchmarks import build_benchmark_profile
 from .evaluation import ModelEvaluation, ModelEvaluationRequest
 
 
@@ -26,12 +26,20 @@ class Judge:
         model: dict[str, Any],
         packet: Any,
         cache: Any = None,
+        profile: Any = None,
     ) -> ModelEvaluation:
-        """Build request from packet + cache, delegate to underlying evaluator."""
+        """Build request from packet + cache, delegate to underlying evaluator.
+
+        profile is optional — when provided by coordinator (dedup), reuse instead
+        of rebuilding. Stored as _last_profile for pipeline to forward to PolicyGate.
+        """
         model_id = model["id"]
-        # Benchmarks for LLM context — same as pipeline used (profile.to_dict if scores else {})
-        profile = build_benchmark_profile(model_id, provider_name, cache)
+        # Benchmarks for LLM context — reuse coordinator profile when available
+        if profile is None:
+            profile = build_benchmark_profile(model_id, provider_name, cache)
         benchmarks_dict = profile.to_dict() if profile.scores else {}
+        self._last_profile = profile
+        self._last_benchmarks = benchmarks_dict
         # AA match comes from evidence_packet (already resolved deterministically)
         aa_match = packet.aa_match if packet and packet.aa_match is not None else {"matched": False, "model_id": None, "score": None}
         request = ModelEvaluationRequest(
@@ -42,7 +50,3 @@ class Judge:
             benchmarks=benchmarks_dict,
         )
         return self.evaluator.evaluate(request, packet)
-
-    # Backward compat: expose direct delegate for tests that call evaluator.evaluate
-    def _post(self, *a, **kw):
-        return self.evaluator._post(*a, **kw) if hasattr(self.evaluator, "_post") else None

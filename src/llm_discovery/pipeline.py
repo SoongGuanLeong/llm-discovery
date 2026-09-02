@@ -49,9 +49,10 @@ def evaluate_model(
         llm_result = judge.evaluate(provider_name, model, packet, cache)
     except Exception as exc:  # noqa: BLE001 — judge/transport errors → error, not drop
         print(f"  [evaluate] {model_id}: ERROR - {exc}")
-        return PolicyGate(min_score, max_score, cache).error_record(model_id, exc, provider_name)
+        profile = getattr(judge, "_last_profile", None)
+        return PolicyGate(min_score, max_score, cache).error_record(model_id, exc, provider_name, profile=profile)
     gate = PolicyGate(min_score, max_score, cache)
-    return gate.apply(llm_result, resolution, model_id, provider_name)
+    return gate.apply(llm_result, resolution, model_id, provider_name, profile=getattr(judge, "_last_profile", None))
 
 
 def _llm_error_record(model_id: str, exc: Exception, coding_score: float = 0.0, benchmarks: dict = None) -> dict[str, Any]:

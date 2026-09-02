@@ -38,10 +38,16 @@ class PolicyGate:
         resolution: Any,
         model_id: str,
         provider_name: str,
+        profile: Any = None,
     ) -> dict[str, Any]:
-        """Map LLM judge output + deterministic signals to final evaluation record."""
-        # --- Benchmark profile (deterministic) ---
-        profile = build_benchmark_profile(model_id, provider_name, self.cache)
+        """Map LLM judge output + deterministic signals to final evaluation record.
+
+        profile is optional dedup — when provided (from Judge), reuse instead
+        of rebuilding.
+        """
+        # --- Benchmark profile (deterministic, dedup) ---
+        if profile is None:
+            profile = build_benchmark_profile(model_id, provider_name, self.cache)
         benchmarks_dict = profile.to_dict() if profile.scores else {}
         coding_score, score_confidence, score_reasons = (
             compute_coding_score(profile) if profile.scores else (None, 0.0, ["No benchmark data"])
@@ -173,10 +179,11 @@ class PolicyGate:
         return evaluation
 
     def error_record(
-        self, model_id: str, exc: Exception, provider_name: str
+        self, model_id: str, exc: Exception, provider_name: str, profile: Any = None
     ) -> dict[str, Any]:
         """Judge failure → decision=error with benchmark context."""
-        profile = build_benchmark_profile(model_id, provider_name, self.cache)
+        if profile is None:
+            profile = build_benchmark_profile(model_id, provider_name, self.cache)
         benchmarks_dict = profile.to_dict() if profile.scores else {}
         coding_score, _, _ = (
             compute_coding_score(profile) if profile.scores else (None, 0.0, [])

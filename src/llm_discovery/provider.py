@@ -9,6 +9,8 @@ class ResolvedProvider:
     name: str
     base_url: str
     secret: str
+    discovery: str = "openai"
+    discovery_strategy: str | None = None
 
 
 def resolve_provider(
@@ -20,6 +22,8 @@ def resolve_provider(
             name=config.name,
             base_url=config.base_url,
             secret=config.secret,
+            discovery=config.discovery,
+            discovery_strategy=config.discovery_strategy,
         )
 
     provider = catalog.get_provider(config.name)
@@ -42,4 +46,6 @@ def resolve_provider(
         name=config.name,
         base_url=base_url,
         secret=config.secret,
+        discovery=config.discovery,
+        discovery_strategy=config.discovery_strategy,
     )

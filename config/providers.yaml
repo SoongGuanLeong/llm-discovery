@@ -1,25 +1,68 @@
 artificial_analysis:
   min_score: 24
+  max_score: 45
 
 infisical:
   environment: dev
   shared_project_id_env: INFISICAL_SHARED_PROJECT_ID
   discovery_project_id_env: INFISICAL_DISCOVERY_PROJECT_ID
 
-local_llm:
-  base_url: https://opencode.ai/zen/v1
-  model: mimo-v2.5-free
-  secret: OPENCODE_ZEN_API_KEY
+judge_llm:
+  base_url: https://apihub.agnes-ai.com/v1
+  model: agnes-2.0-flash
+  secret: AGNES_AI_API_KEY
 
 providers:
+  - name: agnes
+    base_url: https://apihub.agnes-ai.com/v1
+    secret: AGNES_AI_API_KEY
+
+  - name: ainative
+    base_url: https://api.ainative.studio/api/v1
+    secret: AINATIVE_API_KEY
+
+  - name: bazaarlink
+    base_url: https://api.bazaarlink.ai/v1
+    secret: BAZAARLINK_API_KEY
+    discovery_strategy: bazaarlink
+    
+  - name: cerebras
+    base_url: https://api.cerebras.ai/v1
+    secret: CEREBRAS_API_KEY
+
+  - name: cloudflare
+    base_url: https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1
+    secret: CLOUDFLARE_API_KEY
+    discovery: cloudflare
+
+  - name: cohere
+    base_url: https://api.cohere.com/v1
+    secret: COHERE_API_KEY
+
+  - name: google
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai
+    secret: GEMINI_API_KEY
+  
   - name: groq
     base_url: https://api.groq.com/openai/v1
-    secret: GROQ_API_KEY
+    secret: GROQ_API_KEY 
 
+  - name: kilo_ai
+    base_url: https://api.kilo.ai/api/gateway
+    secret: KILO_AI_API_KEY
+  
+  - name: llm7
+    base_url: https://api.llm7.io/v1
+    secret: LLM7_API_KEY
+  
   - name: mistral
     base_url: https://api.mistral.ai/v1
     secret: MISTRAL_API_KEY
-
+  
+  - name: opencode_zen
+    base_url: https://opencode.ai/zen/v1
+    secret: OPENCODE_ZEN_API_KEY
+  
   - name: openrouter
     base_url: https://openrouter.ai/api/v1
     secret: OPENROUTER_API_KEY

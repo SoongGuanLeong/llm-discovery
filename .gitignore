@@ -19,3 +19,13 @@ wheels/
 
 # Local catalog snapshots
 data/
+
+.dsh-worktrees/
+
+# Local review / debug artifacts - do not commit
+architecture-review-*.html
+check_aa.py
+debug_tokens.py
+llm-discovery-handoff.md
+docs/benchmark-research.md
+scripts/_probe_judge.py

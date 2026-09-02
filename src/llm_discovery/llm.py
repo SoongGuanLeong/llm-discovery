@@ -6,8 +6,10 @@ from typing import Any
 import httpx
 
 from .evaluation import ModelEvaluation, ModelEvaluationRequest
+from .evidence import EvidencePacket
 
-SYSTEM_PROMPT = """\
+
+SYSTEM_PROMPT = """\\
 You evaluate LLMs for a model discovery system.
 
 Your task is to identify the provider model, determine whether it is
@@ -72,9 +74,10 @@ After gathering enough evidence, return only a JSON object with:
 {
   "canonical_name": string or null,
   "coding": boolean,
-  "aa_model_id": string or null,
+  "aa_relevance": "strong"|"moderate"|"weak"|"none",
   "confidence": number between 0 and 1,
   "decision": "keep" or "drop",
+  "evidence_level": "strong"|"moderate"|"weak"|"none",
   "evidence": [strings]
 }
 """
@@ -93,7 +96,7 @@ TOOLS = [
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "The web search query.",
+                        "description": "The web search query."
                     }
                 },
                 "required": ["query"],
@@ -123,6 +126,7 @@ class LocalLLMEvaluator:
     def evaluate(
         self,
         request: ModelEvaluationRequest,
+        evidence_packet: EvidencePacket | None = None,
     ) -> ModelEvaluation:
         messages = [
             {
@@ -131,7 +135,7 @@ class LocalLLMEvaluator:
             },
             {
                 "role": "user",
-                "content": self._build_prompt(request),
+                "content": self._build_prompt(request, evidence_packet),
             },
         ]
 
@@ -140,71 +144,72 @@ class LocalLLMEvaluator:
 
         for _ in range(max_iterations):
             for attempt in range(3):
-                response = httpx.post(
-                    f"{self.base_url}/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": self.model,
-                        "messages": messages,
-                        "tools": TOOLS,
-                        "temperature": 0,
-                        "max_tokens": 800,
-                        "tool_choice": "auto",
-                    },
-                    timeout=120,
-                )
-
-                if response.status_code != 429:
+                response = self._post(messages, disable_tools=False)
+                if response.status_code not in (429, 503):
                     break
-
+                retry_after = response.headers.get("retry-after")
+                wait = int(retry_after) if retry_after and retry_after.isdigit() else 10 * (2 ** attempt)
                 if attempt < 2:
-                    time.sleep(5 * (attempt + 1))
+                    time.sleep(min(wait, 60))
+            else:
+                return response
 
             response.raise_for_status()
 
             message = response.json()["choices"][0]["message"]
-            print("\n--- LLM MESSAGE ---")
-            print(json.dumps(message, indent=2))
-            print("--- END MESSAGE ---\n")
             tool_calls = message.get("tool_calls", [])
 
             if not tool_calls:
                 content = self._extract_json(message.get("content") or "")
 
                 if not content:
-                    raise RuntimeError("LLM returned an empty final response")
-
-                try:
-                    data = json.loads(content)
-                except json.JSONDecodeError as exc:
-                    raise RuntimeError(f"LLM returned invalid JSON:\n\n{content}") from exc
-
-                return ModelEvaluation.model_validate(data)
-
-            messages.append(message)
-
-            if search_count + len(tool_calls) > self.max_searches:
-                messages.append(
-                    {
+                    messages.append(message)
+                    messages.append({
                         "role": "user",
                         "content": (
-                            "You have reached the web search limit. "
-                            "Do not call any more tools. "
-                            "Return the final JSON decision now."
+                            "Return ONLY a JSON object with exactly these keys: "
+                            'canonical_name, coding (bool), aa_relevance (strong|moderate|weak|none), evidence_level (strong|moderate|weak|none), '
+                            'confidence (0-1 float), decision ("keep"|"drop"), '
+                            'evidence (list of at most 2 short strings). '
+                            "No prose, no markdown fences."
                         ),
-                    }
-                )
+                    })
+                    continue
+
+                data: dict | None = None
+                try:
+                    data = json.loads(content)
+                except json.JSONDecodeError:
+                    repaired = self._repair_json(content)
+                    if repaired != content:
+                        try:
+                            data = json.loads(repaired)
+                        except json.JSONDecodeError:
+                            data = None
+
+                if data is not None:
+                    return ModelEvaluation.model_validate(data)
+
+                messages.append(message)
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "Your previous response was not valid JSON. "
+                        "Return ONLY a JSON object with exactly these keys: "
+                        'canonical_name, coding (bool), aa_relevance (strong|moderate|weak|none), evidence_level (strong|moderate|weak|none), '
+                        'confidence (0-1 float), decision ("keep"|"drop"), '
+                        'evidence (list of at most 2 short strings). '
+                        "Do not include reasoning, prose, or markdown fences."
+                    ),
+                })
                 continue
+
+            messages.append(message)
 
             for tool_call in tool_calls:
                 result = self._execute_tool(tool_call)
                 search_count += 1
 
-                # Limit search output so each model evaluation stays within
-                # the local LLM context window.
                 result = [
                     {
                         "title": item.get("title", ""),
@@ -222,7 +227,61 @@ class LocalLLMEvaluator:
                     }
                 )
 
+            if search_count >= self.max_searches:
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "You have reached the web search limit. "
+                            "Do not call any more tools. "
+                            "Return the final JSON decision now."
+                        ),
+                    }
+                )
+
         raise RuntimeError("LLM failed to return a final evaluation")
+
+    def _post(
+        self,
+        messages: list[dict[str, Any]],
+        disable_tools: bool = False,
+    ) -> httpx.Response:
+        """POST a chat completion, retrying transient 429/503 with backoff.
+
+        Honors a server-sent Retry-After header when present, otherwise backs off
+        exponentially (10 -> 20 -> 40s, capped at 60s). After exhausting retries
+        the final 429/503 response is returned so the caller's raise_for_status
+        surface the failure honestly instead of silently dropping the model.
+
+        When "disable_tools" is set, "tool_choice" is forced to "none" so
+        the LLM must emit a final text response without further tool calls. This
+        is used after the search budget is exhausted to break tool-call loops.
+        """
+        url = f"{self.base_url}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "tools": TOOLS,
+            "temperature": 0,
+            "max_tokens": 1200,
+            "tool_choice": "none" if disable_tools else "auto",
+        }
+
+        backoff = 10
+        for attempt in range(4):
+            response = httpx.post(url, headers=headers, json=payload, timeout=120)
+            if response.status_code not in (429, 503):
+                return response
+            retry_after = response.headers.get("retry-after")
+            wait = int(retry_after) if retry_after and retry_after.isdigit() else backoff
+            if attempt < 3:
+                time.sleep(min(wait, 60))
+            backoff = min(backoff * 2, 60)
+        return response
 
     def _execute_tool(
         self,
@@ -240,16 +299,67 @@ class LocalLLMEvaluator:
     def _build_prompt(
         self,
         request: ModelEvaluationRequest,
+        evidence_packet: EvidencePacket | None = None,
     ) -> str:
-        payload: dict[str, Any] = {
+        evidence_summary = {}
+        if evidence_packet:
+            evidence_summary = evidence_packet.evidence_summary()
+            polarity_info = {}
+            for bench in evidence_packet.benchmarks:
+                polarity_info[bench.name] = {
+                    "value": bench.value,
+                    "polarity": bench.polarity.value,
+                    "category": bench.category.value,
+                }
+            evidence_summary["polarity"] = polarity_info
+
+        payload = {
             "provider": request.provider,
             "model_id": request.model_id,
             "provider_metadata": request.provider_metadata,
-            "aa_candidates": request.aa_candidates,
+            "artificial_analysis": request.aa_match,
+            "benchmarks": request.benchmarks,
+            "evidence": evidence_summary,
             "minimum_aa_intelligence_index": self.min_score,
         }
 
         return json.dumps(payload, indent=2)
+
+    @staticmethod
+    def _repair_json(content: str) -> str:
+        import re
+
+        out = []
+        in_string = False
+        escape = False
+        i = 0
+        while i < len(content):
+            ch = content[i]
+            if in_string:
+                if escape:
+                    out.append(ch)
+                    escape = False
+                elif ch == "\\\\":
+                    out.append(ch)
+                    escape = True
+                elif ch == '"':
+                    out.append(ch)
+                    in_string = False
+                elif ch in "\n\r":
+                    out.append("\\n" if ch == "\n" else "\\r")
+                else:
+                    out.append(ch)
+            else:
+                if ch == '"':
+                    in_string = True
+                    out.append(ch)
+                else:
+                    out.append(ch)
+            i += 1
+
+        repaired = "".join(out)
+        repaired = re.sub(r",\\s*([}\\]])", r"\\1", repaired)
+        return repaired
 
     @staticmethod
     def _extract_json(content: str) -> str:

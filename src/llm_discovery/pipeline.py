@@ -197,8 +197,8 @@ def evaluate_model(
     elif tier == "drop":
         evaluation["decision"] = "drop"
         evaluation.setdefault("evidence", []).append("Tier assessment below minimum; forced drop")
-    elif deterministic_coding and (not llm_result.coding or llm_result.decision == "drop"):
-        # Deterministic evidence proves coding capability, override LLM non-coding OR LLM drop
+    elif deterministic_coding and not llm_result.coding:
+        # Deterministic evidence proves coding capability, override LLM non-coding
         evaluation["decision"] = "keep"
         evaluation.setdefault("evidence", []).append("Deterministic evidence overrides LLM assessment")
     elif llm_result.decision == "error":

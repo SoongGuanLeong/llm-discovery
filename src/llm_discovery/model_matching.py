@@ -4,13 +4,35 @@ Replaces binary exact/normalized matching with a hybrid approach:
 1. Normalize provider model IDs
 2. Generate candidates from catalogs using multiple similarity signals
 3. Score candidates with weighted features
-4. High confidence → accept, medium → LLM adjudication, low → no match
+4. High confidence -> accept, medium -> LLM adjudication, low -> no match
+
+Canonical resolution (T6): ModelMatcher.match() returns ModelResolution
+directly carrying the resolved AA model dict, eliminating the extraction
+loop previously duplicated in resolver.py and the re-derivation loop in
+pipeline.py. resolver.py is now a thin re-export shim.
 """
 
 import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 from difflib import SequenceMatcher
+
+
+def _normalize(value: str) -> str:
+    """Normalize a model ID or slug to a comparable canonical form."""
+    value = value.lower().strip()
+    value = value.rsplit("/", 1)[-1]
+    value = value.replace(".", "-")
+    value = re.sub(r"[^a-z0-9]+", "-", value)
+    value = re.sub(r"-+", "-", value)
+    return value.strip("-")
+
+
+@dataclass(frozen=True)
+class ModelResolution:
+    provider_model_id: str
+    aa_model: dict[str, Any] | None
+    method: str
 
 
 @dataclass(frozen=True)
@@ -380,22 +402,43 @@ class ModelMatcher:
         self,
         provider_model_id: str,
         require_high_confidence: bool = True,
-    ) -> Optional[CandidateMatch]:
-        """Find best match, optionally requiring high confidence."""
-        candidates = self.find_candidates(provider_model_id)
-        if not candidates:
-            return None
+        **kwargs: Any,
+    ) -> ModelResolution:
+        """Resolve provider model ID to AA catalog entry.
 
-        best = candidates[0]
-
-        if require_high_confidence:
-            if best.confidence >= self.HIGH_CONFIDENCE:
-                return best
-            return None
-        else:
-            if best.confidence >= self.LOW_CONFIDENCE:
-                return best
-            return None
+        Returns ModelResolution carrying the resolved aa_model dict directly
+        so callers need no second lookup loop (pipeline 116-124).
+        Uses deterministic exact_slug / normalized_slug / unresolved logic.
+        """
+        if self.aa_catalog is None:
+            return ModelResolution(
+                provider_model_id=provider_model_id,
+                aa_model=None,
+                method="unresolved",
+            )
+        provider_slug = provider_model_id.rsplit("/", 1)[-1]
+        exact = [m for m in self.aa_catalog.models if m.get("slug") == provider_slug]
+        if len(exact) == 1:
+            return ModelResolution(
+                provider_model_id=provider_model_id,
+                aa_model=exact[0],
+                method="exact_slug",
+            )
+        normalized = _normalize(provider_model_id)
+        candidates = [
+            m for m in self.aa_catalog.models if _normalize(m.get("slug", "")) == normalized
+        ]
+        if len(candidates) == 1:
+            return ModelResolution(
+                provider_model_id=provider_model_id,
+                aa_model=candidates[0],
+                method="normalized_slug",
+            )
+        return ModelResolution(
+            provider_model_id=provider_model_id,
+            aa_model=None,
+            method="unresolved",
+        )
 
     def match_with_adjudication(
         self,
@@ -435,3 +478,18 @@ def format_candidates_for_llm(candidates: list[CandidateMatch]) -> str:
             f"slug={c.catalog_slug}, confidence={c.confidence:.2f})"
         )
     return "\n".join(lines)
+
+def resolve_model(
+    provider_model_id: str,
+    aa: Any,
+    models_dev: Any = None,
+    benchmark_cache: Any = None,
+) -> ModelResolution:
+    """Module-level resolve_model for import compatibility.
+
+    Delegates to ModelMatcher.match() so the extraction loop lives in exactly
+    one place (ModelMatcher) and the caller already receives aa_model.
+    """
+    matcher = ModelMatcher(aa_catalog=aa, models_dev_catalog=models_dev, benchmark_cache=benchmark_cache)
+    return matcher.match(provider_model_id)
+

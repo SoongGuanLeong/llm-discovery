@@ -105,20 +105,18 @@ def evaluate_model(
         error_rec["benchmarks"] = benchmarks_dict
         return error_rec
 
-    # Deterministic AA fields from our match (LLM does NOT invent IDs)
-    aa_model_id = None
-    aa_name = None
-    aa_slug = None
-    verified_score = None
-    if aa_match and aa_match.get("matched"):
-        aa_model_id = aa_match.get("model_id")
-        # Get name/slug from catalog
-        if aa_model_id:
-            aa_model = aa.get_by_id(aa_model_id)
-            if aa_model:
-                aa_name = aa_model.get("name")
-                aa_slug = aa_model.get("slug")
-                verified_score = _aa_score(aa_model)
+    # Deterministic AA fields from resolution (already carries aa_model, no second lookup)
+    aa_model = resolution.aa_model
+    if aa_model is not None:
+        aa_model_id = aa_model.get("id")
+        aa_name = aa_model.get("name")
+        aa_slug = aa_model.get("slug")
+        verified_score = _aa_score(aa_model)
+    else:
+        aa_model_id = None
+        aa_name = None
+        aa_slug = None
+        verified_score = None
 
     evaluation: dict[str, Any] = {
         "provider_model_id": model_id,

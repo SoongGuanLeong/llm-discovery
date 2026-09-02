@@ -130,16 +130,6 @@ class LocalLLMEvaluator:
             api_key=self.api_key,
         )
 
-    def __getattr__(self, name: str):
-        # Expand-contract shim: delegate removed json methods to json_repair
-        if name == "_" + "extract_json":
-            from .json_repair import extract_json
-            return extract_json
-        if name == "_" + "repair_json":
-            from .json_repair import repair_json
-            return repair_json
-        raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
-
     def evaluate(
         self,
         request: ModelEvaluationRequest,

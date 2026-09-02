@@ -18,14 +18,22 @@ from typing import Any, Optional
 from difflib import SequenceMatcher
 
 
-def _normalize(value: str) -> str:
-    """Normalize a model ID or slug to a comparable canonical form."""
+def normalize_model_id(value: str) -> str:
+    """Normalize a model ID or slug to a comparable canonical form.
+
+    Public API for model ID normalization. Tests and external callers should
+    use this instead of the private _normalize helper.
+    """
     value = value.lower().strip()
     value = value.rsplit("/", 1)[-1]
     value = value.replace(".", "-")
     value = re.sub(r"[^a-z0-9]+", "-", value)
     value = re.sub(r"-+", "-", value)
     return value.strip("-")
+
+
+# Backward compatibility alias
+_normalize = normalize_model_id
 
 
 @dataclass(frozen=True)
@@ -330,6 +338,11 @@ class ModelMatcher:
         self.normalizer = ModelNormalizer()
         self.scorer = SimilarityScorer()
 
+    @staticmethod
+    def normalize_model_id(value: str) -> str:
+        """Public API: normalize model ID via ModelMatcher."""
+        return normalize_model_id(value)
+
     def _build_catalog_index(self) -> list[tuple[str, str, str, ModelSignature]]:
         """Build index of catalog models: (model_id, slug, name, signature)."""
         index = []
@@ -492,4 +505,3 @@ def resolve_model(
     """
     matcher = ModelMatcher(aa_catalog=aa, models_dev_catalog=models_dev, benchmark_cache=benchmark_cache)
     return matcher.match(provider_model_id)
-

@@ -13,15 +13,15 @@ from llm_discovery.categorize import categorize_model
 from llm_discovery.config import AppConfig, load_config
 from llm_discovery.evaluation import ModelEvaluation, ModelEvaluationRequest
 from llm_discovery.pipeline import (
-    _classify_provider_error,
-    _provider_error_result,
+    classify_provider_error,
+    provider_error_result,
     discover_all_providers,
     discover_single,
     evaluate_model,
     pick_tracer_model,
 )
 from llm_discovery.results import save_yaml_result, YAML_SCHEMA_KEYS
-from llm_discovery.resolver import _normalize, resolve_model
+from llm_discovery.resolver import normalize_model_id, resolve_model
 from scripts.discover import parse_args
 
 
@@ -505,9 +505,9 @@ class TestParseArgs:
 # Resolver characterization (pure)
 class TestResolver:
     def test_normalize(self):
-        assert _normalize("groq/mix") == "mix"
-        assert _normalize("Meta.Llama-3.3 70B") == "meta-llama-3-3-70b"
-        assert _normalize("Llama---3.3") == "llama-3-3"
+        assert normalize_model_id("groq/mix") == "mix"
+        assert normalize_model_id("Meta.Llama-3.3 70B") == "meta-llama-3-3-70b"
+        assert normalize_model_id("Llama---3.3") == "llama-3-3"
 
     def test_exact_slug_match(self, aa_catalog):
         res = resolve_model("llama-3.3-70b-versatile", aa_catalog)
@@ -700,12 +700,12 @@ class TestDiscoverAllProvidersIsolation:
         assert "404" in provider_result["error"][0]["evidence"][0]
 
     def test_error_record_has_stage_and_evidence(self, aa_catalog):
-        """_provider_error_result produces records with stage + evidence."""
+        """provider_error_result produces records with stage + evidence."""
         from httpx import HTTPStatusError
 
         resp = _FakeResponse({}, status_code=404)
         exc = HTTPStatusError("404 Not Found", request=None, response=resp)
-        result = _provider_error_result("llm7", exc)
+        result = provider_error_result("llm7", exc)
 
         assert result["keep"] == []
         assert result["drop"] == []
@@ -717,28 +717,28 @@ class TestDiscoverAllProvidersIsolation:
         assert "404" in rec["evidence"][0]
 
     def test_classify_provider_error(self):
-        """_classify_provider_error returns (stage, detail) tuples."""
+        """classify_provider_error returns (stage, detail) tuples."""
         from httpx import HTTPStatusError
 
         # 404
         resp = _FakeResponse({}, status_code=404)
         exc = HTTPStatusError("404 Not Found", request=None, response=resp)
-        stage, detail = _classify_provider_error(exc)
+        stage, detail = classify_provider_error(exc)
         assert stage == "discovery"
         assert "404" in detail
 
         # 401
         resp = _FakeResponse({}, status_code=401)
         exc = HTTPStatusError("401 Unauthorized", request=None, response=resp)
-        stage, detail = _classify_provider_error(exc)
+        stage, detail = classify_provider_error(exc)
         assert stage == "authentication"
 
         # connection refused
         exc = RuntimeError("Connection refused")
-        stage, detail = _classify_provider_error(exc)
+        stage, detail = classify_provider_error(exc)
         assert stage == "discovery"
 
         # LLM evaluation error
         exc = RuntimeError("LLM evaluation failed: timeout")
-        stage, detail = _classify_provider_error(exc)
+        stage, detail = classify_provider_error(exc)
         assert stage == "evaluation"

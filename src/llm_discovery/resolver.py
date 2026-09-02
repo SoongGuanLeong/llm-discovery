@@ -11,9 +11,9 @@ lookup. See pipeline.py for the eliminated re-derivation loop.
 
 from typing import Any
 
-from .model_matching import ModelResolution, ModelMatcher, _normalize  # noqa: F401  re-export
+from .model_matching import ModelResolution, ModelMatcher, _normalize, normalize_model_id  # noqa: F401  re-export
 
-__all__ = ["ModelResolution", "_normalize", "resolve_model"]
+__all__ = ["ModelResolution", "_normalize", "normalize_model_id", "resolve_model"]
 
 
 def resolve_model(

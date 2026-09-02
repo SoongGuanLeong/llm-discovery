@@ -76,7 +76,7 @@ def evaluate_model(
     if evidence_packet.is_specialized():
         reason = evidence_packet.deterministic_flags[0] if evidence_packet.deterministic_flags else "specialized_model"
         print(f"  [evaluate] {model_id}: DROP (deterministic) - {reason}")
-        return _deterministic_drop_record(model_id, reason, cache)
+        return deterministic_drop_record(model_id, reason, cache)
 
     # --- AA match ---
     aa_match = evidence_packet.aa_match
@@ -242,8 +242,12 @@ def _llm_error_record(model_id: str, exc: Exception, coding_score: float = 0.0, 
     }
 
 
-def _deterministic_drop_record(model_id: str, reason: str, cache=None) -> dict[str, Any]:
-    """Pre-filter drop (specialised / non-coding models, free-model-rule)."""
+def deterministic_drop_record(model_id: str, reason: str, cache=None) -> dict[str, Any]:
+    """Pre-filter drop (specialised / non-coding models, free-model-rule).
+
+    Public API for deterministic drop records. Use this in tests instead of
+    the private _deterministic_drop_record helper.
+    """
     profile = build_benchmark_profile(model_id, "", cache)
     benchmarks_dict = profile.to_dict() if profile.scores else {}
     coding_score, _, _ = compute_coding_score(profile) if profile.scores else (None, 0.0, [])
@@ -265,6 +269,9 @@ def _deterministic_drop_record(model_id: str, reason: str, cache=None) -> dict[s
         "evidence": [reason],
         "coding_assessment": None,
     }
+
+# Backward compatibility alias
+_deterministic_drop_record = deterministic_drop_record
 
 
 def _resolve_provider_config(provider_name: str, config: Any) -> Any:
@@ -493,7 +500,7 @@ def discover_provider(
             models = discover_models(base_url, api_key)
     except Exception as exc:  # noqa: BLE001 — provider-level failure
         print(f"[{provider_name}] Discovery failed: {exc}")
-        return _provider_error_result(provider_name, exc)
+        return provider_error_result(provider_name, exc)
 
     print(f"[{provider_name}] Discovered {len(models)} models")
 
@@ -563,7 +570,7 @@ def discover_provider(
 
     # Add deterministically dropped models to drop bucket
     for m in dropped_models:
-        record = _deterministic_drop_record(m["id"], m.get("_drop_reason", "free-model-rule"), cache)
+        record = deterministic_drop_record(m["id"], m.get("_drop_reason", "free-model-rule"), cache)
         result["drop"].append(record)
         print(f"[{provider_name}] DROP (deterministic) {m['id']} - {m.get('_drop_reason', 'free-model-rule')}")
 
@@ -610,7 +617,7 @@ def discover_all_providers(
             )
         except Exception as exc:  # noqa: BLE001 — provider is isolated boundary
             _log_provider_error(name, exc)
-            result = _provider_error_result(name, exc)
+            result = provider_error_result(name, exc)
             all_results[name] = result
             save_provider_result(result, name, output_dir)
             continue
@@ -627,14 +634,18 @@ def discover_all_providers(
 
 def _log_provider_error(name: str, exc: Exception) -> None:
     """Print a clear, stage-aware error line for a failed provider."""
-    stage, detail = _classify_provider_error(exc)
+    stage, detail = classify_provider_error(exc)
     print(f"\n=== {name} ===")
     print(f"ERROR: {stage} failed")
     print(f"      {detail}")
 
 
-def _classify_provider_error(exc: Exception) -> tuple[str, str]:
+def classify_provider_error(exc: Exception) -> tuple[str, str]:
     """Return a short stage label and a human-readable detail string.
+
+    Public API for provider error classification. Use this in tests instead of
+    the private _classify_provider_error helper.
+
 
     The stage tells the user *where* the failure occurred:
     "discovery"  — HTTP error or transport issue during model listing
@@ -660,9 +671,17 @@ def _classify_provider_error(exc: Exception) -> tuple[str, str]:
     return ("unknown", msg)
 
 
-def _provider_error_result(name: str, exc: Exception) -> dict[str, list[dict[str, Any]]]:
-    """Return an error-shaped result for a provider that failed entirely."""
-    stage, detail = _classify_provider_error(exc)
+# Backward compatibility alias
+_classify_provider_error = classify_provider_error
+
+
+def provider_error_result(name: str, exc: Exception) -> dict[str, list[dict[str, Any]]]:
+    """Return an error-shaped result for a provider that failed entirely.
+
+    Public API for provider error results. Use this in tests instead of
+    the private _provider_error_result helper.
+    """
+    stage, detail = classify_provider_error(exc)
     return {
         "keep": [],
         "drop": [],
@@ -684,6 +703,10 @@ def _provider_error_result(name: str, exc: Exception) -> dict[str, list[dict[str
             }
         ],
     }
+
+
+# Backward compatibility alias
+_provider_error_result = provider_error_result
 
 
 def _has_free_name(models: list[dict[str, Any]]) -> bool:

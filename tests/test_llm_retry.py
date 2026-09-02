@@ -6,6 +6,7 @@ import httpx
 import json
 
 from llm_discovery.judge_transport import JudgeTransport
+from llm_discovery.json_repair import extract_json, repair_json
 from llm_discovery.llm import LocalLLMEvaluator
 from llm_discovery.search import NoopSearcher
 
@@ -117,75 +118,65 @@ _Q = chr(96) * 3
 
 
 def test_extract_json_bare_object():
-    ev = _evaluator()
-    assert json.loads(ev._extract_json('{"a": 1}')) == {"a": 1}
+    assert json.loads(extract_json('{"a": 1}')) == {"a": 1}
 
 
 def test_extract_json_strips_fenced_block_with_leading_prose():
-    ev = _evaluator()
     payload = '{"canonical_name": "X", "decision": "keep"}'
     content = (
         "The evidence is clear:" + chr(10) + chr(10)
         + "- AA candidate matches" + chr(10) + chr(10)
         + _Q + "json" + chr(10) + payload + chr(10) + _Q
     )
-    assert json.loads(ev._extract_json(content)) == {"canonical_name": "X", "decision": "keep"}
+    assert json.loads(extract_json(content)) == {"canonical_name": "X", "decision": "keep"}
 
 
 def test_extract_json_strips_fence_without_lang_tag():
-    ev = _evaluator()
     payload = '{"a": 2}'
     content = "intro" + chr(10) + _Q + chr(10) + payload + chr(10) + _Q
-    assert json.loads(ev._extract_json(content)) == {"a": 2}
+    assert json.loads(extract_json(content)) == {"a": 2}
 
 
 def test_extract_json_prefixed_fence_with_lang():
-    ev = _evaluator()
     payload = '{"a": 3}'
     content = _Q + "json" + chr(10) + payload + chr(10) + _Q
-    assert json.loads(ev._extract_json(content)) == {"a": 3}
+    assert json.loads(extract_json(content)) == {"a": 3}
 
 
 def test_extract_json_brace_on_fence_line():
     """JSON with { on the same line as the fence tag — raw_decode rescue."""
-    ev = _evaluator()
     content = _Q + "json" + "{" + "\n  \"canonical_name\": \"X\"," + "\n  \"decision\": \"keep\"" + "\n}\n" + _Q
-    result = ev._extract_json(content)
+    result = extract_json(content)
     assert json.loads(result) == {"canonical_name": "X", "decision": "keep"}
 
 
 def test_extract_json_trailing_prose_after_object():
     """JSON followed by extra prose — raw_decode strips trailing text."""
-    ev = _evaluator()
     content = '{"a": 1}\n\nSome extra prose here.'
-    result = ev._extract_json(content)
+    result = extract_json(content)
     assert json.loads(result) == {"a": 1}
 
 
 def test_extract_json_prose_before_object():
     """Prose before the JSON object — raw_decode finds the first {."""
-    ev = _evaluator()
     content = 'Here is the answer:\n{"a": 1}\nDone.'
-    result = ev._extract_json(content)
+    result = extract_json(content)
     assert json.loads(result) == {"a": 1}
 
 
 def test_repair_json_escapes_newlines_in_strings():
-    ev = _evaluator()
     bad = '{"evidence": ["line1\nline2"]}'
-    assert json.loads(ev._repair_json(bad)) == {"evidence": ["line1\nline2"]}
+    assert json.loads(repair_json(bad)) == {"evidence": ["line1\nline2"]}
 
 
 def test_repair_json_strips_trailing_commas():
-    ev = _evaluator()
     bad = '{"a": 1, "b": 2,}'
-    assert json.loads(ev._repair_json(bad)) == {"a": 1, "b": 2}
+    assert json.loads(repair_json(bad)) == {"a": 1, "b": 2}
 
 
 def test_repair_json_handles_nested_with_newlines():
-    ev = _evaluator()
     bad = '{"decision": "keep",\n"evidence": ["Qwen3\nbenchmark score"]}'
-    assert json.loads(ev._repair_json(bad)) == {
+    assert json.loads(repair_json(bad)) == {
         "decision": "keep",
         "evidence": ["Qwen3\nbenchmark score"],
     }

@@ -21,8 +21,8 @@ class ArtificialAnalysisConfig(BaseModel):
 
 class InfisicalConfig(BaseModel):
     environment: str = "dev"
-    shared_project_id_env: str = "INFISICAL_SHARED_PROJECT_ID"
-    discovery_project_id_env: str = "INFISICAL_DISCOVERY_PROJECT_ID"
+    shared_project_id_env: str = "LLM_SHARED_PROJECT_ID"
+    discovery_project_id_env: str = "LLM_DISCOVERY_PROJECT_ID"
 
 
 class JudgeLLMConfig(BaseModel):

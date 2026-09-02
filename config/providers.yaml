@@ -4,8 +4,8 @@ artificial_analysis:
 
 infisical:
   environment: dev
-  shared_project_id_env: INFISICAL_SHARED_PROJECT_ID
-  discovery_project_id_env: INFISICAL_DISCOVERY_PROJECT_ID
+  shared_project_id_env: LLM_SHARED_PROJECT_ID
+  discovery_project_id_env: LLM_DISCOVERY_PROJECT_ID
 
 judge_llm:
   base_url: https://apihub.agnes-ai.com/v1

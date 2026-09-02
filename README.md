@@ -4,23 +4,43 @@ Discover and evaluate cloud LLMs across multiple providers. Enumerates provider 
 
 ## Prerequisites
 
-| Requirement | Notes |
-|---|---|
-| **Python 3.12** | `requires-python = ">=3.12"` in `pyproject.toml`. |
-| **uv or venv** | Either `uv venv && uv pip install -e .` or `python -m venv .venv && .venv/bin/pip install -e .`. |
-| **Infisical CLI** | Installed and authenticated (`infisical login`). Used to inject secrets at runtime — no keys are committed. |
-| **Podman + systemd Quadlet** | Required on the gateway host (see `~/projects/llm-gateway`). Not needed to run discovery locally, but needed to deploy the keep-list to LiteLLM. |
-| **Two Infisical project IDs** | Stored in local `.env` (gitignored): |
-| | `INFISICAL_SHARED_PROJECT_ID` — shared project (judge LLM key, search keys). |
-| | `INFISICAL_DISCOVERY_PROJECT_ID` — discovery project (per-provider API keys). |
-| **Infisical secrets** | `OPENCODE_ZEN_API_KEY` lives in the **shared** project; each provider key (e.g. `GROQ_API_KEY`, `KILO_AI_API_KEY`, `CEREBRAS_API_KEY`) lives in the **discovery** project. The judge LLM key (`AGNES_AI_API_KEY` via `config/providers.yaml: judge_llm.secret`) also comes from the shared project. |
-| **`.env` file** | Copy `.env.example` → `.env` and fill the two project IDs. Never commit `.env`. |
+- **Python 3.12** (`requires-python = ">=3.12"` in `pyproject.toml`)
+- **uv or venv** — `uv venv && uv pip install -e .` or `python -m venv .venv && .venv/bin/pip install -e .`
+- **Provider configuration** — `config/providers.yaml` is the source of truth. Each entry declares `name`, `base_url`, and `secret` (env var name holding the API key):
 
-`.infisical.json` in the repo has a placeholder `workspaceId`; the actual project IDs come from `.env` via `--projectId` flags in `src/llm_discovery/secrets.py`.
+  ```yaml
+  providers:
+    - name: groq
+      base_url: https://api.groq.com/openai/v1
+      secret: GROQ_API_KEY
+    - name: kilo_ai
+      base_url: https://api.kilo.ai/api/gateway
+      secret: KILO_AI_API_KEY
+  ```
 
-Optional env vars (also via Infisical or local env):
+  Add a provider there; no code change needed. `judge_llm` and `artificial_analysis` sections define the judge model and AA score thresholds.
 
-- `BRAVE_API_KEY` — Brave Search API (higher quality web search; without it, DuckDuckGo is used). Set `DISABLE_WEB_SEARCH=1` for offline/Noop mode.
+- **Secrets** — provide API keys either directly via env vars or via Infisical (recommended for teams):
+
+  | Method | How |
+  |---|---|
+  | **Plain env** | `export GROQ_API_KEY=... AGNES_AI_API_KEY=... AA_API_KEY=...` |
+  | **Infisical** | Store keys in two projects and export via `infisical export`. Set local `.env` (gitignored, see `.env.example`): |
+
+  ```bash
+  LLM_SHARED_PROJECT_ID=<project with all provider keys + AGNES_AI_API_KEY>
+  LLM_DISCOVERY_PROJECT_ID=<project with AA_API_KEY only>
+  ```
+
+  `LLM_SHARED_PROJECT_ID` holds every provider key (`GROQ_API_KEY`, `KILO_AI_API_KEY`, `CEREBRAS_API_KEY`, `OPENCODE_ZEN_API_KEY`, ...) plus the judge key `AGNES_AI_API_KEY`. `LLM_DISCOVERY_PROJECT_ID` holds only `AA_API_KEY` (used for catalog refresh). If you do not use Infisical, just export the keys and ignore these two vars — `src/llm_discovery/secrets.py:load_all_secrets()` only runs when the vars are set.
+
+No Podman, systemd, or gateway setup is required to run discovery locally.
+
+> **.infisical.json removed** — the repo previously shipped a placeholder `.infisical.json` with a stale `workspaceId`. It was not used (secrets are loaded via explicit `infisical export --projectId $LLM_*_PROJECT_ID`). The file has been deleted; the two `LLM_*_PROJECT_ID` env vars are now the only Infisical config.
+
+Optional env vars:
+
+- `BRAVE_API_KEY` — Brave Search API (higher quality web search; without it, DuckDuckGo is used). Set `DISABLE_WEB_SEARCH=1` for offline mode.
 - `AA_API_KEY` / `ARTIFICIAL_ANALYSIS_API_KEY` — only needed for `refresh` (see below).
 
 ## Installation
@@ -32,22 +52,25 @@ uv venv --python 3.12          # or: python3.12 -m venv .venv
 source .venv/bin/activate
 uv pip install -e .            # or: .venv/bin/pip install -e .
 
-# 2. Infisical CLI (if not installed)
-# https://infisical.com/docs/cli/overview
+# 2a. Plain env (simplest)
+export AGNES_AI_API_KEY=...
+export GROQ_API_KEY=...
+export KILO_AI_API_KEY=...
+# AA key only needed for refresh:
+export AA_API_KEY=aa_xxx
+
+# 2b. Or via Infisical (team setup)
+# Install + auth once: https://infisical.com/docs/cli/overview
 infisical login
-
-# 3. Local env — two project IDs
 cp .env.example .env
-# edit .env:
-#   INFISICAL_SHARED_PROJECT_ID=<shared project id>
-#   INFISICAL_DISCOVERY_PROJECT_ID=<discovery project id>
-
-# 4. Verify secrets inject (no keys printed)
-infisical export --projectId "$INFISICAL_SHARED_PROJECT_ID" --env dev --format json | jq length
-infisical export --projectId "$INFISICAL_DISCOVERY_PROJECT_ID" --env dev --format json | jq length
+# edit .env with LLM_SHARED_PROJECT_ID + LLM_DISCOVERY_PROJECT_ID
+infisical export --projectId "$LLM_SHARED_PROJECT_ID" --env dev --format json | jq length
+infisical export --projectId "$LLM_DISCOVERY_PROJECT_ID" --env dev --format json | jq length
+# run with injected env:
+infisical run -- .venv/bin/python scripts/discover.py groq --all
 ```
 
-No provider or judge keys are hardcoded. `src/llm_discovery/secrets.py:load_all_secrets()` calls `infisical export --projectId <id> --env dev` for both projects at runtime.
+No provider or judge keys are hardcoded. See `config/providers.yaml` for the full provider list and secret names.
 
 ## Catalog data sources
 
@@ -69,7 +92,7 @@ Filtered catalogs can be queried offline without secrets:
 
 ## How to run
 
-All runs load secrets from Infisical and write results to `data/results/`. No keys are requested interactively.
+All runs load secrets from env (or Infisical if configured) and write results to `data/results/`.
 
 ```bash
 # Tracer: evaluate ONE model for a provider (deterministic pick, cheapest smoke test)
@@ -94,7 +117,7 @@ All runs load secrets from Infisical and write results to `data/results/`. No ke
 1. `discover_models(base_url, api_key)` (or Cloudflare/BazaarLink special paths) enumerates `/models`.
 2. Free-model filter (`_split_by_free_rule`) drops non-free models before any LLM cost.
 3. `BenchmarkDataCache` + `ModelResolver` resolve each model against AA/models.dev/benchmarks.
-4. `EvidenceCollector` + `Judge` (via `AGNES_AI_API_KEY` / `agnes-2.0-flash`) + `PolicyGate` judge coding relevance and tier (`max` ≥45, `flash` 24–45, `drop` below).
+4. `EvidenceCollector` + `Judge` (via `AGNES_AI_API_KEY` / `agnes-2.0-flash`) + `PolicyGate` judge coding relevance and tier (`max` >=45, `flash` 24–45, `drop` below).
 5. Failures are isolated — one model error goes to the `error` bucket, other models still complete.
 
 Concurrency: bounded `ThreadPoolExecutor(max_workers=4)` with synchronous `httpx`; results are sorted for determinism.
@@ -140,7 +163,7 @@ error:
     evidence: ["LLM evaluation failed: ..."]
 ```
 
-- `keep` — coding-relevant models (use these).
+- `keep` — coding-relevant models (downstream gateway consumes this).
 - `drop_llm` — LLM-judged non-coding (free-model-rule drops are excluded from YAML entirely).
 - `error` — judge/transport failures (not drops).
 
@@ -148,57 +171,9 @@ Tracer mode (`discover.py <provider>` without `--all`) writes a single-record YA
 
 Programmatic writers: `src/llm_discovery/results.py:ProviderBatchWriter` / `SingleModelWriter` and shims `save_provider_result()` / `save_yaml_result()`.
 
-## Keep-list → llm-gateway (LiteLLM) handoff
+### Downstream handoff
 
-The keep-list is the source of truth for `~/projects/llm-gateway` — a local LiteLLM gateway (Podman + systemd Quadlet + PostgreSQL + Infisical).
-
-`llm-gateway` layout:
-
-```
-~/projects/llm-gateway/
-  config.yaml              # LiteLLM: model_list: [] (populated from keep-list)
-  catalog/providers.yaml   # provider catalog (type: native | openai_compatible)
-  containers/litellm.container  # Quadlet — managed secrets injected between
-                                #   # BEGIN MANAGED SECRETS / # END MANAGED SECRETS
-  scripts/setup-secrets.sh # pulls Infisical LITELLM + shared projects → Podman secrets
-  scripts/install.sh       # installs Quadlets, starts postgres + litellm
-```
-
-How to feed the keep-list:
-
-1. Run discovery and inspect the keep-list:
-   ```bash
-   .venv/bin/python scripts/discover.py kilo_ai --all
-   cat data/results/kilo_ai.yaml          # keep[].model_id is what to route
-   # or for all providers:
-   .venv/bin/python scripts/discover.py --all-providers
-   ls data/results/*.yaml
-   ```
-
-2. Translate keep entries into `~/projects/llm-gateway/config.yaml: model_list`. Each keep entry maps to one LiteLLM model (use the provider's `base_url` from `config/providers.yaml` and the secret name from the same file). Example (illustrative):
-
-   ```yaml
-   # ~/projects/llm-gateway/config.yaml
-   model_list:
-     - model_name: kilo-minimax-m2.7
-       litellm_params:
-         model: openai/minimax/minimax-m2.7:free
-         api_base: https://api.kilo.ai/api/gateway
-         api_key: os.environ/KILO_AI_API_KEY
-   ```
-
-   Keys like `KILO_AI_API_KEY` / `OPENCODE_ZEN_API_KEY` are provisioned to the gateway via `setup-secrets.sh` (which syncs Infisical → Podman secrets → Quadlet `Secret=...,type=env,target=...`). Keep the Infisical project IDs in `~/projects/llm-gateway/.env` (`INFISICAL_LITELLM_PROJECT_ID` + `INFISICAL_SHARED_PROJECT_ID`) separate from this repo's `.env`.
-
-3. Re-provision and restart the gateway:
-   ```bash
-   cd ~/projects/llm-gateway
-   ./scripts/setup-secrets.sh   # idempotent: rebuilds Podman secrets from Infisical
-   ./scripts/install.sh         # verifies secrets, installs Quadlets, starts services
-   systemctl --user is-active litellm.service
-   curl -fsS http://127.0.0.1:4000/health/liveliness  # -> "I'm alive!"
-   ```
-
-Tip: `data/results/*.yaml` can be diffed across runs to audit what entered/left the keep-list before promoting to the gateway.
+`data/results/*.yaml` is the keep-list consumed by the gateway. The previous gateway is being retired in favor of **Bifrost**. To feed a new gateway, read `keep[].model_id` per provider and map each to the gateway config (use `base_url` and `secret` from `config/providers.yaml`). Diffing `data/results/*.yaml` across runs audits what entered/left the keep-list before promotion.
 
 ## Catalog refresh (T6)
 

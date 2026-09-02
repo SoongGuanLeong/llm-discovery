@@ -369,6 +369,8 @@ def _normalize_model_key(name: str) -> str:
     name = name.replace("nemotron", "nemo")
     name = name.replace("laguna-s", "laguna")
     name = name.replace("laguna-xs", "laguna")
+    # Normalize dots to hyphens for version numbers (3.5 -> 3-5) to match slugs
+    name = name.replace(".", "-")
     # Replace whitespace with hyphens
     name = re.sub(r"\s+", "-", name)
     # Remove non-alphanumeric (keep hyphens)

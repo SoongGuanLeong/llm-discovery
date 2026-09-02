@@ -113,6 +113,16 @@ class ProviderBatchWriter:
     """Writer for T3 provider-batch YAML (keep/drop/error lists per provider)."""
 
     def _to_record(self, rec: dict[str, Any]) -> dict[str, Any]:
+        raw_benchmarks = rec.get("benchmarks")
+        # BenchmarkProfile.to_dict includes model_id/provider duplication; strip for YAML
+        if isinstance(raw_benchmarks, dict):
+            benchmarks = {k: v for k, v in raw_benchmarks.items() if k not in ("model_id", "provider")}
+            # Also strip empty benchmarks to keep YAML concise
+            if not benchmarks.get("scores") and not benchmarks.get("raw_benchmarks"):
+                # Keep structure but without duplication; empty scores already handled
+                pass
+        else:
+            benchmarks = raw_benchmarks
         projected: dict[str, Any] = {
             "model_id": rec["provider_model_id"],
             "decision": rec["decision"],
@@ -121,7 +131,7 @@ class ProviderBatchWriter:
             "aa_model_id": rec.get("aa_model_id"),
             "aa_score": rec.get("aa_score"),
             "coding_score": rec.get("coding_score"),
-            "benchmarks": rec.get("benchmarks"),
+            "benchmarks": benchmarks,
             "confidence": rec["confidence"],
             "evidence_level": rec.get("evidence_level"),
             "evidence": clean_evidence(rec.get("evidence", [])),

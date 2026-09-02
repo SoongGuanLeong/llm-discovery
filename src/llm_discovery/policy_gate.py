@@ -18,6 +18,24 @@ from .benchmarks import build_benchmark_profile, compute_coding_score, has_criti
 from .categorize import categorize_model
 
 
+def _is_router_model(model_id: str) -> bool:
+    """Router models (e.g. kilo-auto/free, openrouter/free) are always kept.
+
+    Routers are meta-models that delegate to free candidates; they have no
+    coding benchmarks but must appear in the keep list for routing.
+    """
+    lower = model_id.lower()
+    # Exact router ids + generic router substring
+    if lower in ("kilo-auto/free", "openrouter/free"):
+        return True
+    if "router" in lower:
+        return True
+    # kilo auto-routing pattern
+    if "auto" in lower and "free" in lower:
+        return True
+    return False
+
+
 def _aa_score(aa_model: dict[str, Any] | None) -> float | None:
     if aa_model is None:
         return None
@@ -138,6 +156,18 @@ class PolicyGate:
             has_critical_weakness=has_weakness,
         )
         evaluation["tier"] = tier
+
+        # --- Router override: always keep regardless of coding/tier ---
+        if _is_router_model(model_id):
+            # Router keep overrides any drop; preserve max if already max, else flash
+            if tier != "max":
+                tier = "flash"
+            evaluation["tier"] = tier
+            evaluation["decision"] = "keep"
+            evaluation["coding"] = True
+            evaluation.setdefault("evidence", []).append("Router model: always keep (routing meta-model)")
+            print(f"  [evaluate] {model_id}: ROUTER override -> KEEP {tier}")
+            return evaluation
 
         # --- Python policy: map LLM decision to final decision ---
         if not deterministic_coding:

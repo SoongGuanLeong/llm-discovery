@@ -450,7 +450,7 @@ def provider_error_result(name: str, exc: Exception) -> dict[str, list[dict[str,
 _provider_error_result = provider_error_result
 
 
-FREE_MARKERS = (":free", "-free", "_free")
+FREE_MARKERS = (":free", "-free", "_free", "/free")
 
 
 def _is_free_model(model_id: str) -> bool:

@@ -10,7 +10,7 @@ def clean_evidence(evidence: list[str] | None) -> list[str]:
     for ev in evidence:
         if "free-model-rule" in ev:
             continue
-        ev = re.sub(r"(?::|-|_)free", "", ev)
+        ev = re.sub(r"(?::|-|_|/)free", "", ev)
         ev = re.sub(r"''''", "", ev)
         cleaned.append(ev)
     return cleaned

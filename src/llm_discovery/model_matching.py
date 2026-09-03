@@ -509,21 +509,63 @@ class ModelMatcher:
             "claude-haiku-4-5": "claude-4-5-haiku",
             "claude-haiku-4.5": "claude-4-5-haiku",
             "gemini-3.8-flash-high": "gemini-3-7-flash",
+            # Mistral *-latest aliases (issue #42)
+            "mistral-medium-latest": "mistral-medium-3-5",
+            "mistral-large-latest": "mistral-large-3",
+            "mistral-small-latest": "mistral-small-3-1",
+            "pixtral-large-latest": "pixtral-large-2411",
+            "magistral-medium-latest": "magistral-medium-2509",
+            "magistral-small-latest": "magistral-small-2509",
         }
         for k, v in alias_map.items():
             if provider_slug.lower() == k.lower() or base_slug.lower() == k.lower():
                 hit = [m for m in self.aa_catalog.models if m.get("slug") == v]
                 if hit:
                     return ModelResolution(provider_model_id=provider_model_id, aa_model=hit[0], method="alias_"+v)
-        # Try exact on base and original
-        for slug in (provider_slug, base_slug):
-            exact = [m for m in self.aa_catalog.models if m.get("slug") == slug]
-            if len(exact) == 1:
-                return ModelResolution(
-                    provider_model_id=provider_model_id,
-                    aa_model=exact[0],
-                    method="exact_slug",
-                )
+        # Try exact on original slug only (base_slug after dated aliases to avoid dated->generic)
+        exact = [m for m in self.aa_catalog.models if m.get("slug") == provider_slug]
+        if len(exact) == 1:
+            return ModelResolution(
+                provider_model_id=provider_model_id,
+                aa_model=exact[0],
+                method="exact_slug",
+            )
+        # Dated Mistral aliases: provider dated variants -> versioned AA slug (before base_slug to avoid dated->generic)
+        dated_alias_map = {
+            "mistral-medium-2604": "mistral-medium-3-5",
+            "mistral-medium-2505": "mistral-medium-3",
+            "mistral-medium-2508": "mistral-medium-3-1",
+            "mistral-large-2512": "mistral-large-3",
+            "mistral-large-2411": "mistral-large-3",
+            "mistral-small-2603": "mistral-small-4",
+            "mistral-small-2506": "mistral-small-3-1",
+            "mistral-small-2501": "mistral-small-3-1",
+        }
+        for k, v in dated_alias_map.items():
+            if provider_slug.lower() == k.lower():
+                hit = [m for m in self.aa_catalog.models if m.get("slug") == v]
+                if hit:
+                    return ModelResolution(provider_model_id=provider_model_id, aa_model=hit[0], method="alias_dated_"+v)
+        # Generic dated fallback for Mistral family: any mistral-(medium|large|small)-YYYY -> best versioned (after exact)
+        if re.match(r"^mistral-(medium|large|small)-\d{4}$", provider_slug, re.I):
+            family = provider_slug.split("-")[1].lower()
+            fallback = {
+                "medium": "mistral-medium-3-5",
+                "large": "mistral-large-3",
+                "small": "mistral-small-4",
+            }.get(family)
+            if fallback:
+                hit = [m for m in self.aa_catalog.models if m.get("slug") == fallback]
+                if hit:
+                    return ModelResolution(provider_model_id=provider_model_id, aa_model=hit[0], method="alias_dated_fallback_"+fallback)
+        # Try exact on stripped base (dated suffix removed) - after dated aliases
+        exact_base = [m for m in self.aa_catalog.models if m.get("slug") == base_slug]
+        if len(exact_base) == 1:
+            return ModelResolution(
+                provider_model_id=provider_model_id,
+                aa_model=exact_base[0],
+                method="exact_slug_base",
+            )
         # Normalized match (dot-preserving)
         for raw in (provider_model_id, provider_model_id.rsplit("/",1)[-1], base_slug):
             normalized = _normalize(raw)

@@ -247,8 +247,12 @@ class BenchmarkDataCache:
 
         if model_id in self._data:
             return self._data[model_id]["benchmarks"]
+        # Slash stripping: try bare slug directly (issue #42)
+        bare = model_id.rsplit("/", 1)[-1]
+        if bare != model_id and bare in self._data:
+            return self._data[bare]["benchmarks"]
 
-        provider_slug = model_id.rsplit("/", 1)[-1]
+        provider_slug = bare
         norm_slug = _normalize_model_key(provider_slug)
         if not norm_slug:
             return None
@@ -271,8 +275,12 @@ class BenchmarkDataCache:
 
         if model_id in self._data:
             return self._data[model_id].get("raw_benchmarks", [])
+        # Slash stripping: try bare slug directly (issue #42)
+        bare = model_id.rsplit("/", 1)[-1]
+        if bare != model_id and bare in self._data:
+            return self._data[bare].get("raw_benchmarks", [])
 
-        provider_slug = model_id.rsplit("/", 1)[-1]
+        provider_slug = bare
         norm_slug = _normalize_model_key(provider_slug)
         if not norm_slug:
             return []
@@ -367,8 +375,7 @@ def _normalize_model_key(name: str) -> str:
     # Remove version suffixes
     name = re.sub(r":(free|paid|beta|rc\d*)$", "", name)
     name = re.sub(r"-(preview|beta|rc\d+)$", "", name)
-    # Strip date suffix like :0731 / -0731
-    name = re.sub(r"[:/_-]\d{4}$", "", name)
+    # Date suffix preserved for benchmark cache distinctness (issue #42); resolver handles dated alias separately
     # Remove parenthetical content
     name = re.sub(r"\s*\(.*?\)\s*", "", name)
     # Handle common naming variations

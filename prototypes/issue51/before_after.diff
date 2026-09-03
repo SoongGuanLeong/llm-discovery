@@ -1,173 +1,101 @@
 --- a/data/results/nararouter.yaml
 +++ b/prototypes/issue51/nararouter.yaml
-@@ -1,44 +1,10 @@
+@@ -1,25 +1,6 @@
  provider: nararouter
--evaluated_at: '2026-09-03T10:40:47.360325+00:00'
--keep: []
--drop_llm: []
--error:
--- model_id: agnes-2.0-flash
--  decision: error
--  tier: error
--  category: error
--  aa_model_id: null
--  aa_score: null
--  coding_score: null
--  pricing: null
--  benchmarks: {}
--  confidence: 0.0
--  evidence_level: none
--  evidence:
--  - 'LLM evaluation failed: Client error ''401 Unauthorized'' for url ''https://apihub.agnes-ai.com/v1/chat/completions''
--
--    For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401'
--  coding_assessment: null
+-evaluated_at: '2026-09-03T11:55:50.001961+00:00'
++evaluated_at: '2026-09-03T11:08:16.062197+00:00'
+ keep:
 -- model_id: agnes-2.5-flash
--  decision: error
--  tier: error
--  category: error
--  aa_model_id: null
--  aa_score: null
+-  decision: keep
+-  tier: flash
+-  category: flash
+-  aa_model_id: f3a0e101-086f-44b3-a1b2-d23498f9716b
+-  aa_score: 49.1
 -  coding_score: null
--  pricing: null
+-  pricing:
+-    price_1m_blended_3_to_1: 0.15
+-    price_1m_input_tokens: 0.1
+-    price_1m_output_tokens: 0.3
 -  benchmarks: {}
--  confidence: 0.0
--  evidence_level: none
+-  confidence: 0.7
+-  evidence_level: moderate
 -  evidence:
--  - 'LLM evaluation failed: Client error ''401 Unauthorized'' for url ''https://apihub.agnes-ai.com/v1/chat/completions''
--
--    For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401'
+-  - AA score 49.1 for Agnes 2.5 Pro Beta exceeds minimum threshold of 24.0
+-  - Model explicitly optimized for coding tasks, agent workflows, and tool calls
+-  - Pricing blended $0.15/1M, intelligence per dollar 389.7 influenced tier=flash
 -  coding_assessment: null
-+evaluated_at: '2026-09-03T11:04:43.268972+00:00'
-+keep:
  - model_id: laguna-s-2.1
--  decision: error
--  tier: error
--  category: error
-+  decision: keep
-+  tier: flash
-+  category: flash
-   aa_model_id: null
-   aa_score: null
-   coding_score: 56.98
-@@ -72,21 +38,24 @@
+   decision: keep
+   tier: flash
+@@ -57,13 +38,12 @@
        score: 37.5
        metric: success rate
        source: https://poolside.ai/blog/introducing-laguna-xs-2-1
--  confidence: 0.0
--  evidence_level: none
+-  confidence: 0.85
 +  confidence: 0.9
-+  evidence_level: strong
+   evidence_level: strong
    evidence:
--  - 'LLM evaluation failed: Client error ''401 Unauthorized'' for url ''https://apihub.agnes-ai.com/v1/chat/completions''
--
--    For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401'
+-  - SWE-Bench Verified score of 70.9 exceeds the >= 50 threshold for strong coding
+-    evidence
+-  - Multiple positive coding benchmarks including Terminal-Bench 37.5 and SWE-Bench
+-    Pro 47.6
 +  - 'Benchmark Terminal Bench: 37.5'
 +  - 'Deterministic override: coding_score=57.0 >= 35 (coding_min)'
 +  - Deterministic evidence overrides LLM assessment
    coding_assessment: null
  - model_id: minimax-m3-free
--  decision: error
--  tier: error
--  category: error
--  aa_model_id: null
--  aa_score: null
-+  decision: keep
-+  tier: max
-+  category: max
-+  aa_model_id: 277f939a-985b-4b37-859d-b3eabc7c0b26
-+  aa_score: 45.4
-   coding_score: 65.53
--  pricing: null
-+  pricing:
-+    price_1m_blended_3_to_1: 0.525
-+    price_1m_input_tokens: 0.3
-+    price_1m_output_tokens: 1.2
-   benchmarks:
-     benchmark_coverage: 0.5
-     coverage_with_supplements: 0.33
-@@ -136,97 +105,145 @@
+   decision: keep
+@@ -125,12 +105,14 @@
        score: 70.06
        metric: success rate
        source: https://www.minimax.io/blog/minimax-m3
--  confidence: 0.0
--  evidence_level: none
+-  confidence: 0.95
 +  confidence: 0.9
-+  evidence_level: strong
+   evidence_level: strong
    evidence:
--  - 'LLM evaluation failed: Client error ''401 Unauthorized'' for url ''https://apihub.agnes-ai.com/v1/chat/completions''
--
--    For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401'
+-  - AA Intelligence 45.4 with coding score 58.6 and SWE-Bench Verified 80.5.
+-  - Terminal-Bench 66 confirms strong agentic coding capability.
 +  - AA Intelligence Index 45.4 matched -> evidence_level=strong
 +  - 'Benchmark Terminal Bench: 66'
 +  - 'Deterministic override: coding_score=65.5 >= 35 (coding_min)'
-+  - Pricing blended $0.53/1M, intelligence per dollar 114.0 influenced tier=max
+   - Pricing blended $0.53/1M, intelligence per dollar 114.0 influenced tier=max
 +  - Deterministic evidence overrides LLM assessment
    coding_assessment: null
--- model_id: mistral-large
--  decision: error
--  tier: error
--  category: error
--  aa_model_id: null
--  aa_score: null
--  coding_score: 4.1
--  pricing: null
-+- model_id: muse-spark-1.2-contributor-free
-+  decision: keep
-+  tier: max
-+  category: max
-+  aa_model_id: 04ee6719-0327-463b-a1a1-70a6a78254f9
-+  aa_score: 56.8
-+  coding_score: 56.8
-+  pricing:
-+    price_1m_blended_3_to_1: 2
-+    price_1m_input_tokens: 1.25
-+    price_1m_output_tokens: 4.25
-   benchmarks:
-     benchmark_coverage: 0.25
-     coverage_with_supplements: 0.08
-     scores:
-       aa_intelligence:
--        score: 4.1
-+        score: 56.8
-+        metric: index
-+        source: artificial_analysis
-+      aa_coding:
-+        score: 72.2
+ - model_id: muse-spark-1.2-contributor-free
+   decision: keep
+@@ -156,28 +138,49 @@
          metric: index
          source: artificial_analysis
      raw_benchmarks: []
--  confidence: 0.0
--  evidence_level: none
+-  confidence: 0.95
 +  confidence: 0.9
-+  evidence_level: strong
+   evidence_level: strong
    evidence:
--  - 'LLM evaluation failed: Client error ''401 Unauthorized'' for url ''https://apihub.agnes-ai.com/v1/chat/completions''
--
--    For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401'
+-  - AA Intelligence score 56.8 exceeds the 55 threshold for strong evidence.
+-  - AA Coding score 72.2 confirms strong coding capability.
 +  - AA Intelligence Index 56.8 matched -> evidence_level=strong
 +  - 'Deterministic override: coding_score=56.8 >= 35 (coding_min)'
-+  - Pricing blended $2.00/1M, intelligence per dollar 27.7 influenced tier=max
+   - Pricing blended $2.00/1M, intelligence per dollar 27.7 influenced tier=max
 +  - Deterministic evidence overrides LLM assessment
    coding_assessment: null
--- model_id: mistral-medium-3-5
--  decision: error
--  tier: error
--  category: error
-+drop_llm:
-+- model_id: agnes-2.0-flash
-+  decision: drop
+ drop_llm:
+ - model_id: agnes-2.0-flash
+   decision: drop
+-  tier: uncertain
+-  category: uncertain
 +  tier: drop
 +  category: drop
    aa_model_id: null
    aa_score: null
--  coding_score: 30.4
-+  coding_score: null
+   coding_score: null
    pricing: null
-+  benchmarks: {}
+   benchmarks: {}
+-  confidence: 0.4
 +  confidence: 0.3
-+  evidence_level: weak
-+  evidence:
+   evidence_level: weak
+   evidence:
+-  - Provider claims coding capability but no benchmark scores or AA score available
+-  - Model labeled 'flash' variant without verified coding evidence
 +  - No coding benchmarks; verdict via deterministic evidence_level only
 +  - Model assessed as non-coding (LLM + deterministic); forced drop
 +  coding_assessment: null
@@ -190,135 +118,56 @@
 +  - No coding benchmarks; verdict via deterministic evidence_level only
 +  - Pricing blended $0.15/1M, intelligence per dollar 389.7 influenced tier=drop
 +  - Model assessed as non-coding (LLM + deterministic); forced drop
-+  coding_assessment: null
-+- model_id: mistral-large
-+  decision: drop
-+  tier: drop
-+  category: drop
-+  aa_model_id: 5e4e4590-a77e-4b66-95f8-f3960a1a7c68
-+  aa_score: 4.1
-+  coding_score: 4.1
-+  pricing:
-+    price_1m_blended_3_to_1: 6
-+    price_1m_input_tokens: 4
-+    price_1m_output_tokens: 12
-   benchmarks:
-     benchmark_coverage: 0.25
-     coverage_with_supplements: 0.08
-     scores:
-       aa_intelligence:
--        score: 30.4
--        metric: index
--        source: artificial_analysis
--      aa_coding:
--        score: 46.9
-+        score: 4.1
+   coding_assessment: null
+ - model_id: mistral-large
+   decision: drop
+@@ -199,11 +202,10 @@
          metric: index
          source: artificial_analysis
      raw_benchmarks: []
--  confidence: 0.0
--  evidence_level: none
+-  confidence: 0.95
+-  evidence_level: strong
 +  confidence: 0.3
 +  evidence_level: weak
    evidence:
--  - 'LLM evaluation failed: Client error ''401 Unauthorized'' for url ''https://apihub.agnes-ai.com/v1/chat/completions''
--
--    For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401'
+-  - AA Intelligence score of 4.1 is well below the minimum threshold of 24.0, requiring
+-    a drop decision.
 +  - AA Intelligence Index 4.1 matched -> evidence_level=weak
-+  - Pricing blended $6.00/1M, intelligence per dollar 0.7 influenced tier=drop
-+  - Model assessed as non-coding (LLM + deterministic); forced drop
+   - Pricing blended $6.00/1M, intelligence per dollar 0.7 influenced tier=drop
+   - Model assessed as non-coding (LLM + deterministic); forced drop
    coding_assessment: null
--- model_id: muse-spark-1.2-contributor-free
--  decision: error
--  tier: error
--  category: error
--  aa_model_id: null
--  aa_score: null
--  coding_score: 56.8
--  pricing: null
-+- model_id: mistral-medium-3-5
-+  decision: drop
-+  tier: drop
-+  category: drop
-+  aa_model_id: dd059b25-d82a-4ead-82a4-4adceaaec48b
-+  aa_score: 30.4
-+  coding_score: 30.4
-+  pricing:
-+    price_1m_blended_3_to_1: 3
-+    price_1m_input_tokens: 1.5
-+    price_1m_output_tokens: 7.5
-   benchmarks:
-     benchmark_coverage: 0.25
-     coverage_with_supplements: 0.08
-     scores:
-       aa_intelligence:
--        score: 56.8
-+        score: 30.4
-         metric: index
-         source: artificial_analysis
-       aa_coding:
--        score: 72.2
-+        score: 46.9
+@@ -231,14 +233,12 @@
          metric: index
          source: artificial_analysis
      raw_benchmarks: []
--  confidence: 0.0
--  evidence_level: none
+-  confidence: 0.9
 +  confidence: 0.6
-+  evidence_level: moderate
+   evidence_level: moderate
    evidence:
--  - 'LLM evaluation failed: Client error ''401 Unauthorized'' for url ''https://apihub.agnes-ai.com/v1/chat/completions''
--
--    For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401'
+-  - AA Intelligence 30.4 (above minimum 24.0) with AA Coding 46.9 confirms coding
+-    capability
+-  - Verified AA match to Mistral Medium 3.5 (dd059b25-d82a-4ead-82a4-4adceaaec48b)
 +  - AA Intelligence Index 30.4 matched -> evidence_level=moderate
-+  - Pricing blended $3.00/1M, intelligence per dollar 10.0 influenced tier=drop
+   - Pricing blended $3.00/1M, intelligence per dollar 10.0 influenced tier=drop
+-  - Tier assessment below minimum; forced drop
 +  - Model assessed as non-coding (LLM + deterministic); forced drop
    coding_assessment: null
  - model_id: qwen3.8-27b
--  decision: error
--  tier: error
--  category: error
-+  decision: drop
-+  tier: drop
-+  category: drop
-   aa_model_id: null
-   aa_score: null
-   coding_score: 61.7
-@@ -244,26 +261,24 @@
-       score: 61.7
-       metric: resolved
-       source: https://huggingface.co/Qwen/Qwen3.8-27B
--  confidence: 0.0
--  evidence_level: none
-+  confidence: 1.0
-+  evidence_level: strong
-   evidence:
--  - 'LLM evaluation failed: Client error ''401 Unauthorized'' for url ''https://apihub.agnes-ai.com/v1/chat/completions''
--
--    For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401'
-+  - specialized_model:vision
-   coding_assessment: null
- - model_id: stepfun-3.7-flash
--  decision: error
--  tier: error
--  category: error
-+  decision: drop
-+  tier: drop
-+  category: drop
-   aa_model_id: null
-   aa_score: null
+   decision: drop
+@@ -275,14 +275,10 @@
    coding_score: null
    pricing: null
    benchmarks: {}
--  confidence: 0.0
--  evidence_level: none
+-  confidence: 0.95
 +  confidence: 0.3
-+  evidence_level: weak
+   evidence_level: weak
    evidence:
--  - 'LLM evaluation failed: Client error ''401 Unauthorized'' for url ''https://apihub.agnes-ai.com/v1/chat/completions''
--
--    For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401'
+-  - No Artificial Analysis match, no benchmarks, and no verifiable evidence found
+-    for stepfun-3.7-flash.
+-  - Model labeled 'flash' (mini variant) with no coding evidence or AA score to justify
+-    keeping.
+-  - Evidence level promoted none→weak via deterministic signals (aa=None, coding_score=None)
 +  - No coding benchmarks; verdict via deterministic evidence_level only
-+  - Model assessed as non-coding (LLM + deterministic); forced drop
+   - Model assessed as non-coding (LLM + deterministic); forced drop
    coding_assessment: null
-+error: []
+ error: []

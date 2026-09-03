@@ -1,10 +1,9 @@
 provider: nararouter
-evaluated_at: '2026-09-03T11:08:16.062197+00:00'
+evaluated_at: '2026-09-03T13:02:23.392120+00:00'
 keep:
 - model_id: laguna-s-2.1
   decision: keep
   tier: flash
-  category: flash
   aa_model_id: null
   aa_score: null
   coding_score: 56.98
@@ -48,7 +47,6 @@ keep:
 - model_id: minimax-m3-free
   decision: keep
   tier: max
-  category: max
   aa_model_id: 277f939a-985b-4b37-859d-b3eabc7c0b26
   aa_score: 45.4
   coding_score: 65.53
@@ -116,8 +114,7 @@ keep:
   coding_assessment: null
 - model_id: muse-spark-1.2-contributor-free
   decision: keep
-  tier: max
-  category: max
+  tier: contributor_free
   aa_model_id: 04ee6719-0327-463b-a1a1-70a6a78254f9
   aa_score: 56.8
   coding_score: 56.8
@@ -143,14 +140,13 @@ keep:
   evidence:
   - AA Intelligence Index 56.8 matched -> evidence_level=strong
   - 'Deterministic override: coding_score=56.8 >= 35 (coding_min)'
-  - Pricing blended $2.00/1M, intelligence per dollar 27.7 influenced tier=max
+  - Pricing blended $2.00/1M, intelligence per dollar 27.7 influenced tier=contributor_free
   - Deterministic evidence overrides LLM assessment
   coding_assessment: null
 drop_llm:
 - model_id: agnes-2.0-flash
   decision: drop
   tier: drop
-  category: drop
   aa_model_id: null
   aa_score: null
   coding_score: null
@@ -165,7 +161,6 @@ drop_llm:
 - model_id: agnes-2.5-flash
   decision: drop
   tier: drop
-  category: drop
   aa_model_id: f3a0e101-086f-44b3-a1b2-d23498f9716b
   aa_score: 49.1
   coding_score: null
@@ -185,7 +180,6 @@ drop_llm:
 - model_id: mistral-large
   decision: drop
   tier: drop
-  category: drop
   aa_model_id: 5e4e4590-a77e-4b66-95f8-f3960a1a7c68
   aa_score: 4.1
   coding_score: 4.1
@@ -212,7 +206,6 @@ drop_llm:
 - model_id: mistral-medium-3-5
   decision: drop
   tier: drop
-  category: drop
   aa_model_id: dd059b25-d82a-4ead-82a4-4adceaaec48b
   aa_score: 30.4
   coding_score: 30.4
@@ -243,7 +236,6 @@ drop_llm:
 - model_id: qwen3.8-27b
   decision: drop
   tier: drop
-  category: drop
   aa_model_id: null
   aa_score: null
   coding_score: 61.7
@@ -266,10 +258,9 @@ drop_llm:
   evidence:
   - specialized_model:vision
   coding_assessment: null
-- model_id: stepfun-3.7-flash
+- model_id: step-3.7-flash
   decision: drop
   tier: drop
-  category: drop
   aa_model_id: null
   aa_score: null
   coding_score: null

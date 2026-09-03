@@ -7,6 +7,19 @@ import yaml
 
 from .evidence_utils import clean_evidence
 
+def _normalize_tier(tier: str | None) -> str | None:
+    if tier == "contributor_special":
+        return "contributor_free"
+    return tier
+
+def _normalize_model_id(model_id: str) -> str:
+    if model_id.startswith("stepfun-"):
+        return "step-" + model_id[len("stepfun-"):]
+    if model_id.startswith("stepfun/"):
+        return "step/" + model_id[len("stepfun/"):]
+    return model_id
+
+
 
 def save_result(
     result: dict[str, Any],
@@ -31,13 +44,12 @@ def save_result(
 
 
 # Exact, ordered schema for the user-editable keep-list YAML (T2, issue #3).
-# tier + category mirror each other (category = spec wording, tier = internal). Both written for spec compliance.
+# Single tier field (merged from tier+category). Reads fallback to category for backward compat.
 YAML_SCHEMA_KEYS = [
     "provider",
     "model_id",
     "decision",
     "tier",
-    "category",
     "aa_model_id",
     "aa_score",
     "confidence",
@@ -81,10 +93,9 @@ class SingleModelWriter:
 
         payload = {
             "provider": provider,
-            "model_id": record["provider_model_id"],
+            "model_id": _normalize_model_id(record["provider_model_id"]),
             "decision": record["decision"],
-            "tier": record.get("tier", record.get("category")),
-            "category": record.get("category", record.get("tier")),
+            "tier": _normalize_tier(record.get("tier", record.get("category"))),
             "aa_model_id": record.get("aa_model_id"),
             "aa_score": record.get("aa_score"),
             "confidence": record["confidence"],
@@ -124,10 +135,9 @@ class ProviderBatchWriter:
         else:
             benchmarks = raw_benchmarks
         projected: dict[str, Any] = {
-            "model_id": rec["provider_model_id"],
+            "model_id": _normalize_model_id(rec["provider_model_id"]),
             "decision": rec["decision"],
-            "tier": rec.get("tier", rec.get("category")),
-            "category": rec.get("category", rec.get("tier")),
+            "tier": _normalize_tier(rec.get("tier", rec.get("category"))),
             "aa_model_id": rec.get("aa_model_id"),
             "aa_score": rec.get("aa_score"),
             "coding_score": rec.get("coding_score"),

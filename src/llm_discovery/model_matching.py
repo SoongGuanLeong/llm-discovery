@@ -181,6 +181,7 @@ class ModelNormalizer:
         "laguna-xs": "laguna",
         "nemotron-3": "nemo-3",
         "nemotron-4": "nemo-4",
+        "stepfun": "step",
     }
 
     # Parameter size patterns (e.g., 550b, 120b, 7b, 30b, etc.)

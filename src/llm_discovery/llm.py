@@ -67,6 +67,12 @@ Hard requirements:
 - evidence must contain at most 2 short items
 - each evidence item must be one short sentence
 - keep the final JSON response under 200 tokens
+- evidence_level calibration (use same scale as deterministic pipeline):
+  - strong: AA Intelligence >= 55 alone, or AA >= 45 plus at least one coding benchmark (SWE-bench Verified >= 40, Terminal-Bench >= 50, LiveCodeBench, HumanEval), or coding_score >= 45, or 2+ positive coding benchmarks
+  - moderate: AA >= 24 alone, or any single coding benchmark >= 30, or provider claim with supporting AA/coding signal
+  - weak: claim only, no AA, no benchmark >= 30
+  - none: no evidence at all
+  Prefer strong when AA + coding benchmark both present; prefer moderate when only AA or only one benchmark present
 
 You have access to this tool:
 

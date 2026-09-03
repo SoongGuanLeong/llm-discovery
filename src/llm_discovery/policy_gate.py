@@ -163,6 +163,21 @@ class PolicyGate:
                 f"Evidence level promoted {orig_level}→{final_level} via deterministic signals (aa={verified_score}, coding_score={coding_score})"
             )
 
+        # --- Triangulation guard for no-AA / claim-only moderate without source URL (issue #39) ---
+        # Never demote LLM strong; only demote unverified claim-only moderate -> weak to prevent hallucination.
+        if evaluation.get("evidence_level") == "moderate" and det_level == "weak":
+            # No AA and no benchmark scores means deterministic weak; verify URL exists
+            if verified_score is None and not (profile.scores if profile else {}):
+                has_url = any("http" in str(e) for e in evaluation.get("evidence", []))
+                if not has_url:
+                    # Only demote if LLM claimed moderate without verification
+                    if orig_level == "moderate":
+                        print(f"  [evaluate] {model_id}: TRIANGULATION GUARD moderate -> weak (no source URL for claim-only, aa=None, no benchmarks)")
+                        evaluation["evidence_level"] = "weak"
+                        evaluation.setdefault("evidence", []).append(
+                            "Unverified claim-only moderate without source URL demoted to weak (triangulation requires first-party URL)"
+                        )
+
         # Pricing from AA model (blended $/1M)
         pricing_blended = None
         if aa_model is not None:
@@ -233,7 +248,7 @@ class PolicyGate:
         print(
             f"  [evaluate] {model_id}: {evaluation['decision'].upper()} {tier} "
             f"(coding={llm_result.coding}, coding_score={coding_score}, "
-            f"aa_score={verified_score}, evidence_level={llm_result.evidence_level})"
+            f"aa_score={verified_score}, evidence_level={evaluation.get('evidence_level')})"
         )
         return evaluation
 

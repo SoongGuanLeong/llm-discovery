@@ -47,32 +47,33 @@ Hard requirements:
 - without a verified AA score, keep is allowed only when strong,
   model-specific coding evidence justifies the decision
 - provider-native or proprietary general-purpose models or systems may be kept
-  without an AA score when reliable first-party documentation establishes
-  coding or agentic coding capability
+  without an AA score ONLY when ALL hold: (1) provider-native (provider organisation matches model creator, not a third-party re-host), (2) first-party URL domain matches provider (e.g., openai.com, mistral.ai, seed.bytedance.com, bytedance.com), (3) doc snippet explicitly mentions coding, code generation, software engineering, or programming and lists >=2 programming languages or states agentic coding, (4) evidence includes the source URL as (source: <url>). No URL -> unverified -> exception does not apply; do not hallucinate URL
 - an agentic system may use documented underlying models as supporting evidence,
   but must never inherit or claim their AA score
 - this provider-native exception does not apply to compound systems,
-  tool wrappers, safety models, speech/audio models, or other specialized models
+  tool wrappers, safety models, speech/audio models, embedding, vision, reranker, or other specialized models
 - models explicitly labeled mini, small, lite, nano, or similar variants should
   be dropped unless they have a verified AA score meeting the minimum threshold
-  and reliable coding evidence
+  and reliable coding evidence; provider claim alone never lifts mini/small/lite/nano to moderate
 - tool use, code execution, or general reasoning alone is not sufficient
   evidence of coding capability
+- triangulation: for no-AA / claim-only models, verify via web search before lifting above weak; unverified claim stays weak
 - the Python pipeline will verify any AA model ID and score against
   its local Artificial Analysis catalog
-- use search_web when necessary
-- perform at most 2 web searches
+- use search_web when necessary for no-AA / claim-only models
+- perform at most 2 web searches. Use queries in order: (1) "{model_id} model card coding programming languages" (add site:<provider-domain> when known), (2) "{model_id} coding benchmark HumanEval SWE-bench LiveCodeBench"
+- record every source URL in evidence as (source: <url>) and, if a numeric benchmark is found, also in raw_benchmarks with the same URL; claim-only (no number) goes only in evidence, never invent URL
 - after gathering enough evidence, make a final keep/drop decision
 - when evidence is insufficient, choose "drop"
 - evidence must contain at most 2 short items
 - each evidence item must be one short sentence
 - keep the final JSON response under 200 tokens
 - evidence_level calibration (use same scale as deterministic pipeline):
-  - strong: AA Intelligence >= 55 alone, or AA >= 45 plus at least one coding benchmark (SWE-bench Verified >= 40, Terminal-Bench >= 50, LiveCodeBench, HumanEval), or coding_score >= 45, or 2+ positive coding benchmarks
-  - moderate: AA >= 24 alone, or any single coding benchmark >= 30, or provider claim with supporting AA/coding signal
-  - weak: claim only, no AA, no benchmark >= 30
+  - strong: AA Intelligence >= 55 alone, or AA >= 45 plus at least one coding benchmark (SWE-bench Verified >= 40, Terminal-Bench >= 50, LiveCodeBench, HumanEval), or coding_score >= 45, or 2+ positive coding benchmarks, or any coding benchmark >= 50
+  - moderate: AA >= 24 alone, or any single coding benchmark >= 30, or provider claim verified via first-party URL with >=2 programming languages listed (source: <url> required) — unverified claim stays weak; mini/small/lite/nano never moderate via claim alone
+  - weak: claim only, no AA, no benchmark >= 30, or unverified claim without source URL
   - none: no evidence at all
-  Prefer strong when AA + coding benchmark both present; prefer moderate when only AA or only one benchmark present
+  Prefer strong when AA + coding benchmark both present; prefer moderate when only AA or only one benchmark present. Claim-only never reaches strong without a benchmark number
 
 You have access to this tool:
 

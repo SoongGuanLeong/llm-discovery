@@ -7,6 +7,7 @@ applied.
 Bands (locked by T1, issue #1):
     max     = strategic reserve (better quality + performance token)
     flash   = cost effective general coding
+    contributor_special = contributor models (models with 'contributor' in name)
     drop    = not coding OR critical weakness OR strong negative evidence
     uncertain = insufficient evidence to determine quality
     error   = judge evaluation failed (NOT a real drop — needs retry/review)
@@ -51,7 +52,7 @@ def categorize_model(
     pricing: Optional[float] = None,
     pricing_blended: Optional[float] = None,
 ) -> str:
-    """Return 'max' | 'flash' | 'drop' | 'uncertain' | 'error' per T1 bands.
+    """Return 'max' | 'flash' | 'contributor_special' | 'drop' | 'uncertain' | 'error' per T1 bands.
 
     When *judge_decision* is "error" the model is surfaced as "error"
     so it can be retried or reviewed -- it is **not** silently dropped.
@@ -66,6 +67,10 @@ def categorize_model(
         return "error"
     if not coding:
         return "drop"
+    
+    # Contributor special tier: models with 'contributor' in name
+    if model_id and "contributor" in model_id.lower():
+        return "contributor_special"
     
     if has_critical_weakness:
         return "drop"

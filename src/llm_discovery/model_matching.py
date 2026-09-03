@@ -32,10 +32,19 @@ def normalize_model_id(value: str) -> str:
     # Other providers (llama, minimax) keep their family prefix; only nvidia AA uses provider hyphen
     if value.startswith("nvidia-"):
         value = value[len("nvidia-"):]
-    value = value.replace(".", "-")
-    value = re.sub(r"[^a-z0-9]+", "-", value)
+    # Insert hyphen between letter and digit for multi-letter families (gemma4 -> gemma-4, not v2)
+    value = re.sub(r"([a-z]{2,})(\d)", r"\1-\2", value)
+    # Preserve dots inside version numbers: 2.5 -> zzzdotzzz -> restore after
+    value = re.sub(r"(\d)\.(\d)", r"\1zzzdotzzz\2", value)
+    value = re.sub(r"[^a-z0-9.]+", "-", value)
+    value = value.replace("zzzdotzzz", ".")
+    # Convert stray dots (not between digits) to hyphen - keep 2.5 dots only
+    value = re.sub(r"(?<!\d)\.", "-", value)
+    value = re.sub(r"\.(?!\d)", "-", value)
     value = re.sub(r"-+", "-", value)
-    return value.strip("-")
+    value = re.sub(r"-\.", ".", value)
+    value = re.sub(r"\.-", ".", value)
+    return value.strip("-.")
 
 
 # Backward compatibility alias
@@ -124,7 +133,7 @@ class ModelNormalizer:
     # Match number + 'b' at word boundary or end, but not 'a12b' style
     PARAM_PATTERN = re.compile(r"(\d+(?:\.\d+)?[bB])(?:[^a-z0-9]|$)")
     # Version pattern: major.minor.patch optionally with suffix, but not including variants like 'ultra'
-    VERSION_PATTERN = re.compile(r"(\d+(?:\.\d+)+(?:-\w+)?)(?![a-z])")
+    VERSION_PATTERN = re.compile(r"(\d+(?:[\.\-]\d+)+(?:-\w+)?)(?![a-z])")
 
     @classmethod
     def normalize(cls, model_id: str) -> str:
@@ -238,7 +247,7 @@ class SimilarityScorer:
 
     def _tokenize(self, name: str) -> set[str]:
         """Split into meaningful tokens."""
-        return set(t for t in re.split(r"[-_\s]+", name.lower()) if t)
+        return set(t for t in re.split(r"[-_\.\s]+", name.lower()) if t)
 
     def _token_overlap(self, a: str, b: str) -> float:
         """Jaccard similarity of tokens."""
@@ -253,14 +262,19 @@ class SimilarityScorer:
         return SequenceMatcher(None, a, b).ratio()
 
     def _version_compatible(self, v1: str, v2: str) -> float:
-        """Check if versions are compatible (e.g., 3.7.0 vs 3.7)."""
+        """Check if versions are compatible (e.g., 3.7.0 vs 3.7, 2.5 vs 2-5)."""
         if not v1 or not v2:
             return 0.0
+        # Normalize hyphen and dot interchangeably for versions
+        v1n = v1.replace("-", ".")
+        v2n = v2.replace("-", ".")
+        if v1n == v2n:
+            return 1.0
         if v1 == v2:
             return 1.0
         # Check major.minor compatibility
-        parts1 = v1.split(".")
-        parts2 = v2.split(".")
+        parts1 = v1n.split(".")
+        parts2 = v2n.split(".")
         if len(parts1) >= 2 and len(parts2) >= 2:
             if parts1[0] == parts2[0] and parts1[1] == parts2[1]:
                 return 0.8
@@ -328,8 +342,8 @@ class ModelMatcher:
     """Match provider models to catalog models with confidence scoring."""
 
     # Confidence thresholds
-    HIGH_CONFIDENCE = 0.90
-    MEDIUM_CONFIDENCE = 0.70
+    HIGH_CONFIDENCE = 0.75
+    MEDIUM_CONFIDENCE = 0.50
     LOW_CONFIDENCE = 0.50
 
     def __init__(
@@ -436,23 +450,91 @@ class ModelMatcher:
                 method="unresolved",
             )
         provider_slug = provider_model_id.rsplit("/", 1)[-1]
-        exact = [m for m in self.aa_catalog.models if m.get("slug") == provider_slug]
-        if len(exact) == 1:
-            return ModelResolution(
-                provider_model_id=provider_model_id,
-                aa_model=exact[0],
-                method="exact_slug",
-            )
-        normalized = _normalize(provider_model_id)
-        candidates = [
-            m for m in self.aa_catalog.models if _normalize(m.get("slug", "")) == normalized
-        ]
-        if len(candidates) == 1:
-            return ModelResolution(
-                provider_model_id=provider_model_id,
-                aa_model=candidates[0],
-                method="normalized_slug",
-            )
+        # Strip date/release suffix like :0731, -0731, _0731 (4 digits) for base match
+        base_slug = re.sub(r"[:/_-]\d{4}$", "", provider_slug)
+        # DeepSeek: plain is old (0420), :0731 is new (0731)
+        if provider_slug == "deepseek-v4-flash" and ":0731" not in provider_model_id and "0731" not in provider_slug:
+            hit = [m for m in self.aa_catalog.models if m.get("slug") == "deepseek-v4-flash-0420"]
+            if hit:
+                return ModelResolution(provider_model_id=provider_model_id, aa_model=hit[0], method="alias_deepseek-old")
+        if "0731" in provider_model_id or provider_slug == "deepseek-v4-flash-0731":
+            hit = [m for m in self.aa_catalog.models if m.get("slug") == "deepseek-v4-flash"]
+            if hit:
+                return ModelResolution(provider_model_id=provider_model_id, aa_model=hit[0], method="alias_deepseek-new")
+        alias_map = {
+            "mimo-v2.5": "mimo-v2-5-0424",
+            "mimo-v2-5": "mimo-v2-5-0424",
+            "claude-haiku-4-5": "claude-4-5-haiku",
+            "claude-haiku-4.5": "claude-4-5-haiku",
+            "gemini-3.8-flash-high": "gemini-3-7-flash",
+        }
+        for k, v in alias_map.items():
+            if provider_slug.lower() == k.lower() or base_slug.lower() == k.lower():
+                hit = [m for m in self.aa_catalog.models if m.get("slug") == v]
+                if hit:
+                    return ModelResolution(provider_model_id=provider_model_id, aa_model=hit[0], method="alias_"+v)
+        # Try exact on base and original
+        for slug in (provider_slug, base_slug):
+            exact = [m for m in self.aa_catalog.models if m.get("slug") == slug]
+            if len(exact) == 1:
+                return ModelResolution(
+                    provider_model_id=provider_model_id,
+                    aa_model=exact[0],
+                    method="exact_slug",
+                )
+        # Normalized match (dot-preserving)
+        for raw in (provider_model_id, provider_model_id.rsplit("/",1)[-1], base_slug):
+            normalized = _normalize(raw)
+            candidates = [
+                m for m in self.aa_catalog.models if _normalize(m.get("slug", "")) == normalized
+            ]
+            if len(candidates) == 1:
+                return ModelResolution(
+                    provider_model_id=provider_model_id,
+                    aa_model=candidates[0],
+                    method="normalized_slug",
+                )
+            # Also try dot<->hyphen variant for version (2.5 vs 2-5) - generic typo correction
+            # Expensive wordings only: pro/ultra/etc handled in categorize, here just version typo
+            # Obvious typo: 4-5 should be 4.5 -> try hyphen->dot for version segments
+            alts = {normalized}
+            alts.add(normalized.replace(".", "-"))  # dot -> hyphen (2.5 -> 2-5)
+            alts.add(re.sub(r"(\d)-(\d)", r"\1.\2", normalized))  # hyphen -> dot typo fix (4-5 -> 4.5)
+            alts.add(re.sub(r"(\d)\.(\d)", r"\1-\2", normalized))  # dot -> hyphen typo
+            for alt in alts:
+                candidates2 = [
+                    m for m in self.aa_catalog.models if _normalize(m.get("slug", "")) == alt
+                ]
+                if len(candidates2) == 1:
+                    return ModelResolution(
+                        provider_model_id=provider_model_id,
+                        aa_model=candidates2[0],
+                        method="normalized_slug_alt",
+                    )
+        # Fallback: similarity scorer (ModelNormalizer + SequenceMatcher)
+        try:
+            candidates_scored = self.find_candidates(provider_model_id, max_candidates=5, min_score=0.50)
+            if candidates_scored and candidates_scored[0].confidence >= self.HIGH_CONFIDENCE:
+                best = candidates_scored[0]
+                aa_model = next((m for m in self.aa_catalog.models if m.get("id") == best.catalog_model_id or m.get("slug") == best.catalog_slug), None)
+                if aa_model:
+                    return ModelResolution(
+                        provider_model_id=provider_model_id,
+                        aa_model=aa_model,
+                        method=f"similarity_{best.confidence:.2f}",
+                    )
+            if candidates_scored and candidates_scored[0].confidence >= self.MEDIUM_CONFIDENCE:
+                if len(candidates_scored) == 1 or (candidates_scored[0].confidence - candidates_scored[1].confidence) > 0.15:
+                    best = candidates_scored[0]
+                    aa_model = next((m for m in self.aa_catalog.models if m.get("id") == best.catalog_model_id or m.get("slug") == best.catalog_slug), None)
+                    if aa_model:
+                        return ModelResolution(
+                            provider_model_id=provider_model_id,
+                            aa_model=aa_model,
+                            method=f"similarity_med_{best.confidence:.2f}",
+                        )
+        except Exception:
+            pass
         return ModelResolution(
             provider_model_id=provider_model_id,
             aa_model=None,

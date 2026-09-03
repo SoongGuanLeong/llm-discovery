@@ -131,6 +131,7 @@ class ProviderBatchWriter:
             "aa_model_id": rec.get("aa_model_id"),
             "aa_score": rec.get("aa_score"),
             "coding_score": rec.get("coding_score"),
+            "pricing": rec.get("pricing"),
             "benchmarks": benchmarks,
             "confidence": rec["confidence"],
             "evidence_level": rec.get("evidence_level"),

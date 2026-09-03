@@ -252,11 +252,14 @@ class BenchmarkDataCache:
         norm_slug = _normalize_model_key(provider_slug)
         if not norm_slug:
             return None
+        # Build alternates for version-dot typo (4-5 vs 4.5) and dot↔hyphen
+        alts = {norm_slug, norm_slug.replace(".", "-"), re.sub(r"(\\d)-(\\d)", r"\\1.\\2", norm_slug)}
         for key, entry in self._data.items():
             norm_key = _normalize_model_key(key)
             if not norm_key:
                 continue
-            if norm_slug == norm_key:
+            key_alts = {norm_key, norm_key.replace(".", "-"), re.sub(r"(\\d)-(\\d)", r"\\1.\\2", norm_key)}
+            if alts & key_alts:
                 return entry["benchmarks"]
 
         return None
@@ -273,11 +276,13 @@ class BenchmarkDataCache:
         norm_slug = _normalize_model_key(provider_slug)
         if not norm_slug:
             return []
+        alts = {norm_slug, norm_slug.replace(".", "-"), re.sub(r"(\\d)-(\\d)", r"\\1.\\2", norm_slug)}
         for key, entry in self._data.items():
             norm_key = _normalize_model_key(key)
             if not norm_key:
                 continue
-            if norm_slug == norm_key:
+            key_alts = {norm_key, norm_key.replace(".", "-"), re.sub(r"(\\d)-(\\d)", r"\\1.\\2", norm_key)}
+            if alts & key_alts:
                 return entry.get("raw_benchmarks", [])
 
         return []
@@ -350,7 +355,7 @@ class BenchmarkDataCache:
 
 
 def _normalize_model_key(name: str) -> str:
-    """Normalize a model name to a key for matching."""
+    """Normalize a model name to a key for matching. Preserves version dots (2.5 stays 2.5)."""
     name = name.lower().strip()
     # Remove provider prefix (everything before last /)
     name = re.sub(r"^.+?/", "", name)
@@ -362,6 +367,8 @@ def _normalize_model_key(name: str) -> str:
     # Remove version suffixes
     name = re.sub(r":(free|paid|beta|rc\d*)$", "", name)
     name = re.sub(r"-(preview|beta|rc\d+)$", "", name)
+    # Strip date suffix like :0731 / -0731
+    name = re.sub(r"[:/_-]\d{4}$", "", name)
     # Remove parenthetical content
     name = re.sub(r"\s*\(.*?\)\s*", "", name)
     # Handle common naming variations
@@ -369,15 +376,23 @@ def _normalize_model_key(name: str) -> str:
     name = name.replace("nemotron", "nemo")
     name = name.replace("laguna-s", "laguna")
     name = name.replace("laguna-xs", "laguna")
-    # Normalize dots to hyphens for version numbers (3.5 -> 3-5) to match slugs
-    name = name.replace(".", "-")
+    # Insert hyphen between letter and digit (gemma4 -> gemma-4)
+    name = re.sub(r"([a-z]{2,})(\d)", r"\1-\2", name)
+    # Preserve dots inside versions: 2.5 -> zzzdotzzz -> restore
+    name = re.sub(r"(\d)\.(\d)", r"\1zzzdotzzz\2", name)
     # Replace whitespace with hyphens
     name = re.sub(r"\s+", "-", name)
-    # Remove non-alphanumeric (keep hyphens)
-    name = re.sub(r"[^a-z0-9-]", "", name)
-    # Collapse multiple hyphens
+    # Remove non-alphanumeric (keep hyphens and dots)
+    name = re.sub(r"[^a-z0-9-.]+", "-", name)
+    name = name.replace("zzzdotzzz", ".")
+    # Convert stray dots (not between digits) to hyphen
+    name = re.sub(r"(?<!\d)\.", "-", name)
+    name = re.sub(r"\.(?!\d)", "-", name)
+    # Collapse multiple hyphens, clean dot-hyphen
     name = re.sub(r"-+", "-", name)
-    return name.strip("-")
+    name = re.sub(r"-\.", ".", name)
+    name = re.sub(r"\.-", ".", name)
+    return name.strip("-.")
 
 
 def build_benchmark_profile(provider_model_id, provider_name, cache=None):

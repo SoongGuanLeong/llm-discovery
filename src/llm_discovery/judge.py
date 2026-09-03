@@ -42,11 +42,13 @@ class Judge:
         self._last_benchmarks = benchmarks_dict
         # AA match comes from evidence_packet (already resolved deterministically)
         aa_match = packet.aa_match if packet and packet.aa_match is not None else {"matched": False, "model_id": None, "score": None}
+        pricing = getattr(packet, "pricing", None) if packet else None
         request = ModelEvaluationRequest(
             provider=provider_name,
             model_id=model_id,
             provider_metadata=model,
             aa_match=aa_match,
             benchmarks=benchmarks_dict,
+            pricing=pricing,
         )
         return self.evaluator.evaluate(request, packet)

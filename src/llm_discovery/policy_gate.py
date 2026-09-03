@@ -92,6 +92,8 @@ class PolicyGate:
             aa_slug = None
             verified_score = None
 
+        # Pricing for report
+        pricing = aa_model.get("pricing") if aa_model else None
         evaluation: dict[str, Any] = {
             "provider_model_id": model_id,
             "source": "llm",
@@ -102,6 +104,7 @@ class PolicyGate:
             "aa_slug": aa_slug,
             "aa_score": verified_score,
             "coding_score": coding_score,
+            "pricing": pricing,
             "benchmarks": benchmarks_dict,
             "confidence": llm_result.confidence,
             "decision": llm_result.decision,
@@ -145,6 +148,26 @@ class PolicyGate:
                 f"Deterministic override: {deterministic_coding_reason}"
             ]
 
+        # --- Hybrid deterministic evidence_level override (issue #35) ---
+        # LLM is primary, but deterministic signals promote weak/moderate -> strong/moderate
+        # when benchmarks/AA justify it. Never demote LLM strong.
+        orig_level = evaluation.get("evidence_level")
+        det_level = self._deterministic_evidence_level(
+            verified_score, coding_score, profile
+        )
+        final_level = self._max_evidence_level(orig_level, det_level)
+        if final_level != orig_level:
+            print(f"  [evaluate] {model_id}: EVIDENCE_LEVEL PROMOTE {orig_level} -> {final_level} (deterministic: aa={verified_score}, coding_score={coding_score}, coverage={profile.benchmark_coverage():.2f}/{profile.coverage_with_supplements():.2f})" )
+            evaluation["evidence_level"] = final_level
+            evaluation.setdefault("evidence", []).append(
+                f"Evidence level promoted {orig_level}→{final_level} via deterministic signals (aa={verified_score}, coding_score={coding_score})"
+            )
+
+        # Pricing from AA model (blended $/1M)
+        pricing_blended = None
+        if aa_model is not None:
+            pricing_blended = aa_model.get("pricing", {}).get("price_1m_blended_3_to_1")
+            # Treat 0 as free (already handled in categorize)
         tier = categorize_model(
             coding=deterministic_coding,
             aa_score=verified_score,
@@ -154,8 +177,17 @@ class PolicyGate:
             model_id=model_id,
             coding_score=coding_score if profile.scores else None,
             has_critical_weakness=has_weakness,
+            pricing_blended=pricing_blended,
         )
         evaluation["tier"] = tier
+        # Include pricing influence in evidence for report
+        if pricing_blended is not None:
+            # Intelligence per dollar for report visibility
+            intel = coding_score if coding_score is not None else (verified_score * 100/63 if verified_score else 0)
+            denom = pricing_blended if pricing_blended > 0 else 0.05
+            denom = denom + 0.05
+            value = intel / denom if intel else 0
+            evaluation.setdefault("evidence", []).append(f"Pricing blended ${pricing_blended:.2f}/1M, intelligence per dollar {value:.1f} influenced tier={tier}")
 
         # --- Router override: always keep + flash regardless of coding/tier ---
         if _is_router_model(model_id):
@@ -204,6 +236,56 @@ class PolicyGate:
             f"aa_score={verified_score}, evidence_level={llm_result.evidence_level})"
         )
         return evaluation
+
+    @staticmethod
+    def _deterministic_evidence_level(verified_score, coding_score, profile) -> str:
+        """Compute deterministic evidence level from AA + coding_score + coverage.
+
+        Hybrid promotion: LLM weak/moderate promoted when deterministic signals justify.
+        Never demotes LLM strong. Thresholds align with categorize min 24 / max 45.
+        """
+        # Strong: frontier AA alone (>=55) or AA+benchmark combo or high coding_score
+        if coding_score is not None and coding_score >= 45:
+            return "strong"
+        if verified_score is not None and verified_score >= 55:
+            return "strong"
+        if profile is not None:
+            bc = profile.benchmark_coverage()
+            cs = profile.coverage_with_supplements()
+            scores = profile.scores or {}
+            if verified_score is not None and verified_score >= 45 and bc >= 0.25:
+                return "strong"
+            if verified_score is not None and verified_score >= 50 and cs >= 0.08:
+                return "strong"
+            # SWE/Terminal direct thresholds
+            for key in ("swe_bench_verified", "terminal_bench", "terminal_bench_2_1", "swe_bench_pro"):
+                val = scores.get(key)
+                sc = val.get("score") if isinstance(val, dict) else getattr(val, "score", None)
+                if sc is not None and sc >= 50:
+                    return "strong"
+            # Moderate: AA in flash band or meaningful coding signal
+            if verified_score is not None and verified_score >= 24:
+                return "moderate"
+            if coding_score is not None and coding_score >= 20:
+                return "moderate"
+            # Any positive supplement with reasonable score (>=30) counts as moderate
+            # Avoid promoting low aider 11.1 -> weak
+            for key, val in scores.items():
+                sc = val.get("score") if isinstance(val, dict) else getattr(val, "score", None)
+                if sc is not None and sc >= 30:
+                    return "moderate"
+        else:
+            if verified_score is not None and verified_score >= 24:
+                return "moderate"
+        return "weak"
+
+    @staticmethod
+    def _max_evidence_level(a: str | None, b: str | None) -> str:
+        order = {"none": 0, "weak": 1, "moderate": 2, "strong": 3}
+        # normalize None -> weak
+        a = a or "weak"
+        b = b or "weak"
+        return a if order.get(a, 1) >= order.get(b, 1) else b
 
     def error_record(
         self, model_id: str, exc: Exception, provider_name: str, profile: Any = None

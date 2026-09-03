@@ -507,8 +507,8 @@ class TestParseArgs:
 class TestResolver:
     def test_normalize(self):
         assert normalize_model_id("groq/mix") == "mix"
-        assert normalize_model_id("Meta.Llama-3.3 70B") == "meta-llama-3-3-70b"
-        assert normalize_model_id("Llama---3.3") == "llama-3-3"
+        assert normalize_model_id("Meta.Llama-3.3 70B") == "meta-llama-3.3-70b"
+        assert normalize_model_id("Llama---3.3") == "llama-3.3"
 
     def test_exact_slug_match(self, aa_catalog):
         res = resolve_model("llama-3.3-70b-versatile", aa_catalog)

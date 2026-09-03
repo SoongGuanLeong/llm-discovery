@@ -49,6 +49,7 @@ class EvidencePacket:
 
     # Derived
     aa_match: dict[str, Any] | None = None
+    pricing: dict[str, Any] | None = None  # blended/input/output per 1M from AA
 
     def get_evidence_by_category(self, category: EvidenceCategory) -> list[BenchmarkEvidence]:
         return [e for e in self.benchmarks if e.category == category]
@@ -71,6 +72,7 @@ class EvidencePacket:
             "provider_claims": [c.claim for c in self.provider_claims],
             "deterministic_flags": self.deterministic_flags,
             "artificial_analysis": self.aa_match,
+            "pricing": self.pricing,
         }
 
     def has_strong_evidence(self) -> bool:

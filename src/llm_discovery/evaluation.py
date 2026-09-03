@@ -10,6 +10,7 @@ class ModelEvaluationRequest(BaseModel):
     # Deterministic AA match - LLM does NOT invent aa_model_id
     aa_match: dict[str, Any] | None = None
     benchmarks: dict[str, Any] | None = None
+    pricing: dict[str, Any] | None = None  # blended/input/output pricing from AA
 
 
 class CodingAssessment(BaseModel):

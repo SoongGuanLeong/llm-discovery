@@ -148,7 +148,16 @@ class EvidenceCollector:
                 "name": aa_model.get("name"),
                 "score": aa_model.get("evaluations", {}).get("artificial_analysis_intelligence_index"),
             }
+            # Pricing from AA (blended/input/output) for tier and LLM reasoning
+            pricing = aa_model.get("pricing")
+            if pricing:
+                packet.pricing = {
+                    "price_1m_blended_3_to_1": pricing.get("price_1m_blended_3_to_1"),
+                    "price_1m_input_tokens": pricing.get("price_1m_input_tokens"),
+                    "price_1m_output_tokens": pricing.get("price_1m_output_tokens"),
+                }
         else:
             packet.aa_match = {"matched": False, "model_id": None, "score": None}
+            packet.pricing = None
 
         return packet

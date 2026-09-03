@@ -35,6 +35,7 @@ Hard requirements:
   when an AA score is available
 - other coding benchmarks such as HumanEval, SWE-bench, LiveCodeBench,
   Terminal-Bench, and Codeforces are supporting evidence only
+- pricing (blended $ per 1M tokens from Artificial Analysis) is provided when available and influences flash vs max: cheap high-quality models favor flash (intelligence per dollar)
 - never convert another benchmark's score into an Artificial Analysis score
 - a parent-model AA score may be used only as an inferred reference when
   the provider model is clearly derived from that parent and coding evidence
@@ -284,6 +285,7 @@ class LocalLLMEvaluator:
             "provider_metadata": request.provider_metadata,
             "artificial_analysis": request.aa_match,
             "benchmarks": request.benchmarks,
+            "pricing": getattr(request, "pricing", None),
             "evidence": evidence_summary,
             "minimum_aa_intelligence_index": self.min_score,
         }

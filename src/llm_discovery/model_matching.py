@@ -44,22 +44,53 @@ def normalize_model_id(value: str) -> str:
     value = re.sub(r"-+", "-", value)
     value = re.sub(r"-\.", ".", value)
     value = re.sub(r"\.-", ".", value)
-    value = value.strip("-.")
-    # Option A: systematic dash -> dot for known anthropic versioned families
-    # Only correct when dotted version is known-good, preserving intentional hyphens like 4-8 -> not 4.8
-    _ANTHROPIC_PREFIXES = ("claude-haiku-", "claude-sonnet-", "claude-opus-", "claude-")
-    _KNOWN_DOT_VERSIONS = {"3.5", "3.7", "4.0", "4.1", "4.5", "4.6", "5.0", "5.1", "3.6"}
-    if any(value.startswith(p) for p in _ANTHROPIC_PREFIXES):
-        m = re.search(r"(\d)-(\d)(?=\b|-|$)", value)
-        if m:
-            dotted = f"{m.group(1)}.{m.group(2)}"
-            if dotted in _KNOWN_DOT_VERSIONS:
-                value = value.replace(f"{m.group(1)}-{m.group(2)}", dotted, 1)
-    return value
+    return value.strip("-.")
 
 
 # Backward compatibility alias
 _normalize = normalize_model_id
+
+
+def _generate_match_variants(normalized: str) -> list[tuple[str, float, str]]:
+    """Generate safe matching variants with confidence.
+    Keeps original untouched, generates alternatives:
+    - exact normalized (1.0)
+    - version-format hyphen<->dot (0.95)
+    - token reorder for claude families (0.90)
+    """
+    variants: list[tuple[str, float, str]] = []
+    seen: set[str] = set()
+    def add(v: str, conf: float, reason: str):
+        if v not in seen:
+            seen.add(v)
+            variants.append((v, conf, reason))
+    add(normalized, 1.0, "exact_normalized")
+    hyphen_to_dot = re.sub(r"(\d)-(\d)", r"\1.\2", normalized)
+    if hyphen_to_dot != normalized:
+        add(hyphen_to_dot, 0.95, "version_format_variant")
+    dot_to_hyphen = normalized.replace(".", "-")
+    if dot_to_hyphen != normalized and dot_to_hyphen != hyphen_to_dot:
+        add(dot_to_hyphen, 0.95, "version_format_variant")
+    m = re.match(r"^(claude-(?:haiku|sonnet|opus))-(.+)$", normalized)
+    if m:
+        family = m.group(1)
+        rest = m.group(2)
+        suffix = family.split("-", 1)[1]
+        reordered = f"claude-{rest}-{suffix}"
+        add(reordered, 0.90, "token_reorder")
+        reordered_dot = re.sub(r"(\d)-(\d)", r"\1.\2", reordered)
+        if reordered_dot != reordered:
+            add(reordered_dot, 0.90, "token_reorder+version_format")
+    m2 = re.match(r"^claude-((?:\d+[.-]\d+).*?)-(haiku|sonnet|opus)$", normalized)
+    if m2:
+        version_part = m2.group(1)
+        suffix = m2.group(2)
+        reordered2 = f"claude-{suffix}-{version_part}"
+        add(reordered2, 0.90, "token_reorder")
+        r2_dot = re.sub(r"(\d)-(\d)", r"\1.\2", reordered2)
+        if r2_dot != reordered2:
+            add(r2_dot, 0.90, "token_reorder+version_format")
+    return variants
 
 
 @dataclass(frozen=True)
@@ -505,22 +536,16 @@ class ModelMatcher:
                     aa_model=candidates[0],
                     method="normalized_slug",
                 )
-            # Also try dot<->hyphen variant for version (2.5 vs 2-5) - generic typo correction
-            # Expensive wordings only: pro/ultra/etc handled in categorize, here just version typo
-            # Obvious typo: 4-5 should be 4.5 -> try hyphen->dot for version segments
-            alts = {normalized}
-            alts.add(normalized.replace(".", "-"))  # dot -> hyphen (2.5 -> 2-5)
-            alts.add(re.sub(r"(\d)-(\d)", r"\1.\2", normalized))  # hyphen -> dot typo fix (4-5 -> 4.5)
-            alts.add(re.sub(r"(\d)\.(\d)", r"\1-\2", normalized))  # dot -> hyphen typo
-            for alt in alts:
+            # Generate safe variants with confidence (ideal design: keep original untouched)
+            for variant, conf, reason in _generate_match_variants(normalized):
                 candidates2 = [
-                    m for m in self.aa_catalog.models if _normalize(m.get("slug", "")) == alt
+                    m for m in self.aa_catalog.models if _normalize(m.get("slug", "")) == variant
                 ]
                 if len(candidates2) == 1:
                     return ModelResolution(
                         provider_model_id=provider_model_id,
                         aa_model=candidates2[0],
-                        method="normalized_slug_alt",
+                        method=f"normalized_variant_{reason}_{conf:.2f}",
                     )
         # Fallback: similarity scorer (ModelNormalizer + SequenceMatcher)
         try:

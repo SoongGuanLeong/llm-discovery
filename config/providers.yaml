@@ -58,6 +58,15 @@ providers:
   - name: mistral
     base_url: https://api.mistral.ai/v1
     secret: MISTRAL_API_KEY
+
+  - name: modelscope
+    base_url: https://api-inference.modelscope.cn/v1
+    secret: MODELSCOPE_API_KEY
+
+  - name: nararouter
+    base_url: https://router.bynara.id/v1
+    secret: NARAROUTER_API_KEY
+    discovery_strategy: nararouter
   
   - name: opencode_zen
     base_url: https://opencode.ai/zen/v1

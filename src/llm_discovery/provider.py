@@ -11,6 +11,7 @@ class ResolvedProvider:
     secret: str
     discovery: str = "openai"
     discovery_strategy: str | None = None
+    include_paid_gated_as_dropped: bool = False
 
 
 def resolve_provider(
@@ -24,6 +25,7 @@ def resolve_provider(
             secret=config.secret,
             discovery=config.discovery,
             discovery_strategy=config.discovery_strategy,
+            include_paid_gated_as_dropped=getattr(config, "include_paid_gated_as_dropped", False),
         )
 
     provider = catalog.get_provider(config.name)
@@ -48,4 +50,5 @@ def resolve_provider(
         secret=config.secret,
         discovery=config.discovery,
         discovery_strategy=config.discovery_strategy,
+        include_paid_gated_as_dropped=getattr(config, "include_paid_gated_as_dropped", False),
     )

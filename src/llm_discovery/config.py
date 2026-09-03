@@ -1,9 +1,11 @@
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 CONFIG_PATH = Path("config/providers.yaml")
+
+_ALLOWED_DISCOVERY_STRATEGIES = {None, "bazaarlink", "nararouter"}
 
 
 class ProviderConfig(BaseModel):
@@ -12,6 +14,18 @@ class ProviderConfig(BaseModel):
     secret: str
     discovery: str = "openai"
     discovery_strategy: str | None = None
+    # Optional variant for NaraRouter: if true, paid-gated-free ids are
+    # returned as dropped with reason "paid_gated_free" instead of excluded.
+    include_paid_gated_as_dropped: bool = False
+
+    @field_validator("discovery_strategy")
+    @classmethod
+    def _validate_strategy(cls, v: str | None) -> str | None:
+        if v not in _ALLOWED_DISCOVERY_STRATEGIES:
+            raise ValueError(
+                f"discovery_strategy must be one of {sorted(s for s in _ALLOWED_DISCOVERY_STRATEGIES if s is not None)} or omitted, got {v!r}"
+            )
+        return v
 
 
 class ArtificialAnalysisConfig(BaseModel):

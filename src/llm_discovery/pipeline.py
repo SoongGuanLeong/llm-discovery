@@ -220,15 +220,36 @@ def discover_single(
     if not api_key:
         raise RuntimeError(f"Missing API key environment variable: {provider.secret}")
     base_url = os.path.expandvars(provider.base_url)
-    if provider.discovery == "cloudflare":
+    # NaraRouter true-free filtering: branch before generic free rule
+    if provider.discovery_strategy == "nararouter":
+        from .discovery import discover_nararouter_models, get_nararouter_free_allowlist
+
+        include_as_dropped = bool(getattr(provider_config, "include_paid_gated_as_dropped", False) or getattr(provider, "include_paid_gated_as_dropped", False))
+        if include_as_dropped:
+            allowlist = get_nararouter_free_allowlist()
+            raw = discover_models(base_url, api_key)
+            eval_models = [m for m in raw if m["id"] in allowlist]
+            dropped_models = [m for m in raw if m["id"] not in allowlist]
+            for m in dropped_models:
+                m["_drop_reason"] = "paid_gated_free"
+            print(f"[{provider_name}] NaraRouter true-free filter (include_paid_gated_as_dropped): raw {len(raw)} -> true-free {len(eval_models)} dropped_paid_gated {len(dropped_models)}")
+        else:
+            eval_models = discover_nararouter_models(base_url, api_key)
+            dropped_models: list[dict[str, Any]] = []
+            # discover_nararouter_models already logs raw -> true-free
+    elif provider.discovery == "cloudflare":
         account_id = os.environ["CLOUDFLARE_ACCOUNT_ID"]
         models = discover_cloudflare_models(account_id, api_key)
+        eval_models, dropped_models = _split_by_free_rule(models)
+        if dropped_models:
+            print(f"[{provider_name}] Free-model filter: dropped {len(dropped_models)} non-free, keeping {len(eval_models)} free")
     else:
         models = discover_models(base_url, api_key)
-    # Free-model filter: applied FIRST, before any LLM evaluation
-    eval_models, dropped_models = _split_by_free_rule(models)
-    if dropped_models:
-        print(f"[{provider_name}] Free-model filter: dropped {len(dropped_models)} non-free, keeping {len(eval_models)} free")
+        eval_models, dropped_models = _split_by_free_rule(models)
+        if dropped_models:
+            print(f"[{provider_name}] Free-model filter: dropped {len(dropped_models)} non-free, keeping {len(eval_models)} free")
+    if not eval_models:
+        raise RuntimeError(f"No models to evaluate for {provider_name!r} after filtering (all {len(dropped_models)} dropped)")
     model = pick_tracer_model(eval_models, aa, config.artificial_analysis.min_score)
     searcher = make_searcher(
         brave_api_key=os.environ.get("BRAVE_API_KEY"),
@@ -287,21 +308,41 @@ def discover_provider(
         raise RuntimeError(f"Missing API key environment variable: {provider.secret}")
     base_url = os.path.expandvars(provider.base_url)
     try:
-        if provider.discovery == "cloudflare":
+        if provider.discovery_strategy == "nararouter":
+            from .discovery import discover_nararouter_models, get_nararouter_free_allowlist
+
+            include_as_dropped = bool(getattr(provider_config, "include_paid_gated_as_dropped", False) or getattr(provider, "include_paid_gated_as_dropped", False))
+            if include_as_dropped:
+                allowlist = get_nararouter_free_allowlist()
+                raw = discover_models(base_url, api_key)
+                eval_models = [m for m in raw if m["id"] in allowlist]
+                dropped_models = [m for m in raw if m["id"] not in allowlist]
+                for m in dropped_models:
+                    m["_drop_reason"] = "paid_gated_free"
+                print(f"[{provider_name}] NaraRouter true-free filter (include_paid_gated_as_dropped): raw {len(raw)} -> true-free {len(eval_models)} dropped_paid_gated {len(dropped_models)}")
+                # keep eval_models as filtered; dropped_models holds paid-gated for optional SKIP logging
+            else:
+                eval_models = discover_nararouter_models(base_url, api_key)
+                dropped_models: list[dict[str, Any]] = []
+            print(f"[{provider_name}] Discovered {len(eval_models)} true-free models (NaraRouter allowlist)")
+        elif provider.discovery == "cloudflare":
             account_id = os.environ["CLOUDFLARE_ACCOUNT_ID"]
             print(f"[{provider_name}] Discovering models via Cloudflare API...")
             models = discover_cloudflare_models(account_id, api_key)
+            print(f"[{provider_name}] Discovered {len(models)} models")
+            eval_models, dropped_models = _split_by_free_rule(models)
+            if dropped_models:
+                print(f"[{provider_name}] Free-model filter: dropped {len(dropped_models)} non-free, keeping {len(eval_models)} free")
         else:
             print(f"[{provider_name}] Discovering models from {base_url}/models ...")
             models = discover_models(base_url, api_key)
+            print(f"[{provider_name}] Discovered {len(models)} models")
+            eval_models, dropped_models = _split_by_free_rule(models)
+            if dropped_models:
+                print(f"[{provider_name}] Free-model filter: dropped {len(dropped_models)} non-free, keeping {len(eval_models)} free")
     except Exception as exc:  # noqa: BLE001 — provider-level failure
         print(f"[{provider_name}] Discovery failed: {exc}")
         return provider_error_result(provider_name, exc)
-    print(f"[{provider_name}] Discovered {len(models)} models")
-    # Free-model filter: applied FIRST — dropped models skip LLM and YAML
-    eval_models, dropped_models = _split_by_free_rule(models)
-    if dropped_models:
-        print(f"[{provider_name}] Free-model filter: dropped {len(dropped_models)} non-free, keeping {len(eval_models)} free")
     searcher = make_searcher(
         brave_api_key=os.environ.get("BRAVE_API_KEY"),
         disabled=os.environ.get("DISABLE_WEB_SEARCH") == "1",
@@ -352,10 +393,11 @@ def discover_provider(
                 result["drop"].append(evaluation)
             else:
                 result["error"].append(evaluation)
-    # Dropped non-free models are completely omitted: no LLM, no YAML
+    # Dropped models are completely omitted: no LLM, no YAML (generic) or paid-gated excluded (nararouter)
     if dropped_models:
         for m in dropped_models:
-            print(f"[{provider_name}] SKIP (free-model-rule) {m['id']}")
+            reason = m.get("_drop_reason", "free-model-rule" if provider.discovery_strategy != "nararouter" else "paid_gated_free")
+            print(f"[{provider_name}] SKIP ({reason}) {m['id']}")
     for bucket in result.values():
         bucket.sort(key=lambda r: r["provider_model_id"])
     print(f"[{provider_name}] Done: KEEP={len(result['keep'])} DROP={len(result['drop'])} ERROR={len(result['error'])}")

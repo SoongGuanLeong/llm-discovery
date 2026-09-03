@@ -44,8 +44,8 @@ Other vision-capable models in `modelscope.yaml` (e.g., `MusePublic/Qwen-Image-E
 | `Qwen/Qwen3.5-122B-A10B` (modelscope) | `models_dev:vision` (`alibaba/qwen3.5-122b-a10b`) | 72.0 | 32.8 / 45.7 | SWE Verified 72 | $1.10 | **YES — keep** | SWE 72 ≥50, aa_coding 45.7 ≥45, cheap |
 | `Qwen/Qwen3.8-27B` (modelscope) + `qwen3.8-27b` (nararouter) — same underlying model, 2 provider rows | `models_dev:vision` (`alibaba/qwen3.8-27b`) | 61.7 | 52 / 68.1 | SWE Pro 61.7 | $1.125 | **YES — keep** | Issue exemplar: coding_score 61.7 ≥35, aa_coding 68.1 ≥45, SWE Pro 61.7 ≥40, pricing $1.13 cheap (<2). Nararouter row was stored with `pricing: null` because YAML predates alias fix, but live AA is cheap. Null-pricing + strong score would also qualify per #53. |
 | `Qwen/Qwen3.8-Flash-Next` (modelscope) | `models_dev:vision` (`alibaba/qwen3.8-flash-next`) | 55.8* | 55.8 / 73.1 | — | $0.23 | **YES — keep** | AA 55.8 alone ≥55 frontier, aa_coding 73.1 ≥45, ultra-cheap $0.23. *coding_score == aa_intel (no SWE yet but AA coding confirms). |
-| `Qwen/Qwen3.5-35B-A3B` (modelscope) | `models_dev:vision` (`alibaba/qwen3.5-35b-a3b`) | 29.9 | 29.9 / — | — | $0.688 | **NO — stay dropped** | AA 29.9 <35, no SWE/Terminal, coding_score 29.9 <35 threshold. Cheap but insufficient coding evidence. True vision-not-coding case among flagged set. |
-| `Qwen/Qwen3-VL-235B-A22B-Instruct` (modelscope) | `models_dev:vision` (`alibaba/qwen3-vl-235b-a22b-instruct`) | 14.4 | 14.4 / — | — | $0.70 | **NO — stay dropped** | AA 14.4 <<24, no coding benchmark. VL-only, not coding-capable. |
+| `Qwen/Qwen3.5-35B-A3B` (modelscope) | `models_dev:vision` (`alibaba/qwen3.5-35b-a3b`) | 29.9 | 29.9 / — (AA gpqa 0.845, scicode 0.377, lcr 0.68) | — | $0.688 | **NO — stay dropped (borderline, not pure vision-only)** | Multimodal vision-language (same family as `qwen3.6-35b-a3b` with SWE 73.4 / aa_coding 41.9), but this 3.5 variant has only AA 29.9, no SWE/Terminal, coding_score 29.9 <35. Not pure vision-only like `Qwen-Image-Edit`; family is code-capable but this snapshot lacks strong evidence. Stays dropped under current threshold; would flip to keep only if supplemented with SWE/AA coding ≥45. |
+| `Qwen/Qwen3-VL-235B-A22B-Instruct` (modelscope) | `models_dev:vision` (`alibaba/qwen3-vl-235b-a22b-instruct`) | 14.4 | 14.4 / — | — | $0.70 | **NO — stay dropped** | AA 14.4 <<24, no coding benchmark. VL-only, not coding-capable. Only true VL-only among deterministic set. |
 
 Notes:
 * Duplicate: `nararouter/qwen3.8-27b` and `modelscope/Qwen/Qwen3.8-27B` are the same underlying `alibaba/qwen3.8-27b` model discovered via two providers. Counted as 1 unique model, 2 rows.
@@ -55,15 +55,16 @@ Notes:
 
 * **False drops (vision-flagged but coding-capable, should be kept if conditional): 4 unique models (5 provider rows) — 67% of deterministic vision set.**
   * `Qwen3.5-27B`, `Qwen3.5-122B-A10B`, `Qwen3.8-27B` (×2 providers), `Qwen3.8-Flash-Next` — all have `coding_score ≥55` or `SWE ≥61` or `aa_coding ≥45` and pricing `$0.23–$1.13` (cheap). All exceed the #53 provisional keep condition: `coding evidence strong (AA coding / coding_score / SWE) + cheap pricing`.
-* **True drops (vision-flagged and not coding-capable, correctly stays dropped even if conditional): 2 unique models — 33%.**
-  * `Qwen3.5-35B-A3B`, `Qwen3-VL-235B-A22B-Instruct` — low AA (<30 or 14), no SWE/Terminal, pricing cheap but no coding signal.
+* **True/borderline drops (vision-flagged but not coding-capable under current threshold): 2 unique models — 33%.**
+  * `Qwen3-VL-235B-A22B-Instruct` — true VL-only (AA 14.4 <<24, no SWE/Terminal, pricing cheap but no coding signal) → correctly stays dropped.
+  * `Qwen3.5-35B-A3B` — **not pure vision-only** (multimodal vision-language; family sibling `qwen3.6-35b-a3b` has SWE 73.4 and aa_coding 41.9), but this 3.5 snapshot has only AA 29.9, no SWE/Terminal, coding_score 29.9 <35 → stays dropped under current threshold. Would become keep if supplemented (e.g., SWE ≥50 or aa_coding ≥45). Corrected per review: do not count as "true vision-only" like `Qwen-Image-Edit`/`InternVL`/`ERNIE-VL`.
 * **True vision-only controls *outside* deterministic set (LLM-dropped, not flagged): 6+ models in `modelscope.yaml` drop_llm/error, e.g.:**
   * `MusePublic/Qwen-Image-Edit` — image editing model, no AA, no benchmarks, pricing null, LLM `weak` — no deterministic flag (id has `image` not `vision`, no models_dev hit). Correctly stays dropped.
   * `OpenGVLab/InternVL3_5-241B-A28B` — vision model, no AA/benchmark, LLM weak.
   * `PaddlePaddle/ERNIE-4.5-VL-28B-A3B-PT`, `PaddlePaddle/ERNIE-4.5-300B-A47B-PT` (AA 8.9), `OpenGVLab/InternVL` family, `Shanghai_AI_Laboratory/Intern-S2-Preview` — all LLM `weak`/`none`, no coding benchmarks, AA <24 or null.
   * These demonstrate the expected behavior: pure vision models without coding evidence stay `drop` regardless of vision filter.
 
-Impact: flipping the deterministic `vision` gate to conditional (keep if coding-capable + cheap) would **recover 4 unique coding-capable models (5 rows)** while **keeping 2 vision-only models plus all 6+ LLM vision-only models dropped** — no regression for true vision-only.
+Impact: flipping the deterministic `vision` gate to conditional (keep if coding-capable + cheap) would **recover 4 unique coding-capable models (5 rows)** while **keeping 1 true VL-only (`Qwen3-VL-235B`) plus 1 borderline multimodal (`Qwen3.5-35B-A3B`) plus all 6+ LLM pure vision-only models dropped** — no regression for pure vision-only (`Qwen-Image-Edit`/`InternVL`/`ERNIE-VL` family).
 
 ## Scope: only `vision` vs other specialized patterns
 
@@ -96,7 +97,7 @@ Based on this data, the conditional `vision` keep predicted in #53 could be:
 
 Applied to the table:
 * 4 unique models (5 rows) satisfy → keep.
-* 2 models fail coding side → stay dropped.
+* 1 true VL-only (`Qwen3-VL-235B`) + 1 borderline multimodal (`Qwen3.5-35B-A3B`, not pure vision-only) fail coding side → stay dropped; latter would flip if supplemented.
 * All 6+ LLM vision-only fail coding side → stay dropped.
 * Embedding/tts/safety rows fail modality side → stay dropped (compulsory).
 

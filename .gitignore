@@ -29,3 +29,6 @@ debug_tokens.py
 llm-discovery-handoff.md
 docs/benchmark-research.md
 scripts/_probe_judge.py
+
+# Local dev artifacts
+.local/

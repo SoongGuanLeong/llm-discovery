@@ -44,7 +44,18 @@ def normalize_model_id(value: str) -> str:
     value = re.sub(r"-+", "-", value)
     value = re.sub(r"-\.", ".", value)
     value = re.sub(r"\.-", ".", value)
-    return value.strip("-.")
+    value = value.strip("-.")
+    # Option A: systematic dash -> dot for known anthropic versioned families
+    # Only correct when dotted version is known-good, preserving intentional hyphens like 4-8 -> not 4.8
+    _ANTHROPIC_PREFIXES = ("claude-haiku-", "claude-sonnet-", "claude-opus-", "claude-")
+    _KNOWN_DOT_VERSIONS = {"3.5", "3.7", "4.0", "4.1", "4.5", "4.6", "5.0", "5.1", "3.6"}
+    if any(value.startswith(p) for p in _ANTHROPIC_PREFIXES):
+        m = re.search(r"(\d)-(\d)(?=\b|-|$)", value)
+        if m:
+            dotted = f"{m.group(1)}.{m.group(2)}"
+            if dotted in _KNOWN_DOT_VERSIONS:
+                value = value.replace(f"{m.group(1)}-{m.group(2)}", dotted, 1)
+    return value
 
 
 # Backward compatibility alias

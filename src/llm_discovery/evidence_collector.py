@@ -92,6 +92,41 @@ class EvidenceCollector:
 
         # --- Models.dev description check ---
         md_model = models_dev.get_model(model_id_lower)
+        # Fallback for -free / versioned vendor aliases (issue #50): try stripped free and normalized match
+        if md_model is None:
+            import re
+            stripped = re.sub(r"[:/_-]free$", "", model_id_lower)
+            if stripped != model_id_lower:
+                md_model = models_dev.get_model(stripped)
+                if md_model is None:
+                    bare_stripped = stripped.rsplit("/", 1)[-1]
+                    md_model = models_dev.get_model(bare_stripped)
+            if md_model is None:
+                # Normalized fallback: compare via normalize_model_id (handles dot/hyphen, minimax prefix)
+                try:
+                    from .model_matching import normalize_model_id as _norm
+                except Exception:
+                    _norm = None
+                if _norm is not None:
+                    # Try stripped and also vendor suffix stripped (contributor/next) for muse/qwen aliases
+                    import re as _re2
+                    candidates = []
+                    base_stripped = stripped if 'stripped' in locals() else model_id_lower
+                    candidates.append(_norm(base_stripped))
+                    for suf in ("-contributor", "-next"):
+                        if base_stripped.endswith(suf):
+                            candidates.append(_norm(base_stripped[: -len(suf)]))
+                    # Also try bare forms
+                    for c in list(candidates):
+                        bare = c.rsplit("/", 1)[-1] if "/" in c else c
+                        if bare not in candidates:
+                            candidates.append(bare)
+                    for key, candidate in getattr(models_dev, "models", {}).items():
+                        norm_key = _norm(key)
+                        norm_bare = _norm(key.rsplit("/", 1)[-1])
+                        if norm_key in candidates or norm_bare in candidates:
+                            md_model = candidate
+                            break
         if md_model:
             desc = (md_model.get("description") or "").lower()
             name = (md_model.get("name") or "").lower()

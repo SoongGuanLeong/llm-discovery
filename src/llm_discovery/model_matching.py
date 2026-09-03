@@ -65,6 +65,18 @@ def _generate_match_variants(normalized: str) -> list[tuple[str, float, str]]:
             seen.add(v)
             variants.append((v, conf, reason))
     add(normalized, 1.0, "exact_normalized")
+    # Vendor suffix stripping (muse contributor, qwen -next) for versioned vendor aliases (issue #50)
+    for suffix in ("-contributor", "-next"):
+        if normalized.endswith(suffix):
+            base = normalized[: -len(suffix)]
+            add(base, 0.95, f"suffix_strip_{suffix[1:]}")
+            # Also handle dot/hyphen version for stripped base (e.g., muse-spark-1.2 -> muse-spark-1-2)
+            hyphen_variant = base.replace(".", "-")
+            if hyphen_variant != base:
+                add(hyphen_variant, 0.95, f"suffix_strip_{suffix[1:]}+version_format")
+            dot_variant = re.sub(r"(\d)-(\d)", r"\1.\2", base)
+            if dot_variant != base and dot_variant != hyphen_variant:
+                add(dot_variant, 0.95, f"suffix_strip_{suffix[1:]}+version_format")
     hyphen_to_dot = re.sub(r"(\d)-(\d)", r"\1.\2", normalized)
     if hyphen_to_dot != normalized:
         add(hyphen_to_dot, 0.95, "version_format_variant")
@@ -503,12 +515,27 @@ class ModelMatcher:
             hit = [m for m in self.aa_catalog.models if m.get("slug") == "deepseek-v4-flash"]
             if hit:
                 return ModelResolution(provider_model_id=provider_model_id, aa_model=hit[0], method="alias_deepseek-new")
+        # Strip free suffix before alias lookup so mimo-v2.5-free hits mimo-v2.5 entry (issue #50)
+        stripped_slug = re.sub(r"[:/_-]free$", "", provider_slug, flags=re.IGNORECASE)
+        stripped_base = re.sub(r"[:/_-]free$", "", base_slug, flags=re.IGNORECASE)
         alias_map = {
             "mimo-v2.5": "mimo-v2-5-0424",
             "mimo-v2-5": "mimo-v2-5-0424",
             "claude-haiku-4-5": "claude-4-5-haiku",
             "claude-haiku-4.5": "claude-4-5-haiku",
             "gemini-3.8-flash-high": "gemini-3-7-flash",
+            # Vendor versioned aliases (issue #50): muse contributor, qwen -next
+            "muse-spark-1.2-contributor": "muse-spark-1-2",
+            "muse-spark-1.2": "muse-spark-1-2",
+            "muse-spark-1-3-contributor": "muse-spark-1-2",
+            "muse-spark-1.3-contributor": "muse-spark-1-2",
+            "muse-spark-1-3": "muse-spark-1-2",
+            "muse-spark-1.3": "muse-spark-1-2",
+            "muse-spark-1-2-contributor": "muse-spark-1-2",
+            "qwen-3.8-flash": "qwen3-8-flash-next",
+            "qwen3.8-flash": "qwen3-8-flash-next",
+            "qwen-3-8-flash": "qwen3-8-flash-next",
+            "qwen3-8-flash": "qwen3-8-flash-next",
             # Mistral *-latest aliases (issue #42)
             "mistral-medium-latest": "mistral-medium-3-5",
             "mistral-large-latest": "mistral-large-3",
@@ -518,7 +545,8 @@ class ModelMatcher:
             "magistral-small-latest": "magistral-small-2509",
         }
         for k, v in alias_map.items():
-            if provider_slug.lower() == k.lower() or base_slug.lower() == k.lower():
+            if (provider_slug.lower() == k.lower() or base_slug.lower() == k.lower()
+                or stripped_slug.lower() == k.lower() or stripped_base.lower() == k.lower()):
                 hit = [m for m in self.aa_catalog.models if m.get("slug") == v]
                 if hit:
                     return ModelResolution(provider_model_id=provider_model_id, aa_model=hit[0], method="alias_"+v)

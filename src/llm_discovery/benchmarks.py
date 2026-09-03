@@ -372,9 +372,13 @@ def _normalize_model_key(name: str) -> str:
         if name.startswith(prefix):
             name = name[len(prefix):]
             break
-    # Remove version suffixes
+    # Remove version suffixes (unified free handling: :free/-free/_free//free)
     name = re.sub(r":(free|paid|beta|rc\d*)$", "", name)
     name = re.sub(r"-(preview|beta|rc\d+)$", "", name)
+    name = re.sub(r"[:/_-]free$", "", name)
+    # Strip vendor suffixes that break AA/benchmark lookup (muse contributor, qwen -next)
+    name = re.sub(r"-contributor$", "", name)
+    name = re.sub(r"-next$", "", name)
     # Date suffix preserved for benchmark cache distinctness (issue #42); resolver handles dated alias separately
     # Remove parenthetical content
     name = re.sub(r"\s*\(.*?\)\s*", "", name)

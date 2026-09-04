@@ -1,0 +1,77 @@
+{
+  "thresholds": {
+    "VISION_CHEAP_THRESHOLD": 1.2,
+    "VISION_AA_CODING_MIN": 45.0,
+    "VISION_AA_INTEL_MIN": 55.0,
+    "VISION_CODING_SCORE_MIN": 35.0,
+    "VISION_BENCH_MIN": 50.0
+  },
+  "results": [
+    {
+      "case": "qwen3.8-27b (vision-language coding, cheap)",
+      "model_id": "Qwen/Qwen3.8-27B",
+      "vision_only": true,
+      "coding_capable": true,
+      "cheap_or_free": true,
+      "would_bypass": true,
+      "live_decision": "keep",
+      "live_source": "llm",
+      "expected_after": "keep (bypass deterministic, judge/policy decides)"
+    },
+    {
+      "case": "Qwen-Image-Edit (pure vision, no coding)",
+      "model_id": "Qwen/Qwen-Image-Edit",
+      "vision_only": true,
+      "coding_capable": false,
+      "cheap_or_free": true,
+      "would_bypass": false,
+      "live_decision": "drop",
+      "live_source": "deterministic",
+      "expected_after": "drop (not coding-capable)"
+    },
+    {
+      "case": "Qwen3-VL-235B (vision, weak coding, expensive)",
+      "model_id": "Qwen/Qwen3-VL-235B-A22B-Instruct",
+      "vision_only": true,
+      "coding_capable": false,
+      "cheap_or_free": true,
+      "would_bypass": false,
+      "live_decision": "drop",
+      "live_source": "deterministic",
+      "expected_after": "drop (not coding-capable)"
+    },
+    {
+      "case": "tts model (non-vision specialized, coding+cheap must stay dropped)",
+      "model_id": "Qwen/Qwen3-TTS-8B",
+      "vision_only": false,
+      "coding_capable": true,
+      "cheap_or_free": true,
+      "would_bypass": false,
+      "live_decision": "drop",
+      "live_source": "deterministic",
+      "expected_after": "drop (tts compulsory, not vision-only)"
+    },
+    {
+      "case": "null pricing, free-id + SWE bypasses (edge: free proves cheap)",
+      "model_id": "my-model-free",
+      "vision_only": true,
+      "coding_capable": true,
+      "cheap_or_free": true,
+      "would_bypass": true,
+      "live_decision": "keep",
+      "live_source": "llm",
+      "expected_after": "keep (free + coding-capable)"
+    },
+    {
+      "case": "null pricing, not free, SWE strong still dropped (grill Q3 C)",
+      "model_id": "Qwen/Qwen3.8-27B",
+      "vision_only": true,
+      "coding_capable": true,
+      "cheap_or_free": false,
+      "would_bypass": false,
+      "live_decision": "drop",
+      "live_source": "deterministic",
+      "expected_after": "drop (null pricing without free proof not cheap)"
+    }
+  ]
+}

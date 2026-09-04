@@ -67,6 +67,10 @@ providers:
     base_url: https://router.bynara.id/v1
     secret: NARAROUTER_API_KEY
     discovery_strategy: nararouter
+
+  - name: navy_ai
+    base_url: https://api.navy/v1
+    secret: NAVY_AI_API_KEY
   
   - name: opencode_zen
     base_url: https://opencode.ai/zen/v1

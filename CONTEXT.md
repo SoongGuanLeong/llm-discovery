@@ -44,6 +44,23 @@ _Avoid_: file TTL, cache expiry, 14-day skip
 Evidence strings that cite non-existent benchmarks or unverified domains (e.g. tokenmix.ai, callsphere.ai, benchlm) without a first-party URL. Such records fail the Accurate-Enough Gate.
 _Avoid_: fake evidence, weak claim
 
+
+**Invalidation Signal**:
+Ranked condition that forces a Keeper to be rebuilt even before Record TTL expiry. Order: Identity Integrity → Model-List Churn (new) → Evidence / Benchmark Delta (including Pricing Delta) → Time TTL. Checked in build_all before reuse.
+_Avoid_: stale reason, expiry trigger
+
+**Model-List Churn**:
+Difference between the current discovered normalized keys and the keys stored for a provider. New keys are always built; removed keys are retained 14 days then GC if not rediscovered and not shared by another provider.
+_Avoid_: provider diff, list drift
+
+**Evidence Delta**:
+Change between fresh catalog/benchmark lookup and stored ModelInfoRecord that exceeds a threshold (AA ≥2.0, new KEY_SIGNAL, score ≥10%, or benchmark_coverage crossing 0.25). Forces rebuild regardless of TTL.
+_Avoid_: score change, benchmark drift
+
+**Pricing Delta**:
+Subset of Evidence Delta for blended pricing (3:1) where absolute ≥0.05 $/1M or relative ≥10% forces rebuild. Free-marker exception still satisfies pricing presence floor.
+_Avoid_: price change, cost drift
+
 **UUID Model Id**:
 A provider model_id that is a UUID (8-4-4-4-12 hex) rather than a human name. Never cacheable; blocked by the gate until a human-name mapping exists.
 _Avoid_: infra id, opaque id

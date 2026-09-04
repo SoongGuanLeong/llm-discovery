@@ -1,0 +1,38 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.1.1, pluggy-1.6.0 -- /home/soongguanleong/projects/llm-discovery/.venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/soongguanleong/projects/llm-discovery
+configfile: pyproject.toml
+plugins: anyio-4.14.2
+collecting ... collected 28 items
+
+tests/test_navy_premium_free_rule.py::TestNormalizeModelsPremium::test_preserves_premium_false PASSED [  3%]
+tests/test_navy_premium_free_rule.py::TestNormalizeModelsPremium::test_preserves_premium_true PASSED [  7%]
+tests/test_navy_premium_free_rule.py::TestNormalizeModelsPremium::test_omits_premium_when_missing PASSED [ 10%]
+tests/test_navy_premium_free_rule.py::TestNormalizeModelsPremium::test_preserves_premium_zero_and_string PASSED [ 14%]
+tests/test_navy_premium_free_rule.py::TestNormalizeModelsPremium::test_id_fallback_keeps_premium PASSED [ 17%]
+tests/test_navy_premium_free_rule.py::TestIsFreeModelGeneric::test_free_markers_are_free_generic PASSED [ 21%]
+tests/test_navy_premium_free_rule.py::TestIsFreeModelGeneric::test_non_free_not_free_generic PASSED [ 25%]
+tests/test_navy_premium_free_rule.py::TestIsFreeModelGeneric::test_str_fallback_marker_only PASSED [ 28%]
+tests/test_navy_premium_free_rule.py::TestIsFreeModelGeneric::test_generic_premium_false_not_free PASSED [ 32%]
+tests/test_navy_premium_free_rule.py::TestIsFreeModelNavy::test_navy_premium_false_is_free PASSED [ 35%]
+tests/test_navy_premium_free_rule.py::TestIsFreeModelNavy::test_navy_premium_true_not_free PASSED [ 39%]
+tests/test_navy_premium_free_rule.py::TestIsFreeModelNavy::test_navy_missing_premium_not_free PASSED [ 42%]
+tests/test_navy_premium_free_rule.py::TestIsFreeModelNavy::test_navy_premium_string_and_zero_not_free PASSED [ 46%]
+tests/test_navy_premium_free_rule.py::TestIsFreeModelNavy::test_navy_marker_wins_even_premium_true PASSED [ 50%]
+tests/test_navy_premium_free_rule.py::TestIsFreeModelNavy::test_navy_marker_missing_premium_still_free PASSED [ 53%]
+tests/test_navy_premium_free_rule.py::TestSplitByFreeRule::test_generic_mixed_keeps_only_free PASSED [ 57%]
+tests/test_navy_premium_free_rule.py::TestSplitByFreeRule::test_generic_no_free_returns_all PASSED [ 60%]
+tests/test_navy_premium_free_rule.py::TestSplitByFreeRule::test_generic_all_free_returns_all PASSED [ 64%]
+tests/test_navy_premium_free_rule.py::TestSplitByFreeRule::test_navy_mixed_premium_and_marker PASSED [ 67%]
+tests/test_navy_premium_free_rule.py::TestSplitByFreeRule::test_navy_all_non_free_returns_all PASSED [ 71%]
+tests/test_navy_premium_free_rule.py::TestSplitByFreeRule::test_navy_premium_false_only_without_marker PASSED [ 75%]
+tests/test_navy_premium_free_rule.py::TestSplitByFreeRule::test_non_navy_premium_false_ignored_in_split PASSED [ 78%]
+tests/test_navy_premium_free_rule.py::TestSplitByFreeRule::test_has_free_name_delegates PASSED [ 82%]
+tests/test_navy_premium_free_rule.py::TestSplitByFreeRule::test_split_empty_provider_string_is_generic PASSED [ 85%]
+tests/test_navy_premium_free_rule.py::TestProviderWiringAndNaraRouter::test_apply_free_rule_delegates PASSED [ 89%]
+tests/test_navy_premium_free_rule.py::TestProviderWiringAndNaraRouter::test_nararouter_not_affected_by_premium_rule PASSED [ 92%]
+tests/test_navy_premium_free_rule.py::TestProviderWiringAndNaraRouter::test_discover_provider_navy_uses_premium_split PASSED [ 96%]
+tests/test_navy_premium_free_rule.py::TestProviderWiringAndNaraRouter::test_discover_provider_generic_premium_false_not_split PASSED [100%]
+
+============================== 28 passed in 0.08s ==============================

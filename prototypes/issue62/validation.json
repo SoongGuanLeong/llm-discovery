@@ -1,0 +1,26 @@
+{
+  "issue": 62,
+  "date": "2026-09-04",
+  "tests_new": 28,
+  "full_suite": {
+    "total": 161,
+    "passed": 160,
+    "failed": 1,
+    "failed_test": "test_issue51_nararouter_prototype::test_allowlist_equals_free_plan",
+    "reason": "live NaraRouter allowlist drift longcat-2.0-free, snapshot outdated, not navy regression"
+  },
+  "matrix_cases": 19,
+  "split_scenarios": 5,
+  "seams": [
+    "discovery._normalize_models",
+    "pipeline._is_free_model",
+    "pipeline._split_by_free_rule",
+    "pipeline._has_free_name",
+    "pipeline.discover_provider",
+    "discovery.discover_nararouter_models"
+  ],
+  "generic_unchanged": true,
+  "navy_rule": "marker OR premium is False (identity)",
+  "non_navy_isolation": true,
+  "nararouter_isolation": true
+}

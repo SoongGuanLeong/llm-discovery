@@ -68,9 +68,9 @@ class TestNormalizeStoreKey:
 class TestEvidenceGating:
     def test_cacheable_levels(self):
         assert should_cache("strong") is True
-        assert should_cache("moderate") is True
+        assert should_cache("moderate") is False
         assert should_cache("Strong") is True
-        assert should_cache("MODERATE") is True
+        assert should_cache("MODERATE") is False
         assert should_cache("weak") is False
         assert should_cache("none") is False
         assert should_cache(None) is False
@@ -78,9 +78,9 @@ class TestEvidenceGating:
         assert should_cache("weak", confidence=1.0) is False
 
     def test_field_inclusion_matrix(self):
-        for lvl in ("strong", "moderate"):
+        for lvl in ("strong",):
             assert all(FIELD_INCLUSION_MATRIX[lvl].values()), lvl
-        for lvl in ("weak", "none"):
+        for lvl in ("moderate", "weak", "none"):
             assert not any(FIELD_INCLUSION_MATRIX[lvl].values()), lvl
 
     def test_rank_ordering(self):

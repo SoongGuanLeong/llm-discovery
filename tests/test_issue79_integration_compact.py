@@ -36,10 +36,10 @@ def _keep(model_id, evidence_level="strong", confidence=0.9, aa_score=50, pricin
         "aa_score": aa_score,
         "coding_score": aa_score,
         "pricing": pricing or {"price_1m_blended_3_to_1": 0.5, "price_1m_input_tokens": 0.3, "price_1m_output_tokens": 0.9},
-        "benchmarks": benchmarks or {"scores": {"aa_intelligence": {"score": aa_score, "source": "aa"}}, "raw_benchmarks": []},
+        "benchmarks": benchmarks or {"scores": {"aa_intelligence": {"score": aa_score, "source": "aa"}}, "raw_benchmarks": [], "benchmark_coverage": 0.25},
         "confidence": confidence,
         "evidence_level": evidence_level,
-        "evidence": evidence or [f"AA {aa_score}"],
+        "evidence": evidence or [f"AA {aa_score} https://example.com/aa/{model_id}"],
     }
 
 
@@ -156,11 +156,12 @@ class TestStaleIgnored:
         _write_yaml(results / "stale.yaml", "stale", [_keep("stale-model", aa_score=99)], evaluated_at=_stale_ts(20))
         store_path = tmp_path / "store.json"
         stats = backfill(results_dir=results, store_path=store_path)
-        assert stats["stale_skipped"] == 1
+        # per ADR 0006 file-level TTL removed — both cached
+        assert stats["stale_skipped"] == 0
         store = ModelInfoStore(store_path)
         assert store.get("fresh-model") is not None
-        assert store.get("stale-model") is None
-        assert store.size() == 1
+        assert store.get("stale-model") is not None
+        assert store.size() == 2
 
     def test_build_all_stale_filtered(self, tmp_path):
         # Simulate build_all where one provider writes stale YAML: verify stale ignored after backfill
@@ -172,8 +173,8 @@ class TestStaleIgnored:
         _write_yaml(results / "b.yaml", "b", [_keep("drop-me", aa_score=50)], evaluated_at=_stale_ts(30))
         store_path = data_dir / "model_info_store.json"
         stats = backfill(results_dir=results, store_path=store_path)
-        assert ModelInfoStore(store_path).size() == 1
-        assert ModelInfoStore(store_path).get("drop-me") is None
+        assert ModelInfoStore(store_path).size() == 2
+        assert ModelInfoStore(store_path).get("drop-me") is not None
 
 
 class TestMonotonicDeletion:

@@ -160,12 +160,145 @@ EVIDENCE_LEVEL_ORDER: dict[str, int] = {
     "": 0,
 }
 
-CACHEABLE_LEVELS = {"strong", "moderate"}
+CACHEABLE_LEVELS = {"strong"}
+
+# Hallucinated evidence / UUID denylist per ADR 0006 §3 floors.
+HALLUCINATED_DENYLIST = {"tokenmix.ai", "callsphere.ai", "benchlm"}
+
+_UUID_RE = re.compile(r"^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$", re.IGNORECASE)
+_UUID_HEX32_RE = re.compile(r"^[0-9a-f]{32}$", re.IGNORECASE)
+
+
+def _is_uuid_model_id(model_id: str | None) -> bool:
+    if not model_id:
+        return False
+    mid = model_id.strip()
+    return bool(_UUID_RE.match(mid) or _UUID_HEX32_RE.match(mid))
+
+
+def _is_hallucinated_evidence(evidence: list[str] | None) -> bool:
+    if not evidence:
+        return False
+    joined = " ".join(str(e) for e in evidence).lower()
+    return any(d in joined for d in HALLUCINATED_DENYLIST)
+
+
+def _is_free_model_id(model_id: str | None) -> bool:
+    if not model_id:
+        return False
+    lower = model_id.strip().lower()
+    return bool(re.search(r"(?:[:/_-]|^)free$", lower))
+
+
+def _is_router_model_id(model_id: str | None) -> bool:
+    if not model_id:
+        return False
+    lower = model_id.strip().lower()
+    if lower in ("kilo-auto/free", "openrouter/free"):
+        return True
+    if "router" in lower:
+        return True
+    if "auto" in lower and "free" in lower:
+        return True
+    return False
+
+
+def is_accurate_enough(record: dict[str, Any] | "ModelInfoRecord") -> tuple[bool, str]:
+    """ADR 0006 Accurate-Enough Gate predicate.
+
+    All floors must pass for Keeper eligibility. Returns (ok, reason).
+    Reason is empty when ok, otherwise first failing floor.
+
+    Floors:
+    - evidence_level == strong
+    - coding_score != null
+    - pricing present OR free-marker exception (model_id contains free OR blended == 0)
+    - aa_model_id present OR supplement bench >=50 with http URL
+    - benchmark_coverage >=0.25
+    - evidence contains at least one http URL
+    - not UUID-shaped model_id
+    - not hallucinated denylist in evidence
+    """
+    if isinstance(record, dict):
+        d = record
+        model_id = d.get("model_id") or d.get("provider_model_id") or ""
+        evidence_level = d.get("evidence_level")
+        coding_score = d.get("coding_score")
+        pricing = d.get("pricing")
+        aa_model_id = d.get("aa_model_id")
+        benchmarks = d.get("benchmarks") or {}
+        evidence = d.get("evidence") or []
+        benchmark_coverage = d.get("benchmark_coverage")
+        if benchmark_coverage is None and isinstance(benchmarks, dict):
+            benchmark_coverage = benchmarks.get("benchmark_coverage")
+        pricing_blended = None
+        if isinstance(pricing, dict):
+            pricing_blended = pricing.get("blended", pricing.get("price_1m_blended_3_to_1", pricing.get("price_blended")))
+        elif pricing is not None:
+            pricing_blended = pricing
+    else:
+        model_id = getattr(record, "model_id", "") or ""
+        evidence_level = record.evidence_level
+        coding_score = record.coding_score
+        pricing = record.pricing
+        aa_model_id = record.aa_model_id
+        benchmarks = record.benchmarks.to_dict() if record.benchmarks else {}
+        evidence = record.evidence or []
+        benchmark_coverage = record.benchmarks.benchmark_coverage if record.benchmarks else None
+        pricing_blended = pricing.blended if pricing else None
+
+    if _normalize_evidence_level(evidence_level) != "strong":
+        return False, f"evidence_level={evidence_level} not strong"
+    if coding_score is None:
+        return False, "coding_score is null"
+    has_pricing = False
+    if isinstance(pricing, dict):
+        has_pricing = pricing_blended is not None or pricing.get("input") is not None or pricing.get("output") is not None
+        if not pricing:
+            has_pricing = False
+    elif pricing is not None:
+        has_pricing = True
+    is_free = _is_free_model_id(model_id) or (pricing_blended == 0)
+    if not has_pricing and not is_free:
+        return False, "pricing missing and not free"
+    has_aa = bool(aa_model_id)
+    has_supp_50 = False
+    scores_for_coverage = {}
+    if isinstance(benchmarks, dict):
+        scores = benchmarks.get("scores") or {}
+        scores_for_coverage = scores
+        for key in ("swe_bench_verified", "terminal_bench", "terminal_bench_2_1", "swe_bench_pro"):
+            val = scores.get(key)
+            sc = val.get("score") if isinstance(val, dict) else getattr(val, "score", None) if val is not None else None
+            if sc is not None and sc >= 50:
+                has_supp_50 = True
+                break
+    has_url = any("http" in str(e).lower() for e in (evidence or []))
+    if not has_aa and not (has_supp_50 and has_url):
+        return False, "aa_model_id missing and no supplement >=50 with URL"
+    # Derive benchmark_coverage from scores when field absent (tests & legacy)
+    if benchmark_coverage is None and isinstance(benchmarks, dict):
+        key_signals = {"aa_intelligence", "swe_bench_verified", "livecodebench", "humaneval"}
+        if scores_for_coverage:
+            present = len(key_signals.intersection(scores_for_coverage.keys()))
+            benchmark_coverage = present / 4.0
+    try:
+        bc = float(benchmark_coverage) if benchmark_coverage is not None else None
+    except Exception:
+        bc = None
+    if bc is None or bc < 0.25:
+        return False, f"benchmark_coverage {benchmark_coverage} < 0.25"
+    if not has_url:
+        return False, "evidence lacks http URL"
+    if _is_uuid_model_id(model_id):
+        return False, f"model_id is UUID {model_id}"
+    if _is_hallucinated_evidence(evidence):
+        return False, "hallucinated evidence denylist hit"
+    return True, ""
 
 # Field inclusion matrix by evidence_level (issue #66 output requirement).
-# True = cached, False = not cached. "weak"/"none" rows are "do not cache"
-# per Decision from #64: cache gate strong/moderate only. Weak records are
-# not inserted; if caller passes weak, should_cache() returns False.
+# True = cached, False = not cached. Only strong is cacheable per ADR 0006.
+# Weak/moderate/none rows are "do not cache" — gate is is_accurate_enough().
 FIELD_INCLUSION_MATRIX: dict[str, dict[str, bool]] = {
     "strong": {
         "aa_model_id": True,
@@ -180,16 +313,16 @@ FIELD_INCLUSION_MATRIX: dict[str, dict[str, bool]] = {
         "_meta": True,
     },
     "moderate": {
-        "aa_model_id": True,
-        "aa_score": True,
-        "coding_score": True,
-        "benchmarks": True,
-        "evidence": True,
-        "evidence_level": True,
-        "confidence": True,
-        "tier": True,
-        "pricing": True,
-        "_meta": True,
+        "aa_model_id": False,
+        "aa_score": False,
+        "coding_score": False,
+        "benchmarks": False,
+        "evidence": False,
+        "evidence_level": False,
+        "confidence": False,
+        "tier": False,
+        "pricing": False,
+        "_meta": False,
     },
     "weak": {
         "aa_model_id": False,
@@ -228,10 +361,11 @@ def _normalize_evidence_level(level: str | None) -> str:
 
 
 def should_cache(evidence_level: str | None, confidence: float | None = None) -> bool:
-    """Evidence gating: cache only strong/moderate per #64.
+    """Evidence gating: cache only strong per ADR 0006.
 
-    Null/weak/none -> do not cache. Confidence is not used for gating
+    Null/weak/moderate/none -> do not cache. Confidence is not used for gating
     (only for tie-break during merge), but accepted for call-site symmetry.
+    Strong-only Keeper; moderate remains Candidate until promoted.
     """
     lvl = _normalize_evidence_level(evidence_level)
     return lvl in CACHEABLE_LEVELS

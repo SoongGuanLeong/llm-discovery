@@ -41,10 +41,10 @@ def _keep(model_id, evidence_level="strong", confidence=0.9, aa_score=50, pricin
         "aa_score": aa_score,
         "coding_score": aa_score,
         "pricing": pricing or {"price_1m_blended_3_to_1": 0.5, "price_1m_input_tokens": 0.3, "price_1m_output_tokens": 0.9},
-        "benchmarks": benchmarks or {"scores": {"aa_intelligence": {"score": aa_score, "source": "aa"}}, "raw_benchmarks": []},
+        "benchmarks": benchmarks or {"scores": {"aa_intelligence": {"score": aa_score, "source": "aa"}}, "raw_benchmarks": [], "benchmark_coverage": 0.25},
         "confidence": confidence,
         "evidence_level": evidence_level,
-        "evidence": evidence or [f"AA {aa_score}"],
+        "evidence": evidence or [f"AA {aa_score} https://example.com/aa/{model_id}"],
     }
 
 
@@ -60,17 +60,18 @@ class TestStaleFileIgnored:
     def test_stale_file_skipped(self, tmp_path):
         results = tmp_path / "results"
         results.mkdir()
-        # stale file: 20 days old, should be skipped entirely
+        # stale file: 20 days old — per ADR 0006 file-level TTL removed, per-record TTL via StoreMeta
+        # Both records now cached (evaluated_at does not gate backfill)
         _write_yaml(results / "stale.yaml", "stale_provider", [_keep("stale-model", aa_score=99)], evaluated_at=_stale_ts(20))
         # fresh file: now, should be kept
         _write_yaml(results / "fresh.yaml", "fresh_provider", [_keep("fresh-model", aa_score=60)], evaluated_at=_fresh_ts())
         store_path = tmp_path / "store.json"
         stats = backfill(results_dir=results, store_path=store_path)
-        # stale_skipped counts keep records in stale file
-        assert stats["stale_skipped"] == 1
-        assert stats["unique_models"] == 1
+        # file-level stale no longer gates; stats stale_skipped stays 0 for compat
+        assert stats["stale_skipped"] == 0
+        assert stats["unique_models"] == 2
         store = ModelInfoStore(store_path)
-        assert store.get("stale-model") is None
+        assert store.get("stale-model") is not None
         assert store.get("fresh-model") is not None
         assert is_stale(_stale_ts(20), DEFAULT_TTL_DAYS) is True
         assert is_stale(_fresh_ts(), DEFAULT_TTL_DAYS) is False
@@ -78,18 +79,18 @@ class TestStaleFileIgnored:
     def test_stale_file_ignored_even_with_strong_evidence(self, tmp_path):
         results = tmp_path / "results"
         results.mkdir()
-        # even strong evidence but stale date -> skipped
+        # even strong evidence but stale date -> no longer skipped (per-record TTL)
         _write_yaml(results / "old.yaml", "old", [_keep("old-model", evidence_level="strong", aa_score=80)], evaluated_at=_stale_ts(30))
         store_path = tmp_path / "store.json"
         stats = backfill(results_dir=results, store_path=store_path)
-        assert stats["stale_skipped"] == 1
-        assert stats["unique_models"] == 0
-        assert ModelInfoStore(store_path).size() == 0
+        assert stats["stale_skipped"] == 0
+        assert stats["unique_models"] == 1
+        assert ModelInfoStore(store_path).size() == 1
 
     def test_boundary_14d_not_stale_15d_stale(self, tmp_path):
         results = tmp_path / "results"
         results.mkdir()
-        # 14 days ago: not stale (age > ttl only when >14)
+        # 14 days ago: not stale (age > ttl only when >14) — is_stale utility unchanged
         at_14 = (datetime.now(UTC) - timedelta(days=14)).isoformat()
         at_15 = (datetime.now(UTC) - timedelta(days=15)).isoformat()
         assert is_stale(at_14, 14) is False
@@ -98,10 +99,11 @@ class TestStaleFileIgnored:
         _write_yaml(results / "b.yaml", "b", [_keep("model-15", aa_score=50)], evaluated_at=at_15)
         store_path = tmp_path / "store.json"
         stats = backfill(results_dir=results, store_path=store_path)
-        assert stats["stale_skipped"] == 1
+        # backfill no longer file-gates; both cached
+        assert stats["stale_skipped"] == 0
         store = ModelInfoStore(store_path)
         assert store.get("model-14") is not None
-        assert store.get("model-15") is None
+        assert store.get("model-15") is not None
 
 
 class TestSecondProviderPriceAvg:
@@ -145,7 +147,7 @@ class TestScalarGapFill:
         results = tmp_path / "results"
         results.mkdir()
         # both providers in single backfill: aa_score 55 vs 90 gap-fill keeps first (55)
-        _write_yaml(results / "a.yaml", "a", [_keep("gap-model", evidence_level="moderate", aa_score=55, pricing={"price_1m_blended_3_to_1": 0.5})], evaluated_at=_fresh_ts())
+        _write_yaml(results / "a.yaml", "a", [_keep("gap-model", evidence_level="strong", aa_score=55, pricing={"price_1m_blended_3_to_1": 0.5})], evaluated_at=_fresh_ts())
         _write_yaml(results / "b.yaml", "b", [_keep("gap-model", evidence_level="strong", aa_score=90, pricing={"price_1m_blended_3_to_1": 0.52})], evaluated_at=_fresh_ts())
         store_path = tmp_path / "store.json"
         backfill(results_dir=results, store_path=store_path)

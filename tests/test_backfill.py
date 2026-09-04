@@ -21,10 +21,10 @@ def _keep(model_id, evidence_level="strong", confidence=0.9, aa_score=50, pricin
         "aa_score": aa_score,
         "coding_score": aa_score,
         "pricing": pricing or {"price_1m_blended_3_to_1": 0.5, "price_1m_input_tokens": 0.3, "price_1m_output_tokens": 0.9},
-        "benchmarks": benchmarks or {"scores": {"aa_intelligence": {"score": aa_score, "source": "aa"}}, "raw_benchmarks": []},
+        "benchmarks": benchmarks or {"scores": {"aa_intelligence": {"score": aa_score, "source": "aa"}}, "raw_benchmarks": [], "benchmark_coverage": 0.25},
         "confidence": confidence,
         "evidence_level": evidence_level,
-        "evidence": evidence or [f"AA {aa_score}"],
+        "evidence": evidence or [f"AA {aa_score} https://example.com/aa/{model_id}"],
     }
 
 
@@ -34,7 +34,7 @@ class TestBackfillSeam:
         results.mkdir()
         # two providers, same logical model but different provider prefix -> should dedup
         _write_yaml(results / "a.yaml", "a", [_keep("openai/gpt-4o:free", evidence_level="strong", aa_score=55, pricing={"price_1m_blended_3_to_1": 0.5, "price_1m_input_tokens": 0.3, "price_1m_output_tokens": 0.9})])
-        _write_yaml(results / "b.yaml", "b", [_keep("groq/gpt-4o", evidence_level="moderate", aa_score=50, pricing={"price_1m_blended_3_to_1": 0.52, "price_1m_input_tokens": 0.31, "price_1m_output_tokens": 0.91})])
+        _write_yaml(results / "b.yaml", "b", [_keep("groq/gpt-4o", evidence_level="strong", aa_score=50, pricing={"price_1m_blended_3_to_1": 0.52, "price_1m_input_tokens": 0.31, "price_1m_output_tokens": 0.91})])
         store_path = tmp_path / "store.json"
         stats = backfill(results_dir=results, store_path=store_path)
         # assertions on stats shape (spec sources #69)
@@ -63,7 +63,7 @@ class TestBackfillSeam:
     def test_idempotent_merge_not_overwrite(self, tmp_path):
         results = tmp_path / "results"
         results.mkdir()
-        _write_yaml(results / "a.yaml", "a", [_keep("openai/gpt-4o", evidence_level="moderate", aa_score=50)])
+        _write_yaml(results / "a.yaml", "a", [_keep("openai/gpt-4o", evidence_level="strong", aa_score=50)])
         store_path = tmp_path / "store.json"
         backfill(results_dir=results, store_path=store_path)
         # second run with stronger evidence: #72 Q10 b gap-fill keeps existing scalar (50), not overwrite

@@ -85,7 +85,7 @@ class TestInvalidationTTL:
         # #72 Q10 b gap-fill: existing scalar kept, not overwritten by stronger
         p = tmp_path / "s.json"
         store = ModelInfoStore(p)
-        r1 = ModelInfoRecord(aa_score=50, evidence_level="moderate", confidence=0.8, _meta=StoreMeta(last_updated="2026-09-04T01:00:00+00:00", source_providers=["a"]))
+        r1 = ModelInfoRecord(aa_score=50, evidence_level="strong", confidence=0.8, _meta=StoreMeta(last_updated="2026-09-04T01:00:00+00:00", source_providers=["a"]))
         r2 = ModelInfoRecord(aa_score=60, evidence_level="strong", confidence=0.9, _meta=StoreMeta(last_updated="2026-09-04T02:00:00+00:00", source_providers=["b"]))
         store.put("m", r1)
         store.put("m", r2)
@@ -190,4 +190,3 @@ class TestReadPath:
         # weak should not upsert
         prov2 = {"evidence_level": "weak", "confidence": 0.5, "evidence": ["y"]}
         assert s.upsert_from_provider_record("weak-model", prov2) is False
-

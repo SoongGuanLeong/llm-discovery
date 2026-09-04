@@ -14,6 +14,7 @@ from .model_info_store import (
     ModelInfoStore,
     PricingSnapshot,
     aggregate_pricing,
+    is_accurate_enough,
     is_stale,
     merge_records,
     normalize_store_key,
@@ -50,15 +51,20 @@ def backfill(
     store_path: str | Path = "data/model_info_store.json",
 ) -> dict[str, Any]:
     """
-    One-shot backfill to seed store from existing report YAMLs.
+    One-shot backfill to seed store from existing report YAMLs (ADR 0006/0007).
 
     - Enumerates results_dir/*.yaml
-    - Collects keep[] records (skips weak/none per should_cache)
+    - Collects keep[] records that pass Accurate-Enough Gate (is_accurate_enough)
+      Strong-only; moderate/weak, missing pricing/coverage/URL, UUID, hallucinated,
+      coding_score null all filtered. Router keeps stay in YAML but not in store.
       Note: drop_llm ignored — spec says "maybe also drop_llm if strong
       evidence for drop" but current pipeline treats drop as non-cacheable;
       include only if future decision gates drop_llm strong as cacheable.
+    - No file-level is_stale gate (per ADR 0006: per-record TTL via StoreMeta).
+      evaluated_at only contributes to provenance stats.
     - Deduplicates by normalize_store_key(model_id)
-    - Merges via merge_records (strong > moderate) + aggregate_pricing avg/outlier
+    - Merges via merge_records (gap-fill for scalars, union-max benchmarks)
+      + aggregate_pricing avg/outlier
     - Emits store file (JSON) via ModelInfoStore.put (idempotent merge, not overwrite)
     - Returns stats dict.
     """
@@ -82,22 +88,25 @@ def backfill(
     # Keep evaluated_at range for meta?
     all_evaluated_at: list[str] = []
 
-    stale_skipped = 0
+    stale_skipped = 0  # retained for compat; file-level TTL removed per ADR 0006 (per-record StoreMeta.last_updated)
+    gate_skipped = 0
     for yf in yaml_files:
         provider, evaluated_at, keep = _parse_results_file(yf)
         if evaluated_at:
             all_evaluated_at.append(str(evaluated_at))
-        # 14d SCD1 gate per #72 Q7 / spec #76: skip file if evaluated_at stale
-        if evaluated_at and is_stale(str(evaluated_at), DEFAULT_TTL_DAYS):
-            stale_skipped += len(keep)
-            continue
         for rec in keep:
             total_keep += 1
             model_id = rec.get("model_id") or rec.get("provider_model_id") or ""
             lvl = rec.get("evidence_level")
-            # normalize: if missing evidence_level, treat as none
+            # Gate 1: evidence_level strong-only (should_cache)
             if not should_cache(lvl, rec.get("confidence")):
                 weak_skipped += 1
+                continue
+            # Gate 2: Accurate-Enough floors (ADR 0006 §3) — strong but still must pass
+            ok, reason = is_accurate_enough(rec)
+            if not ok:
+                weak_skipped += 1
+                gate_skipped += 1
                 continue
             key = normalize_store_key(str(model_id))
             if not key:
@@ -184,6 +193,7 @@ def backfill(
         "pricing_avgs": pricing_avgs,
         "pricing_outliers": pricing_outliers,
         "weak_skipped": weak_skipped,
+        "gate_skipped": gate_skipped,
         "stale_skipped": stale_skipped,
         "evaluated_at_range": [min(all_evaluated_at), max(all_evaluated_at)] if all_evaluated_at else [],
         "store_path": str(store_path),

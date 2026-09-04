@@ -162,9 +162,18 @@ def main() -> None:
     parser.add_argument("--data-dir", type=Path, default=Path("data"), help="Data directory (default: data)")
     parser.add_argument("--config", type=Path, default=Path("config/providers.yaml"), help="Providers YAML path")
     parser.add_argument("--providers", nargs="*", help="Optional subset of provider names to build")
-    parser.add_argument("--max-workers", type=int, default=4, help="Workers per provider")
+    parser.add_argument("--all-providers", action="store_true", help="Build all providers (default, parity with discover.py)")
+    parser.add_argument("providers_pos", nargs="*", help=argparse.SUPPRESS)
+    parser.add_argument("--workers", "--max-workers", dest="max_workers", type=int, default=4, help="Workers per provider (alias --workers for discover.py parity)")
     args = parser.parse_args()
-    res = build_all(data_dir=args.data_dir, config_path=args.config, provider_names=args.providers, max_workers=args.max_workers)
+    # Parity with discover.py: allow positional provider names like "kilo_ai" or "kilo_ai --all"
+    providers = args.providers
+    if providers is None and getattr(args, "providers_pos", None):
+        # Filter out "--all" artifact if passed positionally
+        pos = [p for p in args.providers_pos if p != "--all" and not p.startswith("-")]
+        if pos:
+            providers = pos
+    res = build_all(data_dir=args.data_dir, config_path=args.config, provider_names=providers, max_workers=args.max_workers)
     print(json.dumps(res, indent=2))
     print(f"Done: store {res['store_path']} size={res['store_size']} compact {res['compact_bytes']} < pretty {res['pretty_bytes']}")
 

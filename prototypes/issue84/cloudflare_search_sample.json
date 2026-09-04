@@ -1,0 +1,49 @@
+{
+  "result": [
+    {
+      "id": "01564c52-8717-47dc-8efd-907a2ca18301",
+      "name": "@cf/deepgram/aura-1",
+      "description": "Deepgram Aura is a text-to-speech model, not a coding model",
+      "task": {"name": "Text to Speech"}
+    },
+    {
+      "id": "01bc2fb0-4bca-4598-b985-d2584a3f46c0",
+      "name": "@cf/baai/bge-base-en-v1.5",
+      "description": "BGE (BAAI General Embedding) is an embedding model",
+      "task": {"name": "Embedding"}
+    },
+    {
+      "id": "145337e7-cec3-4ebb-8e78-16ddfc75e580",
+      "name": "@cf/baai/bge-reranker-base",
+      "description": "bge-reranker-base is a reranker model",
+      "task": {"name": "Reranking"}
+    },
+    {
+      "id": "2cbc033b-ded8-4e02-bbb2-47cf05d5cfe5",
+      "name": "@cf/meta/llama-3.2-11b-vision-instruct",
+      "description": "Llama 3.2 11B Vision instruction-tuned model",
+      "task": {"name": "Vision"}
+    },
+    {
+      "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "name": "@cf/qwen/qwen2.5-coder-32b-instruct",
+      "description": "Qwen2.5-Coder 32B instruction model for code generation",
+      "task": {"name": "Text Generation"}
+    },
+    {
+      "id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+      "name": "@cf/deepseek-ai/deepseek-v4-pro-0813",
+      "description": "DeepSeek V4 Pro coding model",
+      "task": {"name": "Text Generation"}
+    },
+    {
+      "id": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      "name": "@cf/mistral/mistral-7b-instruct-v0.1",
+      "description": "Mistral 7B instruct model",
+      "task": {"name": "Text Generation"}
+    }
+  ],
+  "success": true,
+  "errors": [],
+  "messages": []
+}

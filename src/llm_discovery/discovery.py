@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,64 @@ def _normalize_models(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
         }
         # Preserve premium flag when present (navy_ai: premium==false => free).
         # Omit when absent to distinguish missing vs explicit false (ADR 0004).
+        if "premium" in m:
+            entry["premium"] = m["premium"]
+        normalized.append(entry)
+    return normalized
+
+
+_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+_UUID_HEX32_RE = re.compile(r"^[0-9a-f]{32}$", re.I)
+
+
+def _is_uuid(value: str) -> bool:
+    """True if value is UUID-shaped (dashed or 32-hex). Used for Cloudflare identity."""
+    if not isinstance(value, str):
+        return False
+    v = value.strip()
+    return bool(_UUID_RE.match(v) or _UUID_HEX32_RE.match(v))
+
+
+def _normalize_cloudflare_models(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Cloudflare-specific normalization: human name is canonical, UUID kept as auxiliary.
+
+    Cloudflare /ai/models/search returns {"id": uuid, "name": "@cf/..."} where
+    "name" is the actionable identifier (model card, pricing, benchmarks) and
+    "id" is an infra UUID. Prior code used "id" -> all 65 records unactionable.
+
+    Decision (#84, P0-1):
+    - canonical model_id/name = human name ("@cf/...") when present and not UUID-shaped
+    - UUID preserved as "source_id" + "cloudflare_id" for audit/trace
+    - when name missing or itself UUID-shaped, fall back to id (still UUID, will fail Accurate-Enough Gate)
+    - description/task preserved when present
+    """
+    normalized: list[dict[str, Any]] = []
+    for m in models:
+        raw_id = m.get("id")
+        raw_name = m.get("name") or m.get("display_name") or m.get("model")
+        if raw_name and isinstance(raw_name, str) and not _is_uuid(raw_name):
+            canonical = str(raw_name)
+            uuid_val = str(raw_id) if isinstance(raw_id, str) and _is_uuid(raw_id) else (str(raw_id) if raw_id else None)
+        elif raw_id and isinstance(raw_id, str) and not _is_uuid(raw_id):
+            canonical = str(raw_id)
+            uuid_val = str(raw_name) if isinstance(raw_name, str) and _is_uuid(raw_name) else None
+        else:
+            canonical = str(raw_name or raw_id or "")
+            uuid_val = str(raw_id) if isinstance(raw_id, str) and _is_uuid(raw_id) and canonical != str(raw_id) else None
+            if not uuid_val and isinstance(raw_id, str) and _is_uuid(raw_id):
+                uuid_val = str(raw_id)
+        entry: dict[str, Any] = {
+            "id": canonical,
+            "name": m.get("name") or raw_name or canonical,
+            "object": m.get("object", "model"),
+        }
+        if uuid_val:
+            entry["source_id"] = uuid_val
+            entry["cloudflare_id"] = uuid_val
+        if "description" in m:
+            entry["description"] = m["description"]
+        if "task" in m:
+            entry["task"] = m["task"]
         if "premium" in m:
             entry["premium"] = m["premium"]
         normalized.append(entry)
@@ -87,9 +146,9 @@ def discover_cloudflare_models(
     )
     response.raise_for_status()
     data = response.json()
-    # Cloudflare returns models under 'result', normalize to standard format
+    # Cloudflare returns models under 'result', normalize to human-name canonical form
     models = data.get("result", [])
-    return _normalize_models(models)
+    return _normalize_cloudflare_models(models)
 
 
 # --- NaraRouter true-free filtering (issue #52) ---

@@ -1,0 +1,65 @@
+[
+  {
+    "uuid": "01564c52-8717-47dc-8efd-907a2ca18301",
+    "before_id": "01564c52-8717-47dc-8efd-907a2ca18301",
+    "before_name": "@cf/deepgram/aura-1",
+    "after_id": "@cf/deepgram/aura-1",
+    "after_name": "@cf/deepgram/aura-1",
+    "source_id": "01564c52-8717-47dc-8efd-907a2ca18301",
+    "cloudflare_id": "01564c52-8717-47dc-8efd-907a2ca18301"
+  },
+  {
+    "uuid": "01bc2fb0-4bca-4598-b985-d2584a3f46c0",
+    "before_id": "01bc2fb0-4bca-4598-b985-d2584a3f46c0",
+    "before_name": "@cf/baai/bge-base-en-v1.5",
+    "after_id": "@cf/baai/bge-base-en-v1.5",
+    "after_name": "@cf/baai/bge-base-en-v1.5",
+    "source_id": "01bc2fb0-4bca-4598-b985-d2584a3f46c0",
+    "cloudflare_id": "01bc2fb0-4bca-4598-b985-d2584a3f46c0"
+  },
+  {
+    "uuid": "145337e7-cec3-4ebb-8e78-16ddfc75e580",
+    "before_id": "145337e7-cec3-4ebb-8e78-16ddfc75e580",
+    "before_name": "@cf/baai/bge-reranker-base",
+    "after_id": "@cf/baai/bge-reranker-base",
+    "after_name": "@cf/baai/bge-reranker-base",
+    "source_id": "145337e7-cec3-4ebb-8e78-16ddfc75e580",
+    "cloudflare_id": "145337e7-cec3-4ebb-8e78-16ddfc75e580"
+  },
+  {
+    "uuid": "2cbc033b-ded8-4e02-bbb2-47cf05d5cfe5",
+    "before_id": "2cbc033b-ded8-4e02-bbb2-47cf05d5cfe5",
+    "before_name": "@cf/meta/llama-3.2-11b-vision-instruct",
+    "after_id": "@cf/meta/llama-3.2-11b-vision-instruct",
+    "after_name": "@cf/meta/llama-3.2-11b-vision-instruct",
+    "source_id": "2cbc033b-ded8-4e02-bbb2-47cf05d5cfe5",
+    "cloudflare_id": "2cbc033b-ded8-4e02-bbb2-47cf05d5cfe5"
+  },
+  {
+    "uuid": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+    "before_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+    "before_name": "@cf/qwen/qwen2.5-coder-32b-instruct",
+    "after_id": "@cf/qwen/qwen2.5-coder-32b-instruct",
+    "after_name": "@cf/qwen/qwen2.5-coder-32b-instruct",
+    "source_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+    "cloudflare_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+  },
+  {
+    "uuid": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+    "before_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+    "before_name": "@cf/deepseek-ai/deepseek-v4-pro-0813",
+    "after_id": "@cf/deepseek-ai/deepseek-v4-pro-0813",
+    "after_name": "@cf/deepseek-ai/deepseek-v4-pro-0813",
+    "source_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+    "cloudflare_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+  },
+  {
+    "uuid": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+    "before_id": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+    "before_name": "@cf/mistral/mistral-7b-instruct-v0.1",
+    "after_id": "@cf/mistral/mistral-7b-instruct-v0.1",
+    "after_name": "@cf/mistral/mistral-7b-instruct-v0.1",
+    "source_id": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+    "cloudflare_id": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
+  }
+]

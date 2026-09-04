@@ -125,8 +125,11 @@ class TestPipelineEndToEndDeterministic:
         keep_ids = {r["provider_model_id"] for r in buckets["keep"]}
         assert "minimax-m3-free" in keep_ids
         assert "muse-spark-1.2-contributor-free" in keep_ids
+        assert "qwen3.8-27b" in keep_ids  # ADR 0003 vision exception: coding-capable + cheap bypasses deterministic drop
         drop_ids = {r["provider_model_id"] for r in buckets["drop_llm"]}
-        assert "qwen3.8-27b" in drop_ids  # vision-specialized deterministic drop
+        assert "qwen3.8-27b" not in drop_ids
+        # regression: pure non-coding still dropped
+        assert "agnes-2.0-flash" in drop_ids
         for rec in buckets["keep"]:
             if rec.get("aa_model_id") is not None:
                 assert rec.get("aa_score") is not None

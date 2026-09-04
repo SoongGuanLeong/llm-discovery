@@ -1,5 +1,5 @@
 provider: nararouter
-evaluated_at: '2026-09-03T13:02:23.392120+00:00'
+evaluated_at: '2026-09-04T02:27:46.266887+00:00'
 keep:
 - model_id: laguna-s-2.1
   decision: keep
@@ -140,7 +140,39 @@ keep:
   evidence:
   - AA Intelligence Index 56.8 matched -> evidence_level=strong
   - 'Deterministic override: coding_score=56.8 >= 35 (coding_min)'
-  - Pricing blended $2.00/1M, intelligence per dollar 27.7 influenced tier=contributor_free
+  - Pricing blended $2.00/1M, intelligence per dollar 27.7 influenced tier=contributor
+  - Deterministic evidence overrides LLM assessment
+  coding_assessment: null
+- model_id: qwen3.8-27b
+  decision: keep
+  tier: max
+  aa_model_id: b01dee41-c62b-48ed-8d16-984adc405e5c
+  aa_score: 52
+  coding_score: 61.7
+  pricing:
+    price_1m_blended_3_to_1: 1.125
+    price_1m_input_tokens: 0.5
+    price_1m_output_tokens: 3
+  benchmarks:
+    benchmark_coverage: 0.0
+    coverage_with_supplements: 0.08
+    scores:
+      swe_bench_pro:
+        score: 61.7
+        metric: resolved
+        source: https://huggingface.co/Qwen/Qwen3.8-27B
+    raw_benchmarks:
+    - name: SWE-bench Pro
+      score: 61.7
+      metric: resolved
+      source: https://huggingface.co/Qwen/Qwen3.8-27B
+  confidence: 0.9
+  evidence_level: strong
+  evidence:
+  - AA Intelligence Index 52.0 matched -> evidence_level=strong
+  - 'Benchmark Swe Bench Pro: 61.7'
+  - 'Deterministic override: coding_score=61.7 >= 35 (coding_min)'
+  - Pricing blended $1.12/1M, intelligence per dollar 52.5 influenced tier=max
   - Deterministic evidence overrides LLM assessment
   coding_assessment: null
 drop_llm:
@@ -232,31 +264,6 @@ drop_llm:
   - AA Intelligence Index 30.4 matched -> evidence_level=moderate
   - Pricing blended $3.00/1M, intelligence per dollar 10.0 influenced tier=drop
   - Model assessed as non-coding (LLM + deterministic); forced drop
-  coding_assessment: null
-- model_id: qwen3.8-27b
-  decision: drop
-  tier: drop
-  aa_model_id: null
-  aa_score: null
-  coding_score: 61.7
-  pricing: null
-  benchmarks:
-    benchmark_coverage: 0.0
-    coverage_with_supplements: 0.08
-    scores:
-      swe_bench_pro:
-        score: 61.7
-        metric: resolved
-        source: https://huggingface.co/Qwen/Qwen3.8-27B
-    raw_benchmarks:
-    - name: SWE-bench Pro
-      score: 61.7
-      metric: resolved
-      source: https://huggingface.co/Qwen/Qwen3.8-27B
-  confidence: 1.0
-  evidence_level: strong
-  evidence:
-  - specialized_model:vision
   coding_assessment: null
 - model_id: step-3.7-flash
   decision: drop

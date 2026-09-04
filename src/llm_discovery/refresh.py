@@ -152,6 +152,13 @@ def refresh_models_dev(output=DATA_DIR / "models_dev_catalog.json", url=DEFAULT_
 
 
 def refresh_benchmarks(aa_path=DATA_DIR / "artificial_analysis_models.json", models_dev_path=DATA_DIR / "models_dev_catalog.json", output=DATA_DIR / "benchmarks.json", backup=True, dry_run=False):
+    # Cache-optional per #76/#77: succeed without local caches, use only as accelerator.
+    # When caches missing, do not create benchmarks.json (per #79).
+    aa_exists = Path(aa_path).exists()
+    md_exists = Path(models_dev_path).exists()
+    if not aa_exists or not md_exists:
+        print(f"benchmarks skipped (cache-miss): aa_exists={aa_exists} models_dev_exists={md_exists}")
+        return None
     aa = ArtificialAnalysisCatalog(aa_path)
     models_dev = ModelsDevCatalog(models_dev_path)
     cache = BenchmarkDataCache(cache_path=output)

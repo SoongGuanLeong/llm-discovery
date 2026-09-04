@@ -54,20 +54,10 @@ def build_all(
     if not provider_list:
         raise ValueError("No providers matched filter: " + str(provider_names))
 
-    # 2. Refresh cache-optional: try benchmarks rebuild if caches exist, otherwise skip gracefully.
-    # No network fetch here; we only rebuild derived benchmarks from local caches if present.
-    try:
-        from .refresh import refresh_benchmarks
-        refresh_benchmarks(
-            aa_path=data_dir / "artificial_analysis_models.json",
-            models_dev_path=data_dir / "models_dev_catalog.json",
-            output=data_dir / "benchmarks.json",
-            backup=False,
-            dry_run=False,
-        )
-    except Exception as exc:
-        # Never fail build-all on refresh; cache-optional per spec
-        print(f"refresh benchmarks skipped (cache-miss): {exc}")
+    # 2. Refresh cache-optional: benchmarks folded into per-model store; no
+    # benchmarks.json is created. Only transient catalog caches are used as
+    # optional accelerator when present; build succeeds without them.
+    # Intentionally no refresh_benchmarks call here per #79: only store is canonical.
 
     # 3. Discover all providers — cache-optional for AA/models_dev
     # Prepare optional aa/models_dev handles for discover_fn; allow None for cache-miss.

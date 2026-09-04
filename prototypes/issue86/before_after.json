@@ -1,0 +1,40 @@
+{
+  "s1": {
+    "discovered": 5,
+    "reused": 1,
+    "rebuilt": 4,
+    "gc_candidates": 0,
+    "store_size": 5,
+    "reasons": {
+      "fresh reuse": 1,
+      "ttl_stale >14d (Rank5)": 1,
+      "pricing_delta Rank4": 1,
+      "evidence_delta Rank4": 1,
+      "new_id (Rank2)": 1
+    },
+    "reuse_pct": 20.0
+  },
+  "s2": {
+    "discovered": 3,
+    "reused": 3,
+    "rebuilt": 0,
+    "gc_candidates": 0,
+    "store_size": 5,
+    "reasons": {
+      "fresh reuse": 3
+    },
+    "reuse_pct": 100.0
+  },
+  "s3": {
+    "discovered": 2,
+    "reused": 1,
+    "rebuilt": 1,
+    "gc_candidates": 0,
+    "store_size": 6,
+    "reasons": {
+      "fresh reuse": 1,
+      "identity_bad (Rank1 TTL0)": 1
+    },
+    "reuse_pct": 50.0
+  }
+}

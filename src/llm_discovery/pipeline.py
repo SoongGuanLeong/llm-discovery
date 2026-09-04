@@ -20,6 +20,86 @@ from .policy_gate import PolicyGate
 from .secrets import load_all_secrets, load_discovery_secrets, load_shared_secrets  # noqa: keep aliases for patch compat
 
 
+VISION_CHEAP_THRESHOLD = 1.2
+VISION_CODING_SCORE_MIN = 35.0
+VISION_AA_CODING_MIN = 45.0
+VISION_AA_INTEL_MIN = 55.0
+VISION_BENCH_MIN = 50.0
+
+
+def _is_vision_only(flags: list[str]) -> bool:
+    """True only if every deterministic flag is vision — no embedding/tts/etc."""
+    if not flags:
+        return False
+    return all(f == "specialized_model:vision" for f in flags)
+
+
+def _is_vision_free_model(model_id: str, resolution: Any, models_dev: Any) -> bool:
+    lower = model_id.lower()
+    if "free" in lower:
+        return True
+    aa_model = getattr(resolution, "aa_model", None) if resolution else None
+    if aa_model:
+        pricing = aa_model.get("pricing") or {}
+        blended = pricing.get("price_1m_blended_3_to_1")
+        inp = pricing.get("price_1m_input_tokens")
+        out = pricing.get("price_1m_output_tokens")
+        if blended == 0 or (inp == 0 and out == 0):
+            return True
+    # models_dev has no pricing field; free detection via model_id substring is sufficient
+    return False
+
+
+def _is_cheap_or_free(resolution: Any, model_id: str, models_dev: Any) -> bool:
+    if _is_vision_free_model(model_id, resolution, models_dev):
+        return True
+    aa_model = getattr(resolution, "aa_model", None) if resolution else None
+    if aa_model:
+        pricing = aa_model.get("pricing") or {}
+        blended = pricing.get("price_1m_blended_3_to_1")
+        if blended is not None and blended <= VISION_CHEAP_THRESHOLD:
+            return True
+    return False
+
+
+def _is_coding_capable(resolution: Any, cache: Any, model_id: str, provider_name: str) -> bool:
+    aa_model = getattr(resolution, "aa_model", None) if resolution else None
+    if aa_model:
+        evals = aa_model.get("evaluations") or {}
+        aa_coding = evals.get("artificial_analysis_coding_index")
+        aa_intel = evals.get("artificial_analysis_intelligence_index")
+        if aa_coding is not None and aa_coding >= VISION_AA_CODING_MIN:
+            return True
+        if aa_intel is not None and aa_intel >= VISION_AA_INTEL_MIN:
+            return True
+    if cache is not None:
+        from .benchmarks import build_benchmark_profile, compute_coding_score
+
+        profile = build_benchmark_profile(model_id, provider_name, cache)
+        if profile.scores:
+            coding_score, _, _ = compute_coding_score(profile)
+            if coding_score is not None and coding_score >= VISION_CODING_SCORE_MIN:
+                return True
+            for key in ("swe_bench_verified", "swe_bench_pro", "terminal_bench", "terminal_bench_2_1"):
+                val = profile.scores.get(key)
+                if val:
+                    score = val.get("score") if isinstance(val, dict) else getattr(val, "score", None)
+                    if score is not None and score >= VISION_BENCH_MIN:
+                        return True
+            # AA indexes also mirrored in benchmark cache
+            aa_coding_bm = profile.scores.get("aa_coding")
+            if aa_coding_bm:
+                s = aa_coding_bm.get("score") if isinstance(aa_coding_bm, dict) else None
+                if s is not None and s >= VISION_AA_CODING_MIN:
+                    return True
+            aa_intel_bm = profile.scores.get("aa_intelligence")
+            if aa_intel_bm:
+                s = aa_intel_bm.get("score") if isinstance(aa_intel_bm, dict) else None
+                if s is not None and s >= VISION_AA_INTEL_MIN:
+                    return True
+    return False
+
+
 def evaluate_model(
     model: dict[str, Any],
     provider_name: str,
@@ -41,9 +121,12 @@ def evaluate_model(
     resolution = resolve_model(model_id, aa, models_dev, cache)
     packet = EvidenceCollector(provider_name).collect(model, cache, models_dev, resolution)
     if packet.is_specialized():
-        reason = packet.deterministic_flags[0] if packet.deterministic_flags else "specialized_model"
-        print(f"  [evaluate] {model_id}: DROP (deterministic) - {reason}")
-        return deterministic_drop_record(model_id, reason, cache)
+        if _is_vision_only(packet.deterministic_flags) and _is_coding_capable(resolution, cache, model_id, provider_name) and _is_cheap_or_free(resolution, model_id, models_dev):
+            print(f"  [evaluate] {model_id}: vision exception - bypass deterministic drop (coding+cheap)")
+        else:
+            reason = packet.deterministic_flags[0] if packet.deterministic_flags else "specialized_model"
+            print(f"  [evaluate] {model_id}: DROP (deterministic) - {reason}")
+            return deterministic_drop_record(model_id, reason, cache)
     judge = Judge(evaluator)
     try:
         llm_result = judge.evaluate(provider_name, model, packet, cache)

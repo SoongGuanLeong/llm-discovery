@@ -19,6 +19,7 @@ wheels/
 
 # Local catalog snapshots
 data/
+!data/model_info_store.json
 
 .dsh-worktrees/
 

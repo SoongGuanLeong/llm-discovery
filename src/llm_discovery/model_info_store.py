@@ -14,10 +14,14 @@ See also:
 
 from __future__ import annotations
 
+import json
+import os
 import re
 import statistics
+import tempfile
 from dataclasses import dataclass, field, asdict
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -770,6 +774,9 @@ __all__ = [
     "BenchmarkSnapshot",
     "PricingSnapshot",
     "StoreMeta",
+    "ModelInfoStore",
+    "STORE_FILE_VERSION",
+    "RECOMMENDED_STORE_PATH_OBJ",
     "EVIDENCE_LEVEL_ORDER",
     "CACHEABLE_LEVELS",
     "FIELD_INCLUSION_MATRIX",
@@ -777,3 +784,255 @@ __all__ = [
     "STORE_SCHEMA_DOC",
     "EXAMPLE_YAML_SNIPPET",
 ]
+
+# ---------------------------------------------------------------------------
+# Persistence — issue #68
+# ---------------------------------------------------------------------------
+# Location: data/model_info_store.json (JSON, committed snapshot).
+# Invalidation: never expire (TTL=None default). Optional is_stale() when
+# caller passes ttl_days (e.g. 90) but not enforced by default — data hardly
+# changes, new name = new record, stronger evidence merges via merge_records.
+# Concurrency: file lock (fcntl.flock) + atomic write (tmp + os.replace).
+# Versioning: STORE_FILE_VERSION at file level, StoreMeta.version per record.
+# Read path: lazy load on first get(), in-memory dict, per-model lookup.
+
+STORE_FILE_VERSION: int = 1
+RECOMMENDED_STORE_PATH_OBJ: Path = Path(RECOMMENDED_STORE_PATH)
+
+def is_stale(last_updated: str | None, ttl_days: int | None = None) -> bool:
+    """Return True if record older than ttl_days. None ttl = never stale."""
+    if ttl_days is None or ttl_days <= 0:
+        return False
+    if not last_updated:
+        return False
+    try:
+        dt = datetime.fromisoformat(last_updated.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        age_days = (datetime.now(UTC) - dt).days
+        return age_days > ttl_days
+    except Exception:
+        return False
+
+def _acquire_lock(fh) -> None:
+    try:
+        import fcntl
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+    except Exception:
+        pass
+
+def _release_lock(fh) -> None:
+    try:
+        import fcntl
+        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    except Exception:
+        pass
+
+def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".tmp-store-", suffix=".json")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            json.dump(payload, fh, indent=2, ensure_ascii=False, sort_keys=False)
+            fh.write("\n")
+            fh.flush()
+            try:
+                os.fsync(fh.fileno())
+            except Exception:
+                pass
+        os.replace(tmp, path)
+    finally:
+        try:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+        except Exception:
+            pass
+
+class ModelInfoStore:
+    """Persistence for cross-provider store (issue #68).
+
+    File: data/model_info_store.json  {"version": 1, "models": {key: record_dict}}
+    Committed snapshot (git exception), atomic write, fcntl lock.
+    Lazy load: first get() loads file into memory; writes flush immediately.
+    TTL: never expire by default; caller may pass ttl_days to treat stale as miss.
+    Merge: put() merges via merge_records (strong > moderate, tie confidence/newer).
+    """
+
+    def __init__(self, path: str | Path | None = None) -> None:
+        self.path: Path = Path(path) if path is not None else RECOMMENDED_STORE_PATH_OBJ
+        self._data: dict[str, ModelInfoRecord] = {}
+        self._loaded: bool = False
+        self._file_version: int = STORE_FILE_VERSION
+
+    # -- load / save --
+
+    def load(self) -> None:
+        if not self.path.exists():
+            self._data = {}
+            self._loaded = True
+            self._file_version = STORE_FILE_VERSION
+            return
+        try:
+            raw = json.loads(self.path.read_text())
+        except Exception:
+            self._data = {}
+            self._loaded = True
+            return
+        # version header
+        if isinstance(raw, dict) and "models" in raw:
+            self._file_version = int(raw.get("version", STORE_FILE_VERSION))
+            models_raw = raw.get("models", {})
+        elif isinstance(raw, dict):
+            # legacy bare dict without wrapper
+            self._file_version = int(raw.get("_version", STORE_FILE_VERSION))
+            models_raw = {k: v for k, v in raw.items() if not k.startswith("_")}
+            if "_version" in raw:
+                models_raw = raw.get("models", models_raw)
+        else:
+            models_raw = {}
+        data: dict[str, ModelInfoRecord] = {}
+        for k, v in (models_raw or {}).items():
+            try:
+                data[str(k)] = ModelInfoRecord.from_dict(v) if isinstance(v, dict) else v
+            except Exception:
+                continue
+        self._data = data
+        self._loaded = True
+
+    def save(self) -> None:
+        payload = {
+            "version": STORE_FILE_VERSION,
+            "models": {k: v.to_dict() for k, v in self._data.items()},
+        }
+        _atomic_write_json(self.path, payload)
+
+    def _ensure_loaded(self) -> None:
+        if not self._loaded:
+            self.load()
+
+    # -- read path --
+
+    def get(self, provider_model_id: str) -> ModelInfoRecord | None:
+        self._ensure_loaded()
+        key = normalize_store_key(provider_model_id)
+        if not key:
+            return None
+        return self._data.get(key)
+
+    def lookup(self, provider_model_id: str) -> ModelInfoRecord | None:
+        return self.get(provider_model_id)
+
+    def get_by_key(self, store_key: str) -> ModelInfoRecord | None:
+        self._ensure_loaded()
+        return self._data.get(store_key)
+
+    def contains(self, provider_model_id: str) -> bool:
+        return self.get(provider_model_id) is not None
+
+    def is_stale_record(self, provider_model_id: str, ttl_days: int | None = None) -> bool:
+        rec = self.get(provider_model_id)
+        if rec is None:
+            return False
+        return is_stale(rec._meta.last_updated, ttl_days)
+
+    def get_if_fresh(self, provider_model_id: str, ttl_days: int | None = None) -> ModelInfoRecord | None:
+        rec = self.get(provider_model_id)
+        if rec is None:
+            return None
+        if is_stale(rec._meta.last_updated, ttl_days):
+            return None
+        return rec
+
+    # -- write path --
+
+    def put(self, store_key: str, record: ModelInfoRecord) -> None:
+        self._ensure_loaded()
+        if not should_cache(record.evidence_level, record.confidence):
+            return
+        # Reload current file to avoid lost updates when multiple Store instances race (ThreadPool).
+        # Best-effort lock + re-read before merge.
+        try:
+            if self.path.exists():
+                raw = json.loads(self.path.read_text())
+                if isinstance(raw, dict) and "models" in raw:
+                    fresh = {}
+                    for k, v in (raw.get("models", {}) or {}).items():
+                        try:
+                            fresh[str(k)] = ModelInfoRecord.from_dict(v) if isinstance(v, dict) else v
+                        except Exception:
+                            continue
+                    # merge fresh from disk into self._data without overwriting newer in-memory that not yet flushed?
+                    # Keep self._data entries that are newer (by last_updated) otherwise take fresh.
+                    for k, v in fresh.items():
+                        if k not in self._data:
+                            self._data[k] = v
+                        else:
+                            # if disk has newer last_updated, it was written by another instance after our load; keep disk's fresher value for other keys
+                            # but for the target key we will merge below anyway; preserve other keys from disk
+                            if k != store_key:
+                                # prefer fresher by last_updated
+                                try:
+                                    disk_ts = v._meta.last_updated or ""
+                                    mem_ts = self._data[k]._meta.last_updated or ""
+                                    if disk_ts > mem_ts:
+                                        self._data[k] = v
+                                except Exception:
+                                    pass
+        except Exception:
+            pass
+        existing = self._data.get(store_key)
+        merged = merge_records(existing, record)
+        self._data[store_key] = merged
+        self.save()
+
+    def put_for_model(self, provider_model_id: str, record: ModelInfoRecord) -> None:
+        key = normalize_store_key(provider_model_id)
+        if not key:
+            return
+        self.put(key, record)
+
+    def upsert_from_provider_record(self, provider_model_id: str, provider_record: dict[str, Any], provider: str | None = None, evaluated_at: str | None = None) -> bool:
+        lvl = provider_record.get("evidence_level")
+        if not should_cache(lvl, provider_record.get("confidence")):
+            return False
+        rec = ModelInfoRecord.from_provider_record(provider_record, provider=provider, evaluated_at=evaluated_at)
+        self.put_for_model(provider_model_id, rec)
+        return True
+
+    def merge_from_dict(self, models_dict: dict[str, dict[str, Any]]) -> int:
+        count = 0
+        for k, v in (models_dict or {}).items():
+            try:
+                rec = ModelInfoRecord.from_dict(v) if isinstance(v, dict) else v
+                if should_cache(rec.evidence_level, rec.confidence):
+                    self.put(str(k), rec)
+                    count += 1
+            except Exception:
+                continue
+        return count
+
+    # -- stats --
+
+    def keys(self) -> list[str]:
+        self._ensure_loaded()
+        return sorted(self._data.keys())
+
+    def size(self) -> int:
+        self._ensure_loaded()
+        return len(self._data)
+
+    def __len__(self) -> int:
+        return self.size()
+
+    def __contains__(self, provider_model_id: str) -> bool:
+        return self.contains(provider_model_id)
+
+    def clear(self) -> None:
+        self._data = {}
+        self._loaded = True
+        self.save()
+
+    def to_dict(self) -> dict[str, Any]:
+        self._ensure_loaded()
+        return {k: v.to_dict() for k, v in self._data.items()}
+

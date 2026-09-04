@@ -611,56 +611,69 @@ def _benchmark_union_max(existing: BenchmarkSnapshot | None, incoming: Benchmark
 
 def merge_records(existing: ModelInfoRecord | None, incoming: ModelInfoRecord) -> ModelInfoRecord:
     """
-    Merge incoming into existing per #64 rules:
-    - Ordinal: strong > moderate > weak > none (tie-break confidence -> newer last_updated)
-    - Per-field best-of + gap-fill: keep strongest value per field; fill null gaps from weaker
-    - Benchmarks: union max per key
-    - Pricing: aggregated later via aggregate_pricing; here gap-fill only if existing pricing null
-    - Provenance: union source_providers / source_evidence_levels, bump last_updated
+    Merge incoming into existing per #72 Q10 b (price re-avg + gap-fill):
+    - Pricing: always re-aggregated via aggregate_pricing (avg across providers, outlier guard)
+    - Other scalar fields (aa_model_id, aa_score, coding_score, evidence, evidence_level, confidence, tier):
+      gap-fill only — if existing not None, keep existing; else take incoming. Never overwrite.
+      Rationale: model capability tied to identity, not provider; first strong write freezes.
+    - Benchmarks: union max per key (coverage max, scores max) — monotonic growth.
+    - Provenance: union source_providers / source_evidence_levels, bump last_updated.
+    Replaces #64 stronger-wins logic for scalars; benchmarks/pricing keep union semantics.
     """
     if existing is None:
         return incoming
-    # Determine stronger record for tie-break
-    e_rank = evidence_level_rank(existing.evidence_level)
-    i_rank = evidence_level_rank(incoming.evidence_level)
-    # Helper to pick winner per-field by rank, then confidence, then recency
-    def _pick(field_name: str):
+
+    def _gap_fill(field_name: str):
         e_val = getattr(existing, field_name)
         i_val = getattr(incoming, field_name)
-        # Gap-fill: if existing null and incoming has value, take incoming
-        if e_val is None and i_val is not None:
-            return i_val
-        if i_val is None:
+        if e_val is not None and e_val != "" and e_val != []:
+            # existing has value — keep (even if empty list vs None handled)
+            # For evidence list: keep existing if non-empty
+            if isinstance(e_val, list) and len(e_val) == 0 and isinstance(i_val, list) and len(i_val) > 0:
+                return i_val
             return e_val
-        # Both present: higher evidence wins
-        if i_rank > e_rank:
-            return i_val
-        if e_rank > i_rank:
-            return e_val
-        # Tie: higher confidence wins
-        e_conf = existing.confidence or 0
-        i_conf = incoming.confidence or 0
-        if i_conf > e_conf:
-            return i_val
-        if e_conf > i_conf:
-            return e_val
-        # Tie: newer last_updated wins
-        e_ts = existing._meta.last_updated or ""
-        i_ts = incoming._meta.last_updated or ""
-        if i_ts > e_ts:
+        if i_val is not None:
             return i_val
         return e_val
 
+    # Pricing: always re-aggregate (avg). Convert snapshots to dict obs for helper.
+    def _snap_to_obs(snap):
+        if not snap:
+            return None
+        d = snap.to_dict() if hasattr(snap, 'to_dict') else dict(snap)
+        return {k: d.get(k) for k in ('blended','input','output','provider','source_provider') if k in d}
+    merged_pricing = None
+    obs_list = []
+    for snap in (existing.pricing, incoming.pricing):
+        if snap:
+            obs = snap.to_dict() if hasattr(snap, 'to_dict') else dict(snap)
+            # normalize keys for aggregate_pricing
+            obs_list.append(obs)
+    if len(obs_list) >= 2:
+        try:
+            agg = aggregate_pricing(obs_list)
+            if agg:
+                merged_pricing = PricingSnapshot(blended=agg.get('blended'), input=agg.get('input'), output=agg.get('output'), per_provider_overrides=agg.get('per_provider_overrides', {}))
+            else:
+                merged_pricing = existing.pricing
+        except Exception:
+            merged_pricing = existing.pricing or incoming.pricing
+    elif len(obs_list) == 1:
+        # single obs — keep as is, no outlier logic
+        merged_pricing = existing.pricing or incoming.pricing
+    else:
+        merged_pricing = None
+
     merged = ModelInfoRecord(
-        aa_model_id=_pick("aa_model_id"),
-        aa_score=_pick("aa_score"),
-        coding_score=_pick("coding_score"),
+        aa_model_id=_gap_fill("aa_model_id"),
+        aa_score=_gap_fill("aa_score"),
+        coding_score=_gap_fill("coding_score"),
         benchmarks=_benchmark_union_max(existing.benchmarks, incoming.benchmarks),
-        evidence=_pick("evidence"),
-        evidence_level=_pick("evidence_level"),
-        confidence=_pick("confidence"),
-        tier=_pick("tier"),
-        pricing=_pick("pricing"),  # gap-fill; aggregated pricing handled at store-level
+        evidence=_gap_fill("evidence"),
+        evidence_level=_gap_fill("evidence_level"),
+        confidence=_gap_fill("confidence"),
+        tier=_gap_fill("tier"),
+        pricing=merged_pricing,
         _meta=StoreMeta(
             first_seen=existing._meta.first_seen or incoming._meta.first_seen,
             last_updated=max(
@@ -797,6 +810,7 @@ __all__ = [
 # Read path: lazy load on first get(), in-memory dict, per-model lookup.
 
 STORE_FILE_VERSION: int = 1
+DEFAULT_TTL_DAYS: int = 14  # SCD1 freshness gate per #72 Q7
 RECOMMENDED_STORE_PATH_OBJ: Path = Path(RECOMMENDED_STORE_PATH)
 
 def is_stale(last_updated: str | None, ttl_days: int | None = None) -> bool:
@@ -813,6 +827,10 @@ def is_stale(last_updated: str | None, ttl_days: int | None = None) -> bool:
         return age_days > ttl_days
     except Exception:
         return False
+
+def dumps_compact(payload: dict[str, Any]) -> str:
+    """Return minified JSON (no whitespace) for token-cheap LLM reads. #72 Q3."""
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=False)
 
 def _acquire_lock(fh) -> None:
     try:
@@ -1011,6 +1029,18 @@ class ModelInfoStore:
                 continue
         return count
 
+    def dumps_compact(self) -> str:
+        """Minified JSON of store payload for LLM token-cheap reads. #72 Q3."""
+        self._ensure_loaded()
+        payload = {"version": STORE_FILE_VERSION, "models": {k: v.to_dict() for k, v in self._data.items()}}
+        return dumps_compact(payload)
+
+    def dumps_pretty(self) -> str:
+        """Pretty JSON (on-disk format)."""
+        self._ensure_loaded()
+        payload = {"version": STORE_FILE_VERSION, "models": {k: v.to_dict() for k, v in self._data.items()}}
+        return json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=False) + "\n"
+
     # -- stats --
 
     def keys(self) -> list[str]:
@@ -1035,4 +1065,3 @@ class ModelInfoStore:
     def to_dict(self) -> dict[str, Any]:
         self._ensure_loaded()
         return {k: v.to_dict() for k, v in self._data.items()}
-

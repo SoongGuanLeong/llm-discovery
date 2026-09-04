@@ -82,6 +82,7 @@ class TestInvalidationTTL:
         assert store.get_if_fresh("old-model", ttl_days=300) is not None
 
     def test_stronger_evidence_overwrites_via_merge(self, tmp_path):
+        # #72 Q10 b gap-fill: existing scalar kept, not overwritten by stronger
         p = tmp_path / "s.json"
         store = ModelInfoStore(p)
         r1 = ModelInfoRecord(aa_score=50, evidence_level="moderate", confidence=0.8, _meta=StoreMeta(last_updated="2026-09-04T01:00:00+00:00", source_providers=["a"]))
@@ -89,7 +90,7 @@ class TestInvalidationTTL:
         store.put("m", r1)
         store.put("m", r2)
         got = store.get_by_key("m")
-        assert got.aa_score == 60
+        assert got.aa_score == 50  # gap-fill only, keep existing
         assert set(got._meta.source_providers) == {"a", "b"}
 
 

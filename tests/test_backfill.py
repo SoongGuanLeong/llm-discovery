@@ -66,12 +66,12 @@ class TestBackfillSeam:
         _write_yaml(results / "a.yaml", "a", [_keep("openai/gpt-4o", evidence_level="moderate", aa_score=50)])
         store_path = tmp_path / "store.json"
         backfill(results_dir=results, store_path=store_path)
-        # second run with stronger evidence should merge via strong > moderate
+        # second run with stronger evidence: #72 Q10 b gap-fill keeps existing scalar (50), not overwrite
         _write_yaml(results / "b.yaml", "b", [_keep("groq/gpt-4o", evidence_level="strong", aa_score=60)])
         stats2 = backfill(results_dir=results, store_path=store_path)
         assert stats2["unique_models"] == 1
         store = ModelInfoStore(store_path)
-        assert store.get("gpt-4o").aa_score == 60  # strong wins
+        assert store.get("gpt-4o").aa_score == 50  # gap-fill only, keep existing
 
     def test_outliers_separated(self, tmp_path):
         results = tmp_path / "results"

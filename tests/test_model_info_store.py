@@ -135,11 +135,12 @@ class TestPricingAggregation:
 
 class TestMergeRecords:
     def test_strong_wins_over_moderate(self):
+        # #72 Q10 b: pricing re-avg, other scalars gap-fill only — existing value kept even if incoming stronger
         r1 = ModelInfoRecord(aa_score=50, evidence_level="moderate", confidence=0.8, evidence=["x"], _meta=StoreMeta(last_updated="2026-09-04T01:00:00+00:00", source_providers=["a"]))
         r2 = ModelInfoRecord(aa_score=55, evidence_level="strong", confidence=0.9, evidence=["y"], _meta=StoreMeta(last_updated="2026-09-04T02:00:00+00:00", source_providers=["b"]))
         m = merge_records(r1, r2)
-        assert m.aa_score == 55
-        assert m.evidence == ["y"]
+        assert m.aa_score == 50  # gap-fill only, keep existing
+        assert m.evidence == ["x"]
         assert set(m._meta.source_providers) == {"a", "b"}
 
     def test_gap_fill(self):

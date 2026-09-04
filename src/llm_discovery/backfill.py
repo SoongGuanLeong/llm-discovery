@@ -9,10 +9,12 @@ from typing import Any
 import yaml
 
 from .model_info_store import (
+    DEFAULT_TTL_DAYS,
     ModelInfoRecord,
     ModelInfoStore,
     PricingSnapshot,
     aggregate_pricing,
+    is_stale,
     merge_records,
     normalize_store_key,
     should_cache,
@@ -80,10 +82,15 @@ def backfill(
     # Keep evaluated_at range for meta?
     all_evaluated_at: list[str] = []
 
+    stale_skipped = 0
     for yf in yaml_files:
         provider, evaluated_at, keep = _parse_results_file(yf)
         if evaluated_at:
             all_evaluated_at.append(str(evaluated_at))
+        # 14d SCD1 gate per #72 Q7 / spec #76: skip file if evaluated_at stale
+        if evaluated_at and is_stale(str(evaluated_at), DEFAULT_TTL_DAYS):
+            stale_skipped += len(keep)
+            continue
         for rec in keep:
             total_keep += 1
             model_id = rec.get("model_id") or rec.get("provider_model_id") or ""
@@ -177,6 +184,7 @@ def backfill(
         "pricing_avgs": pricing_avgs,
         "pricing_outliers": pricing_outliers,
         "weak_skipped": weak_skipped,
+        "stale_skipped": stale_skipped,
         "evaluated_at_range": [min(all_evaluated_at), max(all_evaluated_at)] if all_evaluated_at else [],
         "store_path": str(store_path),
         "store_size": store.size(),

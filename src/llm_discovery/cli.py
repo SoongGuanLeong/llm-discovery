@@ -74,12 +74,37 @@ def build_parser() -> argparse.ArgumentParser:
     refresh_parser.add_argument("--dry-run", action="store_true", help="Fetch and validate but do not write")
     refresh_parser.add_argument("--only", nargs="*", choices=["aa", "models_dev", "benchmarks"], help="Only refresh selected catalogs")
 
+    build_parser = subparsers.add_parser("build-all", help="Build all providers into model_info_store (cache-optional, 14d filter, atomic).")
+    build_parser.add_argument("--data-dir", type=Path, default=DATA_DIR, help="Data directory (default: data)")
+    build_parser.add_argument("--config", type=Path, default=Path("config/providers.yaml"), help="Providers YAML path")
+    build_parser.add_argument("--providers", nargs="*", help="Optional subset of provider names")
+    build_parser.add_argument("--max-workers", type=int, default=4, help="Workers per provider")
+
     return parser
 
 
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
+
+    if args.catalog == "build-all":
+        from .build_all import build_all
+        try:
+            res = build_all(
+                data_dir=args.data_dir,
+                config_path=args.config,
+                provider_names=args.providers,
+                max_workers=args.max_workers,
+            )
+            sp = res['store_path']
+            sz = res['store_size']
+            cb = res['compact_bytes']
+            pb = res['pretty_bytes']
+            print(f"Done: build-all store {sp} size={sz} compact {cb} < pretty {pb}")
+        except Exception as e:
+            print(f"build-all failed: {e}")
+            raise SystemExit(1)
+        return
 
     if args.catalog == "refresh":
         from .refresh import refresh_all

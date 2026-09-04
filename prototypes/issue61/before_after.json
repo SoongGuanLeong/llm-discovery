@@ -1,0 +1,219 @@
+{
+  "cases": [
+    {
+      "id": "agnes-2.0:free",
+      "premium": "<str>",
+      "provider": null,
+      "before": true,
+      "after": true,
+      "expected": true,
+      "desc": "generic :free marker free",
+      "ok": true
+    },
+    {
+      "id": "model-free",
+      "premium": "<str>",
+      "provider": null,
+      "before": true,
+      "after": true,
+      "expected": true,
+      "desc": "generic -free marker free",
+      "ok": true
+    },
+    {
+      "id": "model_free",
+      "premium": "<str>",
+      "provider": null,
+      "before": true,
+      "after": true,
+      "expected": true,
+      "desc": "generic _free marker free",
+      "ok": true
+    },
+    {
+      "id": "model/free",
+      "premium": "<str>",
+      "provider": null,
+      "before": true,
+      "after": true,
+      "expected": true,
+      "desc": "generic /free marker free",
+      "ok": true
+    },
+    {
+      "id": "gpt-4",
+      "premium": "<str>",
+      "provider": null,
+      "before": false,
+      "after": false,
+      "expected": false,
+      "desc": "generic no marker no premium not free",
+      "ok": true
+    },
+    {
+      "id": "gpt-4",
+      "premium": false,
+      "provider": null,
+      "before": false,
+      "after": false,
+      "expected": false,
+      "desc": "generic premium false without navy not free (scoped)",
+      "ok": true
+    },
+    {
+      "id": "gpt-4",
+      "premium": false,
+      "provider": "openai",
+      "before": false,
+      "after": false,
+      "expected": false,
+      "desc": "openai premium false not free",
+      "ok": true
+    },
+    {
+      "id": "gpt-4",
+      "premium": false,
+      "provider": "navy_ai",
+      "before": false,
+      "after": true,
+      "expected": true,
+      "desc": "navy premium false free (OR)",
+      "ok": true
+    },
+    {
+      "id": "gpt-4",
+      "premium": true,
+      "provider": "navy_ai",
+      "before": false,
+      "after": false,
+      "expected": false,
+      "desc": "navy premium true not free",
+      "ok": true
+    },
+    {
+      "id": "gpt-4",
+      "premium": "<str>",
+      "provider": "navy_ai",
+      "before": false,
+      "after": false,
+      "expected": false,
+      "desc": "navy missing premium no marker not free",
+      "ok": true
+    },
+    {
+      "id": "gpt-4",
+      "premium": null,
+      "provider": "navy_ai",
+      "before": false,
+      "after": false,
+      "expected": false,
+      "desc": "navy premium None not free (identity)",
+      "ok": true
+    },
+    {
+      "id": "gpt-4",
+      "premium": "false",
+      "provider": "navy_ai",
+      "before": false,
+      "after": false,
+      "expected": false,
+      "desc": "navy premium string false not free",
+      "ok": true
+    },
+    {
+      "id": "gpt-4",
+      "premium": 0,
+      "provider": "navy_ai",
+      "before": false,
+      "after": false,
+      "expected": false,
+      "desc": "navy premium 0 not free",
+      "ok": true
+    },
+    {
+      "id": "gpt-4:free",
+      "premium": true,
+      "provider": "navy_ai",
+      "before": true,
+      "after": true,
+      "expected": true,
+      "desc": "navy marker wins even premium true",
+      "ok": true
+    },
+    {
+      "id": "gpt-4:free",
+      "premium": "<str>",
+      "provider": "navy_ai",
+      "before": true,
+      "after": true,
+      "expected": true,
+      "desc": "navy marker free",
+      "ok": true
+    },
+    {
+      "id": "gpt-4-free",
+      "premium": false,
+      "provider": "navy_ai",
+      "before": true,
+      "after": true,
+      "expected": true,
+      "desc": "navy both marker and premium false free",
+      "ok": true
+    },
+    {
+      "id": "gpt-4-free",
+      "premium": true,
+      "provider": "navy_ai",
+      "before": true,
+      "after": true,
+      "expected": true,
+      "desc": "navy marker wins despite premium true",
+      "ok": true
+    },
+    {
+      "id": "gpt-4:free",
+      "premium": null,
+      "provider": "navy_ai",
+      "before": true,
+      "after": true,
+      "expected": true,
+      "desc": "str marker free navy still marker-only",
+      "ok": true
+    },
+    {
+      "id": "gpt-4",
+      "premium": null,
+      "provider": "navy_ai",
+      "before": false,
+      "after": false,
+      "expected": false,
+      "desc": "str no marker not free even navy (no premium dict)",
+      "ok": true
+    }
+  ],
+  "normalize_check": "preserve premium",
+  "splits": {
+    "generic_mixed": {
+      "before_keep": [
+        "b:free"
+      ],
+      "after_keep": [
+        "b:free"
+      ]
+    },
+    "navy_premium": {
+      "after_keep": [
+        "a"
+      ]
+    },
+    "navy_mixed": {
+      "before_keep": [
+        "m3:free"
+      ],
+      "after_keep": [
+        "m1",
+        "m3:free"
+      ]
+    }
+  }
+}

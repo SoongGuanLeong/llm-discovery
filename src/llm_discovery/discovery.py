@@ -21,13 +21,16 @@ def _normalize_models(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     for m in models:
         model_id = m.get("id") or m.get("name") or m.get("model") or str(m)
-        normalized.append(
-            {
-                "id": model_id,
-                "name": m.get("name") or m.get("id") or m.get("display_name") or model_id,
-                "object": m.get("object", "model"),
-            }
-        )
+        entry: dict[str, Any] = {
+            "id": model_id,
+            "name": m.get("name") or m.get("id") or m.get("display_name") or model_id,
+            "object": m.get("object", "model"),
+        }
+        # Preserve premium flag when present (navy_ai: premium==false => free).
+        # Omit when absent to distinguish missing vs explicit false (ADR 0004).
+        if "premium" in m:
+            entry["premium"] = m["premium"]
+        normalized.append(entry)
     return normalized
 
 

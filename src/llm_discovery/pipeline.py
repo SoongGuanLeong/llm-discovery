@@ -323,12 +323,12 @@ def discover_single(
     elif provider.discovery == "cloudflare":
         account_id = os.environ["CLOUDFLARE_ACCOUNT_ID"]
         models = discover_cloudflare_models(account_id, api_key)
-        eval_models, dropped_models = _split_by_free_rule(models)
+        eval_models, dropped_models = _split_by_free_rule(models, provider_name)
         if dropped_models:
             print(f"[{provider_name}] Free-model filter: dropped {len(dropped_models)} non-free, keeping {len(eval_models)} free")
     else:
         models = discover_models(base_url, api_key)
-        eval_models, dropped_models = _split_by_free_rule(models)
+        eval_models, dropped_models = _split_by_free_rule(models, provider_name)
         if dropped_models:
             print(f"[{provider_name}] Free-model filter: dropped {len(dropped_models)} non-free, keeping {len(eval_models)} free")
     if not eval_models:
@@ -413,14 +413,14 @@ def discover_provider(
             print(f"[{provider_name}] Discovering models via Cloudflare API...")
             models = discover_cloudflare_models(account_id, api_key)
             print(f"[{provider_name}] Discovered {len(models)} models")
-            eval_models, dropped_models = _split_by_free_rule(models)
+            eval_models, dropped_models = _split_by_free_rule(models, provider_name)
             if dropped_models:
                 print(f"[{provider_name}] Free-model filter: dropped {len(dropped_models)} non-free, keeping {len(eval_models)} free")
         else:
             print(f"[{provider_name}] Discovering models from {base_url}/models ...")
             models = discover_models(base_url, api_key)
             print(f"[{provider_name}] Discovered {len(models)} models")
-            eval_models, dropped_models = _split_by_free_rule(models)
+            eval_models, dropped_models = _split_by_free_rule(models, provider_name)
             if dropped_models:
                 print(f"[{provider_name}] Free-model filter: dropped {len(dropped_models)} non-free, keeping {len(eval_models)} free")
     except Exception as exc:  # noqa: BLE001 — provider-level failure
@@ -581,40 +581,61 @@ _provider_error_result = provider_error_result
 FREE_MARKERS = (":free", "-free", "_free", "/free")
 
 
-def _is_free_model(model_id: str) -> bool:
-    """Return True if model_id contains any free marker."""
+def _is_free_model(model: dict[str, Any] | str, provider_name: str | None = None) -> bool:
+    """Return True if model is free (ADR 0004 navy-scoped).
+
+    Generic: id contains any FREE_MARKERS.
+    Navy_ai scoped: marker OR premium is False (identity check).
+    Missing/None/string premium -> marker-only fallback. Str model -> marker-only.
+    """
+    if isinstance(model, dict):
+        model_id = str(model.get("id", ""))
+        is_marker = any(marker in model_id for marker in FREE_MARKERS)
+        if is_marker:
+            return True
+        if provider_name == "navy_ai" and model.get("premium") is False:
+            return True
+        return False
+    model_id = str(model)
     return any(marker in model_id for marker in FREE_MARKERS)
 
 
-def _has_free_name(models: list[dict[str, Any]]) -> bool:
-    """Return True if any model id contains a free marker."""
-    return any(_is_free_model(m.get("id", "")) for m in models)
+def _has_free_name(models: list[dict[str, Any]], provider_name: str | None = None) -> bool:
+    """Return True if any model qualifies as free under provider rule."""
+    return any(_is_free_model(m, provider_name) for m in models)
 
 
 def _split_by_free_rule(
     models: list[dict[str, Any]],
+    provider_name: str = "",
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Split models into (keep, dropped) by free-model rule.
+    """Split models into (keep, dropped) by free-model rule (provider-aware).
 
-    If any model id contains a free marker (``:free``, ``-free``, ``_free``),
-    only free models are kept; non-free models are returned as dropped and
-    must NOT be sent to the LLM nor written to YAML.
+    Generic (default): if any id contains a free marker (``:free``, ``-free``, ``_free``),
+    only free models kept.
+    Navy_ai (provider_name=="navy_ai"): marker OR premium is False.
+    Default provider_name="" => generic marker-only, zero regression for others.
+    Dropped models must NOT be sent to LLM nor written to YAML.
     """
-    if not _has_free_name(models):
+    # Normalize provider_name for _is_free_model (None vs "" both generic)
+    pn = provider_name or None
+    if not _has_free_name(models, pn):
         return models, []
-    free_models = [m for m in models if _is_free_model(m.get("id", ""))]
+    free_models = [m for m in models if _is_free_model(m, pn)]
     non_free = [m for m in models if m not in free_models]
     return free_models, non_free
 
 
-def _apply_free_model_rule(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _apply_free_model_rule(
+    models: list[dict[str, Any]], provider_name: str = ""
+) -> list[dict[str, Any]]:
     """Legacy mutating helper — now delegates to _split_by_free_rule.
 
     Mutates dropped models with ``_deterministic_drop`` / ``_drop_reason`` for
     backward compatibility, but callers should prefer ``_split_by_free_rule``
     which filters BEFORE LLM evaluation.
     """
-    free_models, non_free = _split_by_free_rule(models)
+    free_models, non_free = _split_by_free_rule(models, provider_name)
     if not non_free:
         return models
     reason = f"free-model-rule: all non-free models dropped because {free_models[0]['id'] if free_models else 'a free model'} has a free marker in its id"

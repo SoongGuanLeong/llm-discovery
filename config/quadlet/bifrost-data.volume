@@ -1,0 +1,13 @@
+[Volume]
+# Bifrost data bind-mount volume for file-only config persistence
+# Bind-mounts the project's data/bifrost directory to /app/data in container
+# User must update Source to the absolute path of their project's data/bifrost
+# Example: Source=/home/user/projects/llm-discovery/data/bifrost
+Type=bind
+Source=/home/soongguanleong/projects/llm-discovery/data/bifrost
+Destination=/app/data
+# SELinux label :Z ensures proper labeling for container access
+Options=Z
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,41 @@
+[Unit]
+Description=Bifrost AI Gateway (file-only config, user service)
+Documentation=https://github.com/maximhq/bifrost
+After=network-online.target
+Wants=network-online.target
+Requires=bifrost-data.volume
+After=bifrost-data.volume
+
+[Container]
+# Bifrost image - uses maximhq/bifrost from Docker Hub
+# UID 1000 matches typical non-root user
+Image=docker.io/maximhq/bifrost:latest
+# Mount the bifrost-data volume (bind-mount to project's data/bifrost)
+Volume=bifrost-data.volume:/app/data:Z
+# Publish Bifrost HTTP port
+PublishPort=8080:8080
+# Environment file with secrets (Infisical export or manual .env)
+# File must be 0600 and contain VAR=value lines
+EnvironmentFile=%h/.config/bifrost/bifrost.env
+# Run as current user (UID 1000 in image)
+User=1000
+# Allow private network access for local vLLM/Ollama backends
+# This matches the Podman --allow-private-network flag
+Exec=--allow-private-network=true
+# Health check via Bifrost's built-in /health endpoint
+HealthCmd=/bin/sh -c "curl -fsS http://localhost:8080/health || exit 1"
+HealthInterval=30s
+HealthTimeout=5s
+HealthRetries=3
+HealthStartPeriod=10s
+
+[Service]
+# Restart on failure, with generous start timeout for image pull
+Restart=on-failure
+TimeoutStartSec=900
+# Log to journal (user scope) - view with: journalctl --user -u bifrost -f
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

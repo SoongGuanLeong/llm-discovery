@@ -25,7 +25,7 @@ _Avoid_: coverage, bench score
 ### Source of Truth
 
 **Source of Truth**:
-The committed `data/model_info_store.json` store. It is the only durable artifact consulted for TTL reuse; per-model lookups normalize via `normalize_store_key`.
+The committed `data/model_info_store.json` slim v2 store (version 2, {benchmarks, pricing, _meta} per normalized key). It is the only durable artifact consulted for TTL reuse; per-model lookups normalize via `normalize_store_key`.
 _Avoid_: cache, model cache, database
 
 **Ephemeral Report**:
@@ -46,7 +46,7 @@ _Avoid_: fake evidence, weak claim
 
 
 **Invalidation Signal**:
-Ranked condition that forces a Keeper to be rebuilt even before Record TTL expiry. Order: Identity Integrity → Model-List Churn (new) → Evidence / Benchmark Delta (including Pricing Delta) → Time TTL. Checked in build_all before reuse.
+Ranked condition that forces a Keeper to be rebuilt even before Record TTL expiry. Order: Identity Integrity → Model-List Churn (new) → Pricing TTL (14d re-average) → Time TTL. Evidence / Benchmark Delta disabled per Wayfinder 91 (benchmarks immutable gap-fill). Checked in build_all before reuse.
 _Avoid_: stale reason, expiry trigger
 
 **Model-List Churn**:
@@ -54,11 +54,11 @@ Difference between the current discovered normalized keys and the keys stored fo
 _Avoid_: provider diff, list drift
 
 **Evidence Delta**:
-Change between fresh catalog/benchmark lookup and stored ModelInfoRecord that exceeds a threshold (AA ≥2.0, new KEY_SIGNAL, score ≥10%, or benchmark_coverage crossing 0.25). Forces rebuild regardless of TTL.
+Disabled in slim v2 per Wayfinder 91. Benchmarks immutable gap-fill only; no Evidence Delta rebuild. (Legacy definition: AA ≥2.0, new KEY_SIGNAL, score ≥10%, or benchmark_coverage crossing 0.25.)
 _Avoid_: score change, benchmark drift
 
 **Pricing Delta**:
-Subset of Evidence Delta for blended pricing (3:1) where absolute ≥0.05 $/1M or relative ≥10% forces rebuild. Free-marker exception still satisfies pricing presence floor.
+Pricing refresh via re-average from catalog when Record TTL >14d (no LLM). Blended pricing outlier handling via `aggregate_pricing`. Free-marker exception still satisfies pricing presence floor. Not a delta-triggered rebuild in slim v2 — just re-average.
 _Avoid_: price change, cost drift
 
 **UUID Model Id**:

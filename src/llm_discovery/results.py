@@ -135,16 +135,16 @@ class ProviderBatchWriter:
         else:
             benchmarks = raw_benchmarks
         projected: dict[str, Any] = {
-            "model_id": _normalize_model_id(rec["provider_model_id"]),
-            "decision": rec["decision"],
+            "model_id": _normalize_model_id(rec.get("provider_model_id") or rec.get("model_id") or ""),
+            "decision": rec.get("decision", "keep"),
             "tier": _normalize_tier(rec.get("tier", rec.get("category"))),
             "aa_model_id": rec.get("aa_model_id"),
             "aa_score": rec.get("aa_score"),
             "coding_score": rec.get("coding_score"),
             "pricing": rec.get("pricing"),
             "benchmarks": benchmarks,
-            "confidence": rec["confidence"],
-            "evidence_level": rec.get("evidence_level"),
+            "confidence": rec.get("confidence", 0.9),
+            "evidence_level": rec.get("evidence_level", "strong"),
             "evidence": clean_evidence(rec.get("evidence", [])),
             "coding_assessment": rec.get("coding_assessment"),
         }

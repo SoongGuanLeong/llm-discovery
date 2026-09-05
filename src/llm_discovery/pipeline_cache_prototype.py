@@ -89,7 +89,6 @@ def build_cached_record(
 ) -> dict[str, Any]:
     """Strong-hit fast path: skip judge entirely, reuse cached benchmarks/evidence.
 
-    Provenance: cached=true + cache_key + source_providers for YAML output.
     """
     bench = cached.benchmarks.to_dict() if cached.benchmarks else {}
     pricing = cached.pricing.to_dict() if cached.pricing else {}
@@ -99,11 +98,8 @@ def build_cached_record(
         "cached": True,
         "cache_key": cache_key,
         "cache_hit_level": "strong",
-        "source_providers": list(cached._meta.source_providers),
         "source_evidence_levels": list(cached._meta.source_evidence_levels),
-        "aa_model_id": cached.aa_model_id,
         "aa_score": cached.aa_score,
-        "coding_score": cached.coding_score,
         "benchmarks": bench,
         "evidence": list(cached.evidence),
         "evidence_level": cached.evidence_level,
@@ -178,7 +174,6 @@ def evaluate_model_with_cache_prototype(
 
     if hit == "strong_hit":
         assert cached is not None
-        print(f"  [cache] HIT strong {model_id} key={cache_key} providers={cached._meta.source_providers}")
         return build_cached_record(model_id, provider_name, cached, cache_key)
 
     # moderate vs miss share evidence collection but moderate injects cached context
@@ -233,7 +228,6 @@ def evaluate_model_with_cache_prototype(
             rec = ModelInfoRecord.from_provider_record(result, provider=provider_name, evaluated_at=now)
             # Merge provenance: if updating existing moderate entry, per-field best-of belongs in #64 merge;
             # prototype does simple put
-            rec._meta.source_providers = sorted(set((cached._meta.source_providers if cached else []) + [provider_name]))
             rec._meta.last_updated = now
             if not rec._meta.first_seen:
                 rec._meta.first_seen = now

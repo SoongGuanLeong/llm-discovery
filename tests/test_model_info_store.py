@@ -1,12 +1,8 @@
-"""Tests for model_info_store schema & key normalization (issue #66)."""
+"""Tests for model_info_store schema & key normalization (slim v2)."""
 import pytest
 from llm_discovery.model_info_store import (
     normalize_store_key,
     normalized_key_with_matcher,
-    should_cache,
-    evidence_level_rank,
-    FIELD_INCLUSION_MATRIX,
-    CACHEABLE_LEVELS,
     is_pricing_outlier,
     aggregate_pricing,
     merge_records,
@@ -65,31 +61,6 @@ class TestNormalizeStoreKey:
         assert k2
 
 
-class TestEvidenceGating:
-    def test_cacheable_levels(self):
-        assert should_cache("strong") is True
-        assert should_cache("moderate") is False
-        assert should_cache("Strong") is True
-        assert should_cache("MODERATE") is False
-        assert should_cache("weak") is False
-        assert should_cache("none") is False
-        assert should_cache(None) is False
-        assert should_cache("") is False
-        assert should_cache("weak", confidence=1.0) is False
-
-    def test_field_inclusion_matrix(self):
-        for lvl in ("strong",):
-            assert all(FIELD_INCLUSION_MATRIX[lvl].values()), lvl
-        for lvl in ("moderate", "weak", "none"):
-            assert not any(FIELD_INCLUSION_MATRIX[lvl].values()), lvl
-
-    def test_rank_ordering(self):
-        assert evidence_level_rank("strong") > evidence_level_rank("moderate")
-        assert evidence_level_rank("moderate") > evidence_level_rank("weak")
-        assert evidence_level_rank("weak") > evidence_level_rank("none")
-        assert evidence_level_rank(None) == 0
-
-
 class TestPricingAggregation:
     def test_single_observation_stored_as_is(self):
         obs = [{"blended": 0.5, "input": 0.3, "output": 0.9, "provider": "a"}]
@@ -134,44 +105,37 @@ class TestPricingAggregation:
 
 
 class TestMergeRecords:
-    def test_strong_wins_over_moderate(self):
-        # #72 Q10 b + v2 slim: pricing re-avg, legacy scalars gap-fill, freshness min/max, no source_providers
-        r1 = ModelInfoRecord(aa_score=50, evidence_level="moderate", confidence=0.8, evidence=["x"], _meta=StoreMeta(last_updated="2026-09-04T01:00:00+00:00"))
-        r2 = ModelInfoRecord(aa_score=55, evidence_level="strong", confidence=0.9, evidence=["y"], _meta=StoreMeta(last_updated="2026-09-04T02:00:00+00:00"))
-        m = merge_records(r1, r2)
-        assert m.aa_score == 50  # gap-fill only, keep existing (legacy not persisted but kept in memory)
-        assert m.evidence == ["x"]
-        assert m._meta.version == 2
-
-    def test_gap_fill(self):
-        r1 = ModelInfoRecord(aa_model_id=None, aa_score=None, evidence_level="strong", _meta=StoreMeta(last_updated="2026-09-04T01:00:00+00:00"))
-        r2 = ModelInfoRecord(aa_model_id="m1", aa_score=60, evidence_level="strong", _meta=StoreMeta(last_updated="2026-09-04T02:00:00+00:00"))
-        m = merge_records(r1, r2)
-        assert m.aa_model_id == "m1"
-        assert m.aa_score == 60
-
     def test_benchmark_union_max(self):
         b1 = BenchmarkSnapshot(scores={"aa_intelligence": {"score": 50, "source": "aa"}, "swe_bench_verified": {"score": 70, "source": "dev"}})
         b2 = BenchmarkSnapshot(scores={"aa_intelligence": {"score": 55, "source": "aa"}, "livecodebench": {"score": 60, "source": "lc"}})
-        r1 = ModelInfoRecord(benchmarks=b1, evidence_level="moderate", _meta=StoreMeta(last_updated="2026-09-04T01:00:00+00:00"))
-        r2 = ModelInfoRecord(benchmarks=b2, evidence_level="moderate", _meta=StoreMeta(last_updated="2026-09-04T02:00:00+00:00"))
+        r1 = ModelInfoRecord(benchmarks=b1, _meta=StoreMeta(last_updated="2026-09-04T01:00:00+00:00"))
+        r2 = ModelInfoRecord(benchmarks=b2, _meta=StoreMeta(last_updated="2026-09-04T02:00:00+00:00"))
         m = merge_records(r1, r2)
         assert m.benchmarks.scores["aa_intelligence"]["score"] == 55
         assert m.benchmarks.scores["swe_bench_verified"]["score"] == 70
         assert m.benchmarks.scores["livecodebench"]["score"] == 60
 
     def test_none_existing(self):
-        r2 = ModelInfoRecord(aa_score=10, evidence_level="strong", _meta=StoreMeta(last_updated="2026-09-04T01:00:00+00:00"))
+        b = BenchmarkSnapshot(scores={"aa_intelligence": {"score": 10}})
+        r2 = ModelInfoRecord(benchmarks=b, _meta=StoreMeta(last_updated="2026-09-04T01:00:00+00:00"))
         m = merge_records(None, r2)
-        assert m.aa_score == 10
+        assert m.benchmarks.scores["aa_intelligence"]["score"] == 10
 
     def test_provenance_union(self):
-        # v2 slim: only first_seen/last_updated/version
-        r1 = ModelInfoRecord(evidence_level="strong", _meta=StoreMeta(first_seen="2026-09-04T01:00:00+00:00", last_updated="2026-09-04T01:00:00+00:00"))
-        r2 = ModelInfoRecord(evidence_level="moderate", _meta=StoreMeta(first_seen="2026-09-04T02:00:00+00:00", last_updated="2026-09-04T02:00:00+00:00"))
+        r1 = ModelInfoRecord(_meta=StoreMeta(first_seen="2026-09-04T01:00:00+00:00", last_updated="2026-09-04T01:00:00+00:00"))
+        r2 = ModelInfoRecord(_meta=StoreMeta(first_seen="2026-09-04T02:00:00+00:00", last_updated="2026-09-04T02:00:00+00:00"))
         m = merge_records(r1, r2)
         assert m._meta.first_seen == "2026-09-04T01:00:00+00:00"
         assert m._meta.last_updated == "2026-09-04T02:00:00+00:00"
+        assert m._meta.version == 2
+
+    def test_pricing_reavg(self):
+        p1 = PricingSnapshot(blended=0.5, input=0.3, output=0.9)
+        p2 = PricingSnapshot(blended=0.52, input=0.31, output=0.91)
+        r1 = ModelInfoRecord(pricing=p1, _meta=StoreMeta(first_seen="2026-09-04T01:00:00+00:00", last_updated="2026-09-04T01:00:00+00:00"))
+        r2 = ModelInfoRecord(pricing=p2, _meta=StoreMeta(first_seen="2026-09-04T02:00:00+00:00", last_updated="2026-09-04T02:00:00+00:00"))
+        m = merge_records(r1, r2)
+        assert m.pricing.blended == pytest.approx(0.51)
         assert m._meta.version == 2
 
 
@@ -180,7 +144,6 @@ class TestSchema:
         assert RECOMMENDED_STORE_PATH == "data/model_info_store.json"
 
     def test_record_roundtrip(self):
-        # v2 slim roundtrip: only benchmarks/pricing/_meta persisted
         rec = ModelInfoRecord(
             benchmarks=BenchmarkSnapshot(scores={"aa_intelligence": {"score": 56.8}}),
             pricing=PricingSnapshot(blended=0.45, input=0.3, output=0.9),
@@ -194,27 +157,35 @@ class TestSchema:
         assert rec2.benchmarks.scores["aa_intelligence"]["score"] == 56.8
         assert rec2.pricing.blended == 0.45
         assert rec2._meta.version == 2
-        # Legacy fields not persisted
-        assert rec2.aa_model_id is None
 
     def test_from_provider_record(self):
         rec = {
             "provider_model_id": "muse-spark-1.2-contributor:free",
-            "aa_model_id": "muse-spark-1-2",
-            "aa_score": 56.8,
-            "coding_score": 58.3,
-            "tier": "contributor_special",
-            "confidence": 0.9,
-            "evidence_level": "strong",
-            "evidence": ["x"],
             "benchmarks": {"scores": {"aa_intelligence": {"score": 56.8}}, "raw_benchmarks": []},
             "pricing": {"price_1m_blended_3_to_1": 0.45, "price_1m_input_tokens": 0.3, "price_1m_output_tokens": 0.9},
         }
         mir = ModelInfoRecord.from_provider_record(rec, provider="groq", evaluated_at="2026-09-04T05:00:00+00:00")
-        # v2 slim: tier not persisted separately, but legacy still set in memory for compat
-        assert mir.tier == "contributor_free"
+        assert mir.benchmarks.scores["aa_intelligence"]["score"] == 56.8
         assert mir.pricing.blended == 0.45
         assert mir._meta.version == 2
-        assert mir._meta.first_seen == "2026-09-04T05:00:00+00:00"
-        # slim _meta has no source_providers
-        assert mir._meta.source_providers == []
+
+    def test_compat_read_v1(self):
+        # v1 file with dropped fields should still load (compat)
+        v1 = {
+            "benchmarks": {"scores": {"aa_intelligence": {"score": 50}}, "raw_benchmarks": []},
+            "pricing": {"blended": 0.5, "per_provider_overrides": {}},
+            "_meta": {"first_seen": "2026-09-04T01:00:00+00:00", "last_updated": "2026-09-04T02:00:00+00:00", "version": 1, "source_providers": ["groq"]},
+            "aa_model_id": "muse-spark-1-2",
+            "coding_score": 58.3,
+            "evidence": ["x"],
+            "evidence_level": "strong",
+            "confidence": 0.9,
+            "tier": "flash",
+        }
+        rec = ModelInfoRecord.from_dict(v1)
+        assert rec.benchmarks.scores["aa_intelligence"]["score"] == 50
+        assert rec.pricing.blended == 0.5
+        assert rec._meta.version == 1 or rec._meta.version == 2  # compat keeps version as int
+        d = rec.to_dict()
+        assert "aa_model_id" not in d
+        assert set(d.keys()) == {"benchmarks", "pricing", "_meta"}

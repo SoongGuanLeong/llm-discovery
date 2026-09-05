@@ -129,7 +129,7 @@ def build_cached_keep_record(
     - provider_model_id = raw_model_id (exact case/prefix/free per #90)
     - cache_key = normalized key (for provenance)
     - benchmarks = gap-fill only, pricing = re-avg if stale else verbatim
-    Slim-aware: cached fields aa_model_id etc may be None; keep None.
+    Slim-aware: cached store holds only benchmarks+pricing.
     """
     cache_key = normalize_store_key(raw_model_id)
     pricing_snap = _refresh_pricing_if_stale(cached, fresh_pricing_obs)
@@ -150,33 +150,13 @@ def build_cached_keep_record(
     else:
         bm_dict = {"scores": {}, "raw_benchmarks": []}
     bm_dict = _gap_fill_benchmarks(bm_dict, fresh_bm)
-    # Legacy fields (may be None in slim)
-    aa_model_id = getattr(cached, "aa_model_id", None) if not isinstance(cached, dict) else cached.get("aa_model_id")
-    aa_score = getattr(cached, "aa_score", None) if not isinstance(cached, dict) else cached.get("aa_score")
-    coding_score = getattr(cached, "coding_score", None) if not isinstance(cached, dict) else cached.get("coding_score")
-    evidence = list(getattr(cached, "evidence", []) or (cached.get("evidence", []) if isinstance(cached, dict) else []))
-    evidence_level = getattr(cached, "evidence_level", None) if not isinstance(cached, dict) else cached.get("evidence_level")
-    if not evidence_level:
-        evidence_level = "strong"
-    confidence = getattr(cached, "confidence", None) if not isinstance(cached, dict) else cached.get("confidence")
-    if confidence is None:
-        confidence = 0.9
-    tier = getattr(cached, "tier", None) if not isinstance(cached, dict) else cached.get("tier")
-    if not tier:
-        tier = "flash"
+    # Slim v2: cached store holds only benchmarks+pricing; no legacy fields
     stale = _pricing_is_stale(cached)
     return {
         "provider_model_id": raw_model_id,  # raw for Bifrost POST {model: raw_id}
         "cache_key": cache_key,
-        "aa_model_id": aa_model_id,
-        "aa_score": aa_score,
-        "coding_score": coding_score,
         "benchmarks": bm_dict,
         "pricing": pricing_dict,
-        "evidence": evidence,
-        "evidence_level": evidence_level,
-        "confidence": confidence,
-        "tier": tier,
         "decision": "keep",
         "cached": True,
         "cache_hit_level": "strong",

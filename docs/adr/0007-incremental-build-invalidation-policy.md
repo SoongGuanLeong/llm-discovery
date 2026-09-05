@@ -1,7 +1,7 @@
-# ADR 0007: Incremental build invalidation policy (per-record TTL and signals)
+# ADR 0007: Incremental build invalidation policy (per-record TTL and signals) — slim v2
 
 ## Status
-Accepted — Issue #85 grilling (part of #80 Wayfinder), 2026-09-04. Extends ADR 0006 per-record TTL with ranked invalidation signals.
+Accepted — Issue #85 grilling (part of #80 Wayfinder), 2026-09-04. Extends ADR 0006 per-record TTL with ranked invalidation signals. Updated by #91/#95/#98 to slim v2 (Evidence Delta disabled, Pricing TTL 14d only).
 
 ## Context
 ADR 0006 replaced file-level `is_stale(evaluated_at, 14)` with per-record `is_stale(StoreMeta.last_updated, 14)` and made `data/model_info_store.json` the Source of Truth. File-level TTL hid per-model staleness and model-list churn: a 17-file directory with mixed-age records would skip an entire file while 65 UUID Cloudflare ids stayed unfixable and new true-free ids (stepfun, qwen dot variants) never triggered rebuild. Research #81 showed weak/moderate keeps, hallucinated evidence, and UUID file-shapes; #82 confirmed dot-hyphen benchmark split and 40.5% AA match. Wayfinder #80 needs a safe reuse gate that reuses fresh strong records without LLM calls yet rebuilds on identity fixes, list churn, and evidence drift.
@@ -10,54 +10,34 @@ Open questions in #85: rank the four signal families (time TTL, model-list diff,
 
 ## Decision
 
-### 1. Signal ranking (highest → lowest)
+### 1. Signal ranking (highest → lowest) — slim v2 (Wayfinder 91, #95)
 
-1. **Identity Integrity** — UUID-shaped `model_id` or hallucinated denylist (`tokenmix.ai`, `callsphere.ai`, `benchlm`) or missing human name. Never cacheable; always stale. Overrides all other signals. Rank 1 because a bad key poisons dedup and all downstream deltas.
+1. **Identity Integrity** — UUID-shaped `model_id` or hallucinated denylist or missing human name. Never cacheable; always stale. Overrides all.
 2. **Model-List Churn (new ids)** — Discovered `normalize_store_key(id)` not in store → mandatory build. No TTL; new key is unconditionally stale.
-3. **Model-List Churn (removed ids)** — Stored key with `source_providers` containing this provider but absent from current discovery set. Not rebuilt; retained for 14d then GC if still absent across next build and not shared by another provider. Ranked below new-id because it is a retention/GC decision, not a build trigger.
-4. **Evidence / Benchmark Delta** — Forces rebuild even when TTL fresh:
-   - `aa_score` delta ≥ 2.0 points, or `coding_score` null→non-null, or `evidence_level` would change under gate
-   - `benchmark_coverage` gains a new KEY_SIGNAL (aa_intelligence, swe_bench_verified, livecodebench, humaneval) or existing signal score changes ≥ 10%
-   - Pricing delta (see #5) — treated as subset of evidence delta for gate purposes
-   Ranked below list churn because list churn is structural (presence), while delta is value drift.
-5. **Time TTL** — Baseline freshness. Keeper with `StoreMeta.last_updated` age ≤ 14 days may be reused if none of 1–4 fire; age > 14 days is stale.
-6. **Catalog staleness** — `data/artificial_analysis_models.json` / `data/models_dev_catalog.json` `fetched_at` > 14 days suggests evidence may be stale but does not alone force per-record rebuild; triggers catalog refresh before delta checks.
+3. **Model-List Churn (removed ids)** — Stored key absent from current live normalized set (scanned from all keep lists) → retained 14d then GC if still absent and not shared. Share-aware via live-set scan (no `source_providers` in v2).
+4. **Pricing TTL 14d** — If `_meta.last_updated` age >14d, pricing re-averaged via `aggregate_pricing` (no LLM) rather than full rebuild; benchmarks immutable gap-fill only. (Evidence/Benchmark Delta disabled per #91 Q3.)
+5. **Time TTL** — Baseline freshness: age ≤14d may be reused if none of 1–3 fire; age >14d stale (same as Pricing TTL in slim v2, but kept as baseline).
+6. **Catalog staleness** — `fetched_at` >14d suggests catalog refresh before pricing re-average, but does not alone force rebuild.
 
-### 2. TTL — default and overrides
+### 2. TTL — default and overrides (slim v2)
 
-- **Default TTL:** `DEFAULT_TTL_DAYS = 14`, per-record via `StoreMeta.last_updated`, checked by `ModelInfoStore.get_if_fresh(key, ttl_days=14)`.
+- **Default TTL:** `DEFAULT_TTL_DAYS = 14`, per-record via `StoreMeta.last_updated`, checked by `get_if_fresh(key, 14)`.
 - **Overrides (TTL = 0, always rebuild):** identity failure (Rank 1), new id (Rank 2).
-- **Overrides (ignore TTL, compare fresh catalog/packet vs stored):** Rank 4 deltas. If delta threshold crossed, record is stale regardless of age.
-- **Retention TTL for removed ids (Rank 3):** keep stored record 14 days after last sighting; purge on next build if still absent and `source_providers` would become empty. If another provider still sources the key, keep.
-- **No per-signal variable TTL:** one default (14d) plus the above forced-stale overrides. Keeps the gate predictable; per-provider tuning is a future extension, not part of this ADR.
+- **Pricing TTL re-average:** when age >14d, re-average pricing from catalog observations (`aggregate_pricing`) instead of full LLM rebuild; benchmarks gap-fill only.
+- **Retention TTL for removed ids (Rank 3):** keep 14d after last sighting in live set; purge if still absent and not shared (live-set scan, no `source_providers`).
+- **Evidence Delta disabled:** per Wayfinder 91 Q3, benchmark scores immutable gap-fill only; no Evidence/Benchmark Delta rebuild.
 
-### 3. Gate location — where each check lives
+### 3. Gate location — where each check lives (slim v2)
 
-- **Store (`model_info_store.py`):** `is_stale(last_updated, 14)`, `is_accurate_enough(record)` (ADR 0006 floors), `get_if_fresh(key, ttl_days=14)`. Pure per-record, no file concept.
-- **build_all selective rebuild loop (`build_all.py`):** sole caller of `get_if_fresh` plus Rank 1–4 checks before reuse. Pseudocode:
-  ```
-  store = ModelInfoStore(path)
-  discovered = {normalize_store_key(m["id"]): m for m in discover_fn(provider)}
-  for key, meta in discovered.items():
-      rec = store.get_by_key(key)
-      if rec is None: build(key)  # Rank 2
-      elif is_identity_bad(meta["id"]): build(key)  # Rank 1
-      elif evidence_delta(rec, fresh_catalog_lookup(key)): build(key)  # Rank 4
-      elif pricing_delta(rec.pricing, fresh_pricing(key)): build(key)  # Rank 4
-      elif store.get_if_fresh(key, 14) is None: build(key)  # Rank 5
-      else: reuse(rec)  # skip LLM, gap-fill benchmarks/pricing
-  # Rank 3: after loop, mark stored keys for this provider not in discovered for GC
-  ```
-- **backfill (`backfill.py`):** no TTL gate. Applies only `should_cache` / `is_accurate_enough` per keep record and merges via `merge_records` + `aggregate_pricing`. File `evaluated_at` no longer gates. Historical file-level `is_stale` check removed (ADR 0006 migration).
-- **discovery (`discovery.py`):** normalizes ids (including `_normalize_cloudflare_models` from #84) before store lookup; does not decide reuse.
+- **Store (`model_info_store.py`):** `is_stale(last_updated, 14)`, `get_if_fresh(key, 14)`, `merge_records`, `aggregate_pricing`. No `is_accurate_enough`/`should_cache` at store layer (gate at pipeline before put).
+- **build_all selective reuse loop (`build_all.py`):** collects `live_keys` from all keep lists, does `get_if_fresh` + Rank 1–3 checks, re-averages pricing when stale, otherwise copies verbatim via in-pipeline early return. GC scans live set, no `source_providers`.
+- **backfill (`backfill.py`):** dedupes normalized keys, merges via `merge_records` + `aggregate_pricing`, no legacy gate at store layer (keep[] already filtered at pipeline).
+- **discovery (`discovery.py`):** normalizes ids before store lookup; does not decide reuse.
 
-### 4. Thresholds for Rank 4 deltas
+### 4. Thresholds (slim v2 — Pricing TTL only)
 
-- AA score: absolute delta ≥ 2.0
-- Pricing blended (3:1): absolute delta ≥ 0.05 ($/1M) or relative ≥ 10%, whichever is smaller in absolute terms; either triggers stale
-- Benchmark: new KEY_SIGNAL appears, or existing signal score changes ≥ 10%, or `benchmark_coverage` crosses 0.25 floor
-- Evidence: stored `aa_model_id` null vs fresh non-null with URL, or hallucinated-URL denylist state flips
-- All deltas compare fresh catalog/packet fetch (AA + models_dev + local benchmarks) against stored `ModelInfoRecord` snapshot; fresh fetch is cheap (local JSON), not an LLM call.
+- Pricing blended (3:1): re-average when age >14d via `aggregate_pricing` (outlier to per_provider_overrides); no AA-score delta or benchmark delta thresholds in slim v2 (benchmarks immutable gap-fill).
+- Evidence Delta disabled per Wayfinder 91.
 
 ### 5. Telemetry
 
@@ -70,12 +50,12 @@ Open questions in #85: rank the four signal families (time TTL, model-list diff,
 - Keeping removed ids forever (rejected — store bloat; 14d GC with provider-share check bounds growth).
 - Pricing delta as separate top-rank signal (rejected — logically part of evidence delta; unification avoids double-counting).
 
-## Consequences
+## Consequences (slim v2)
 
-- `model_info_store.py`: add helpers `is_identity_stale(model_id)`, `pricing_delta_exceeds(a,b)`, `evidence_delta_exceeds(rec, fresh)`; keep `is_stale` per-record.
-- `build_all.py`: implement selective reuse loop as above; no file-level skip.
-- `backfill.py`: confirm file-level skip removal (already per ADR 0006); no new TTL logic.
-- Follow-up #86 (Prototype: Intelligent build_all) implements the loop thinly with mocked discovery and reports reuse/rebuild stats.
+- `model_info_store.py`: slim schema, 14d TTL via `last_updated`, pricing re-average, GC via live-set scan.
+- `build_all.py`: selective reuse + backfill + GC + telemetry as implemented in #97.
+- `backfill.py`: union-max + aggregate_pricing for slim store.
+- Migration `scripts/migrate_store_v2.py` already executed; store size ~60% smaller.ery and reports reuse/rebuild stats.
 - No migration: existing store records keep their `last_updated`; identity-bad keys (UUID) are already non-cacheable via gate and will age out / be purged on next build.
 
 ## References

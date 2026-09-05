@@ -1,4 +1,10 @@
-"""Backfill seeding from data/results/*.yaml (issue #69)."""
+"""Backfill seeding from data/results/*.yaml — slim v2.
+
+Seeds slim store {benchmarks, pricing, _meta} by deduping normalized keys.
+No gate on legacy fields (store slim already filtered); all keep[] entries merged.
+Pricing aggregated via aggregate_pricing, benchmarks union-max via merge_records.
+"""
+
 from __future__ import annotations
 
 import json
@@ -9,28 +15,22 @@ from typing import Any
 import yaml
 
 from .model_info_store import (
-    DEFAULT_TTL_DAYS,
     ModelInfoRecord,
     ModelInfoStore,
     PricingSnapshot,
     aggregate_pricing,
-    is_accurate_enough,
-    is_stale,
     merge_records,
     normalize_store_key,
-    should_cache,
 )
 
 
 def _parse_results_file(path: Path) -> tuple[str | None, str | None, list[dict[str, Any]]]:
-    """Parse one results yaml. Returns (provider, evaluated_at, keep_records)."""
     try:
         data = yaml.safe_load(path.read_text())
     except Exception:
         return None, None, []
     if not isinstance(data, dict):
         return None, None, []
-    # Standard shape: {provider, evaluated_at, keep: []}
     if "keep" in data:
         provider = data.get("provider")
         evaluated_at = data.get("evaluated_at")
@@ -38,7 +38,6 @@ def _parse_results_file(path: Path) -> tuple[str | None, str | None, list[dict[s
         if not isinstance(keep, list):
             keep = []
         return provider, evaluated_at, keep
-    # Legacy single-record shape (e.g. malformed huggingface.yaml)
     if data.get("decision") == "keep" and "model_id" in data:
         provider = data.get("provider")
         evaluated_at = data.get("evaluated_at")
@@ -50,45 +49,17 @@ def backfill(
     results_dir: str | Path = "data/results",
     store_path: str | Path = "data/model_info_store.json",
 ) -> dict[str, Any]:
-    """
-    One-shot backfill to seed store from existing report YAMLs (ADR 0006/0007).
-
-    - Enumerates results_dir/*.yaml
-    - Collects keep[] records that pass Accurate-Enough Gate (is_accurate_enough)
-      Strong-only; moderate/weak, missing pricing/coverage/URL, UUID, hallucinated,
-      coding_score null all filtered. Router keeps stay in YAML but not in store.
-      Note: drop_llm ignored — spec says "maybe also drop_llm if strong
-      evidence for drop" but current pipeline treats drop as non-cacheable;
-      include only if future decision gates drop_llm strong as cacheable.
-    - No file-level is_stale gate (per ADR 0006: per-record TTL via StoreMeta).
-      evaluated_at only contributes to provenance stats.
-    - Deduplicates by normalize_store_key(model_id)
-    - Merges via merge_records (gap-fill for scalars, union-max benchmarks)
-      + aggregate_pricing avg/outlier
-    - Emits store file (JSON) via ModelInfoStore.put (idempotent merge, not overwrite)
-    - Returns stats dict.
-    """
     results_dir = Path(results_dir)
     store_path = Path(store_path)
-
-    # Ensure store handles existing file (idempotent)
     store = ModelInfoStore(store_path)
-
-    # Enumerate
     yaml_files = sorted(results_dir.glob("*.yaml")) if results_dir.exists() else []
     files_processed = len(yaml_files)
-
-    # For pricing aggregation we need raw observations per key
     pricing_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    # Track per-key raw records for merge
     record_groups: dict[str, list[ModelInfoRecord]] = defaultdict(list)
-    # Stats
     total_keep = 0
     weak_skipped = 0
-    # Keep evaluated_at range for meta?
     all_evaluated_at: list[str] = []
-
-    stale_skipped = 0  # retained for compat; file-level TTL removed per ADR 0006 (per-record StoreMeta.last_updated)
+    stale_skipped = 0
     gate_skipped = 0
     for yf in yaml_files:
         provider, evaluated_at, keep = _parse_results_file(yf)
@@ -97,74 +68,38 @@ def backfill(
         for rec in keep:
             total_keep += 1
             model_id = rec.get("model_id") or rec.get("provider_model_id") or ""
-            lvl = rec.get("evidence_level")
-            # Gate 1: evidence_level strong-only (should_cache)
-            if not should_cache(lvl, rec.get("confidence")):
-                weak_skipped += 1
-                continue
-            # Gate 2: Accurate-Enough floors (ADR 0006 §3) — strong but still must pass
-            ok, reason = is_accurate_enough(rec)
-            if not ok:
-                weak_skipped += 1
-                gate_skipped += 1
-                continue
             key = normalize_store_key(str(model_id))
             if not key:
-                # fallback: try aa_model_id
-                key = normalize_store_key(str(rec.get("aa_model_id") or ""))
-                if not key:
-                    weak_skipped += 1
-                    continue
-            # Create ModelInfoRecord via from_provider_record
+                weak_skipped += 1
+                continue
             try:
                 mir = ModelInfoRecord.from_provider_record(rec, provider=provider, evaluated_at=evaluated_at)
-            except Exception as exc:  # narrow fallback: malformed provider record, keep minimal evidence
-                # Keep minimal record so backfill continues; log for audit
-                # (avoid silent hide of real bug — surface via fallback evidence)
-                _fallback_evidence = list(rec.get("evidence", [])) or [f"backfill fallback: {exc}"]
-                mir = ModelInfoRecord(
-                    aa_model_id=rec.get("aa_model_id"),
-                    aa_score=rec.get("aa_score"),
-                    coding_score=rec.get("coding_score"),
-                    evidence=_fallback_evidence,
-                    evidence_level=rec.get("evidence_level"),
-                    confidence=rec.get("confidence"),
-                    tier=rec.get("tier"),
-                )
+            except Exception:
+                mir = ModelInfoRecord.from_provider_record({"benchmarks": rec.get("benchmarks"), "pricing": rec.get("pricing")}, provider=provider, evaluated_at=evaluated_at)
             record_groups[key].append(mir)
-            # Pricing observation
             pricing = rec.get("pricing")
             if pricing and isinstance(pricing, dict):
                 obs = dict(pricing)
                 obs["provider"] = provider
                 pricing_groups[key].append(obs)
             elif pricing is not None:
-                # scalar or other
                 pricing_groups[key].append({"blended": pricing, "provider": provider})
             else:
-                # also check if mir has pricing
                 if mir.pricing and mir.pricing.blended is not None:
                     pricing_groups[key].append({"blended": mir.pricing.blended, "input": mir.pricing.input, "output": mir.pricing.output, "provider": provider})
-
-    # Now merge per key and put into store
     unique_models = len(record_groups)
     merged_conflicts = sum(1 for v in record_groups.values() if len(v) > 1)
     pricing_avgs = 0
     pricing_outliers = 0
-
     for key, recs in record_groups.items():
-        # Merge records sequentially (best-of)
         merged: ModelInfoRecord | None = None
         for r in recs:
             merged = merge_records(merged, r)
         assert merged is not None
-        # Aggregate pricing for this key if >=1 observation
         obs_list = pricing_groups.get(key, [])
-        # Deduplicate observations? keep as is, aggregate handles outlier
         if obs_list:
             agg = aggregate_pricing(obs_list)
             if agg is not None:
-                # Convert to PricingSnapshot
                 merged.pricing = PricingSnapshot(
                     blended=agg.get("blended"),
                     input=agg.get("input"),
@@ -174,17 +109,7 @@ def backfill(
                 if len(obs_list) >= 2:
                     pricing_avgs += 1
                 pricing_outliers += len(agg.get("per_provider_overrides", {}))
-            else:
-                # no valid pricing
-                pass
-        # _meta provenance: merge_records keeps earliest first_seen from
-        # first inserted record and latest last_updated (max). Global
-        # evaluated_at_range stat captures repo-wide range; per-key min/max
-        # not recomputed here to avoid overriding trust-rank logic.
-        # If spec later requires per-key evaluated_at min/max, compute from
-        # grouped evaluated_at timestamps.
         store.put(key, merged)
-
     stats = {
         "files_processed": files_processed,
         "total_keep_records": total_keep,
@@ -199,14 +124,12 @@ def backfill(
         "store_path": str(store_path),
         "store_size": store.size(),
     }
-    # Compat alias: tests + callers check "outliers"; keep canonical "pricing_outliers"
     stats["outliers"] = pricing_outliers
     return stats
 
 
 def main() -> None:
     import argparse
-
     parser = argparse.ArgumentParser(description="Backfill model_info_store from data/results/*.yaml")
     parser.add_argument("--results-dir", default="data/results", help="Results yaml directory")
     parser.add_argument("--store-path", default="data/model_info_store.json", help="Store JSON path")

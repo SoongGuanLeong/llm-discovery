@@ -8,6 +8,7 @@ retain isolation but delegate per-model work to evaluate_model.
 """
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -15,9 +16,175 @@ from typing import Any
 from .discovery import discover_cloudflare_models, discover_models
 from .evidence_collector import EvidenceCollector
 from .judge import Judge
+from .model_info_store import (
+    ModelInfoStore,
+    PricingSnapshot,
+    aggregate_pricing,
+    is_stale,
+    normalize_store_key,
+)
 from .model_resolver import ModelResolver, resolve_model
 from .policy_gate import PolicyGate
 from .secrets import load_all_secrets, load_discovery_secrets, load_shared_secrets  # noqa: keep aliases for patch compat
+
+TTL_DAYS = 14  # Record TTL for pricing reuse per CONTEXT / #91
+
+
+# ---------------------------------------------------------------------------
+# In-pipeline cache helpers (issue #96) — strong-only, pricing TTL 14d, benchmarks gap-fill
+# ---------------------------------------------------------------------------
+
+def classify_hit(record: Any | None) -> str:
+    """Strong-only hit classification.
+
+    Slim v2 store holds only Keepers (benchmarks+pricing+_meta); moderate/weak
+    never written, so existence without evidence_level implies Keeper.  When
+    evidence_level present (legacy/mock), enforce strong-only.
+    Returns "strong_hit" or "miss".
+    """
+    if record is None:
+        return "miss"
+    lvl = getattr(record, "evidence_level", None)
+    if lvl is None:
+        lvl = record.get("evidence_level") if isinstance(record, dict) else None
+    if lvl is None or str(lvl).strip() == "":
+        # Slim Keeper — no evidence_level persisted, existence == strong
+        return "strong_hit"
+    lvl_norm = str(lvl).strip().lower()
+    return "strong_hit" if lvl_norm == "strong" else "miss"
+
+
+def _pricing_is_stale(record: Any) -> bool:
+    """Pricing TTL 14d via _meta.last_updated (is_stale)."""
+    try:
+        last = getattr(record._meta, "last_updated", None) if hasattr(record, "_meta") else None
+        if last is None and isinstance(record, dict):
+            last = record.get("_meta", {}).get("last_updated") if isinstance(record.get("_meta"), dict) else None
+        return is_stale(last, TTL_DAYS)
+    except Exception:
+        return False
+
+
+def _refresh_pricing_if_stale(
+    cached: Any,
+    fresh_observations: list[dict[str, Any]] | None = None,
+) -> Any:
+    """If stale, re-average pricing from catalog observations; else verbatim copy.
+
+    fresh_observations = list of {blended,input,output,provider} from catalogs.
+    When None/empty and stale, return cached verbatim (catalog miss -> no change).
+    """
+    if not _pricing_is_stale(cached):
+        return cached.pricing if hasattr(cached, "pricing") else cached.get("pricing") if isinstance(cached, dict) else None
+    if not fresh_observations:
+        return cached.pricing if hasattr(cached, "pricing") else cached.get("pricing") if isinstance(cached, dict) else None
+    agg = aggregate_pricing(fresh_observations)
+    if agg is None:
+        return cached.pricing if hasattr(cached, "pricing") else None
+    return PricingSnapshot.from_dict(agg)
+
+
+def _gap_fill_benchmarks(
+    cached_bm: dict[str, Any],
+    fresh_bm: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Immutable benchmarks: null->fill only. No delta rebuild per #91 Q3.
+
+    Fresh profile scores fill only when cached score missing/None.
+    raw_benchmarks union deduped by string repr.
+    """
+    if not fresh_bm or not fresh_bm.get("scores"):
+        return cached_bm
+    out = dict(cached_bm)
+    scores = dict(out.get("scores", {}))
+    for k, v in fresh_bm["scores"].items():
+        if k not in scores or scores[k] is None:
+            scores[k] = v
+        # else keep cached verbatim — even if fresh differs (immutable)
+    out["scores"] = scores
+    if fresh_bm.get("raw_benchmarks"):
+        seen = set(str(x) for x in out.get("raw_benchmarks", []))
+        merged = list(out.get("raw_benchmarks", []))
+        for rb in fresh_bm["raw_benchmarks"]:
+            if str(rb) not in seen:
+                merged.append(rb)
+                seen.add(str(rb))
+        out["raw_benchmarks"] = merged
+    # Preserve coverage fields if cached lacks them but fresh has them (gap-fill)
+    for cov_key in ("benchmark_coverage", "coverage_with_supplements"):
+        if out.get(cov_key) is None and fresh_bm.get(cov_key) is not None:
+            out[cov_key] = fresh_bm[cov_key]
+    return out
+
+
+def build_cached_keep_record(
+    raw_model_id: str,
+    provider_name: str,
+    cached: Any,
+    fresh_pricing_obs: list[dict[str, Any]] | None = None,
+    fresh_bm: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Strong-hit copy: skip LLM, preserve raw id for yaml/Bifrost.
+
+    - provider_model_id = raw_model_id (exact case/prefix/free per #90)
+    - cache_key = normalized key (for provenance)
+    - benchmarks = gap-fill only, pricing = re-avg if stale else verbatim
+    Slim-aware: cached fields aa_model_id etc may be None; keep None.
+    """
+    cache_key = normalize_store_key(raw_model_id)
+    pricing_snap = _refresh_pricing_if_stale(cached, fresh_pricing_obs)
+    # Normalize pricing snapshot to dict shape
+    if hasattr(pricing_snap, "to_dict"):
+        pricing_dict = pricing_snap.to_dict()
+    elif isinstance(pricing_snap, dict):
+        pricing_dict = pricing_snap
+    elif pricing_snap is not None:
+        pricing_dict = {"blended": pricing_snap}
+    else:
+        pricing_dict = {}
+    # Benchmarks
+    if hasattr(cached, "benchmarks") and cached.benchmarks:
+        bm_dict = cached.benchmarks.to_dict() if hasattr(cached.benchmarks, "to_dict") else dict(cached.benchmarks)
+    elif isinstance(cached, dict) and cached.get("benchmarks"):
+        bm_dict = dict(cached["benchmarks"])
+    else:
+        bm_dict = {"scores": {}, "raw_benchmarks": []}
+    bm_dict = _gap_fill_benchmarks(bm_dict, fresh_bm)
+    # Legacy fields (may be None in slim)
+    aa_model_id = getattr(cached, "aa_model_id", None) if not isinstance(cached, dict) else cached.get("aa_model_id")
+    aa_score = getattr(cached, "aa_score", None) if not isinstance(cached, dict) else cached.get("aa_score")
+    coding_score = getattr(cached, "coding_score", None) if not isinstance(cached, dict) else cached.get("coding_score")
+    evidence = list(getattr(cached, "evidence", []) or (cached.get("evidence", []) if isinstance(cached, dict) else []))
+    evidence_level = getattr(cached, "evidence_level", None) if not isinstance(cached, dict) else cached.get("evidence_level")
+    if not evidence_level:
+        evidence_level = "strong"
+    confidence = getattr(cached, "confidence", None) if not isinstance(cached, dict) else cached.get("confidence")
+    if confidence is None:
+        confidence = 0.9
+    tier = getattr(cached, "tier", None) if not isinstance(cached, dict) else cached.get("tier")
+    if not tier:
+        tier = "flash"
+    stale = _pricing_is_stale(cached)
+    return {
+        "provider_model_id": raw_model_id,  # raw for Bifrost POST {model: raw_id}
+        "cache_key": cache_key,
+        "aa_model_id": aa_model_id,
+        "aa_score": aa_score,
+        "coding_score": coding_score,
+        "benchmarks": bm_dict,
+        "pricing": pricing_dict,
+        "evidence": evidence,
+        "evidence_level": evidence_level,
+        "confidence": confidence,
+        "tier": tier,
+        "decision": "keep",
+        "cached": True,
+        "cache_hit_level": "strong",
+        "reason": "cache_hit:strong:pricing_ttl_14d" if stale else "cache_hit:strong",
+        "provider": provider_name,
+        "source": "cache",
+        "coding": True,
+    }
 
 
 VISION_CHEAP_THRESHOLD = 1.2
@@ -109,16 +276,63 @@ def evaluate_model(
     min_score: float,
     max_score: float,
     cache: Any | None = None,
+    store: ModelInfoStore | None = None,
+    fresh_pricing_obs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Judge one model and apply tiering (thin coordinator, <30 lines).
+    """Judge one model and apply tiering (thin coordinator + cache seam per #96).
 
-    Coordinates four adapters. All policy/benchmark/categorize logic lives
-    in PolicyGate; evidence in EvidenceCollector; resolution in ModelResolver;
-    LLM request + transport in Judge.
+    Early return right after resolve_model and before EvidenceCollector when
+    store holds strong Keeper (slim v2). Hit = strong-only; moderate/weak = miss.
+    Pricing stale (>14d) re-averaged via aggregate_pricing, benchmarks gap-fill only,
+    raw provider_model_id preserved verbatim for Ephemeral Report / Bifrost.
     """
-    model_id = model["id"]
+    model_id = model["id"]  # raw verbatim per #90
     print(f"  [evaluate] {model_id}: starting...")
     resolution = resolve_model(model_id, aa, models_dev, cache)
+    # --- In-pipeline cache check (issue #96) — after resolve, before evidence ---
+    if store is not None:
+        try:
+            cache_key = normalize_store_key(model_id)
+            if cache_key:
+                cached = store.get(cache_key)
+                hit = classify_hit(cached)
+                if hit == "strong_hit":
+                    assert cached is not None
+                    # Fresh benchmarks for gap-fill from BenchmarkDataCache (no LLM)
+                    fresh_bm: dict[str, Any] | None = None
+                    if cache is not None:
+                        try:
+                            from .benchmarks import BenchmarkDataCache, build_benchmark_profile
+
+                            if isinstance(cache, BenchmarkDataCache):
+                                profile = build_benchmark_profile(model_id, provider_name, cache)
+                                fresh_bm = profile.to_dict() if profile.scores else None
+                        except Exception:
+                            fresh_bm = None
+                    # Derive fresh pricing obs from resolution if caller did not supply
+                    obs = fresh_pricing_obs
+                    if obs is None:
+                        try:
+                            aa_model = getattr(resolution, "aa_model", None)
+                            if aa_model and aa_model.get("pricing"):
+                                p = aa_model["pricing"]
+                                cand = {
+                                    "blended": p.get("price_1m_blended_3_to_1", p.get("blended")),
+                                    "input": p.get("price_1m_input_tokens", p.get("input")),
+                                    "output": p.get("price_1m_output_tokens", p.get("output")),
+                                    "provider": provider_name,
+                                }
+                                if cand["blended"] is not None or cand["input"] is not None or cand["output"] is not None:
+                                    obs = [cand]
+                        except Exception:
+                            obs = fresh_pricing_obs
+                    print(f"  [cache] HIT strong {model_id} key={cache_key}")
+                    return build_cached_keep_record(model_id, provider_name, cached, obs, fresh_bm)
+                else:
+                    if cached is not None:
+                        print(f"  [cache] MISS moderate/weak {model_id} key={cache_key} -> full pipeline")
+        except Exception as exc:  # cache seam never breaks pipeline
+            print(f"  [cache] lookup failed {model_id}: {exc} -> full pipeline")
     packet = EvidenceCollector(provider_name).collect(model, cache, models_dev, resolution)
     if packet.is_specialized():
         if _is_vision_only(packet.deterministic_flags) and _is_coding_capable(resolution, cache, model_id, provider_name) and _is_cheap_or_free(resolution, model_id, models_dev):
@@ -365,8 +579,13 @@ def discover_provider(
     aa: Any,
     models_dev: Any,
     max_workers: int = 4,
+    store: ModelInfoStore | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
-    """T3 path: evaluate every model for a provider in parallel."""
+    """T3 path: evaluate every model for a provider in parallel.
+
+    store optional for in-pipeline cache reuse per #96 (strong-only, TTL 14d).
+    When provided, evaluate_model early-returns on hit before LLM.
+    """
     print(f"[{provider_name}] Starting discovery...")
     from .benchmarks import BenchmarkDataCache
     from .llm import LocalLLMEvaluator
@@ -456,6 +675,7 @@ def discover_provider(
                 min_score=config.artificial_analysis.min_score,
                 max_score=config.artificial_analysis.max_score,
                 cache=cache,
+                store=store,
             ): model
             for model in eval_models
         }
@@ -493,6 +713,7 @@ def discover_all_providers(
     models_dev: Any,
     max_workers: int = 4,
     output_dir: Path = Path("data/results"),
+    store: ModelInfoStore | None = None,
 ) -> dict[str, dict[str, list[dict[str, Any]]]]:
     """T3 path for every configured provider."""
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -506,7 +727,7 @@ def discover_all_providers(
         name = provider_config.name
         print(f"\n=== {name} ===")
         try:
-            result = discover_provider(name, config, aa, models_dev, max_workers)
+            result = discover_provider(name, config, aa, models_dev, max_workers, store=store)
         except Exception as exc:  # noqa: BLE001 — provider is isolated boundary
             _log_provider_error(name, exc)
             result = provider_error_result(name, exc)

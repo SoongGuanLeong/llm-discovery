@@ -16,6 +16,7 @@ from typing import Any
 from .discovery import discover_cloudflare_models, discover_models
 from .evidence_collector import EvidenceCollector
 from .judge import Judge
+from .gate import _is_router_model_id, is_accurate_enough
 from .model_info_store import (
     ModelInfoStore,
     PricingSnapshot,
@@ -501,7 +502,39 @@ def evaluate_model(
         profile = getattr(judge, "_last_profile", None)
         return PolicyGate(min_score, max_score, cache).error_record(model_id, exc, provider_name, profile=profile)
     gate = PolicyGate(min_score, max_score, cache)
-    return gate.apply(llm_result, resolution, model_id, provider_name, profile=getattr(judge, "_last_profile", None))
+    result = gate.apply(llm_result, resolution, model_id, provider_name, profile=getattr(judge, "_last_profile", None))
+    # Router tagging per ADR 0006
+    try:
+        if _is_router_model_id(model_id):
+            result["router"] = True
+    except Exception:
+        pass
+    # Accurate-Enough Gate before store write (issue #107)
+    # Candidates never cached: fail => not Keeper even if decision keep
+    # Store write is gated; YAML remains ephemeral via backfill filter
+    if store is not None and result.get("decision") == "keep":
+        try:
+            ok, reason = is_accurate_enough(result)
+            if not ok:
+                print(f"  [gate] SKIP store write {model_id}: {reason} -> Candidate not Keeper")
+            else:
+                # Write slim record to store (benchmarks+pricing only) when gate passes
+                try:
+                    from .model_info_store import ModelInfoRecord
+
+                    rec = ModelInfoRecord.from_provider_record(result, provider=provider_name, evaluated_at=datetime.now(UTC).isoformat())
+                    # Use normalized key for store; put merges via benchmarks union-max + pricing re-avg
+                    from .model_info_store import normalize_store_key as _nsk
+
+                    key = _nsk(model_id)
+                    if key:
+                        store.put(key, rec)
+                        print(f"  [gate] STORE Keeper {model_id} key={key}")
+                except Exception as exc2:
+                    print(f"  [gate] store put failed {model_id}: {exc2}")
+        except Exception as exc:
+            print(f"  [gate] check failed {model_id}: {exc}")
+    return result
 
 
 def _llm_error_record(model_id: str, exc: Exception, coding_score: float = 0.0, benchmarks: dict = None) -> dict[str, Any]:

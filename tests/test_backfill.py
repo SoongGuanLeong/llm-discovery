@@ -12,12 +12,30 @@ def _write_yaml(path: Path, provider: str, keep: list, evaluated_at="2026-09-04T
     path.write_text(yaml.safe_dump(data))
 
 
-def _keep(model_id, pricing=None, benchmarks=None):
+def _keep(model_id, pricing=None, benchmarks=None, evidence_level="strong", coding_score=55, aa_model_id="aa-test-id", evidence=None):
+    if pricing is None:
+        pricing_val = {"price_1m_blended_3_to_1": 0.5, "price_1m_input_tokens": 0.3, "price_1m_output_tokens": 0.9}
+    else:
+        pricing_val = pricing
+    if benchmarks is None:
+        benchmarks_val = {"scores": {"aa_intelligence": {"score": 50, "source": "https://example.com/aa"}}, "raw_benchmarks": [], "benchmark_coverage": 0.25}
+    else:
+        benchmarks_val = benchmarks
+    if evidence is None:
+        evidence_val = ["https://example.com/evidence for " + model_id]
+    else:
+        evidence_val = evidence
     return {
         "model_id": model_id,
         "decision": "keep",
-        "pricing": pricing or {"price_1m_blended_3_to_1": 0.5, "price_1m_input_tokens": 0.3, "price_1m_output_tokens": 0.9},
-        "benchmarks": benchmarks or {"scores": {"aa_intelligence": {"score": 50, "source": "aa"}}, "raw_benchmarks": [], "benchmark_coverage": 0.25},
+        "evidence_level": evidence_level,
+        "coding_score": coding_score,
+        "aa_model_id": aa_model_id,
+        "aa_score": 50,
+        "confidence": 0.9,
+        "pricing": pricing_val,
+        "benchmarks": benchmarks_val,
+        "evidence": evidence_val,
     }
 
 
@@ -41,17 +59,39 @@ class TestBackfillSeam:
         assert raw["models"]["gpt-4o"]["_meta"]["version"] == 2
 
     def test_weak_skipped(self, tmp_path):
-        # slim v2: no gate on legacy evidence_level; all keep entries merged
-        # keep two distinct models, both stored
+        # Gate: moderates/weaks and incomplete never enter store
         results = tmp_path / "results"
         results.mkdir()
-        _write_yaml(results / "x.yaml", "x", [_keep("weak-model"), _keep("strong-model")])
+        _write_yaml(results / "x.yaml", "x", [_keep("weak-model", evidence_level="weak", coding_score=55), _keep("strong-model", evidence_level="strong", coding_score=55)])
         store_path = tmp_path / "store.json"
         stats = backfill(results_dir=results, store_path=store_path)
-        assert stats["unique_models"] == 2
+        assert stats["unique_models"] == 1
+        assert stats["gate_skipped"] == 1
         store = ModelInfoStore(store_path)
         assert store.get("strong-model") is not None
-        assert store.get("weak-model") is not None
+        assert store.get("weak-model") is None
+
+    def test_gate_blocks_incomplete_pricing_and_benchmarks(self, tmp_path):
+        results = tmp_path / "results"
+        results.mkdir()
+        # missing pricing -> gate fail (not free)
+        _write_yaml(results / "a.yaml", "a", [_keep("no-pricing-model", pricing={}, benchmarks={"scores": {"aa_intelligence": {"score": 50, "source": "https://example.com/aa"}}, "raw_benchmarks": [], "benchmark_coverage": 0.25})])
+        # empty benchmarks / coding_score null -> gate fail
+        _write_yaml(results / "b.yaml", "b", [_keep("empty-bench-model", coding_score=None)])
+        # UUID -> gate fail
+        _write_yaml(results / "c.yaml", "c", [_keep("123e4567-e89b-12d3-a456-426614174000", evidence=["https://example.com/evidence"])])
+        # hallucinated evidence -> gate fail (has http but denylist)
+        _write_yaml(results / "d.yaml", "d", [_keep("hallu-model", evidence=["https://tokenmix.ai/bench 50 via tokenmix.ai"])])
+        # valid keeper passes
+        _write_yaml(results / "e.yaml", "e", [_keep("valid-model")])
+        store_path = tmp_path / "store.json"
+        stats = backfill(results_dir=results, store_path=store_path)
+        assert stats["unique_models"] == 1
+        assert stats["gate_skipped"] == 4
+        store = ModelInfoStore(store_path)
+        assert store.get("valid-model") is not None
+        assert store.get("no-pricing-model") is None
+        assert store.get("empty-bench-model") is None
 
     def test_idempotent_merge_not_overwrite(self, tmp_path):
         results = tmp_path / "results"

@@ -16,13 +16,31 @@ def _write_yaml(path: Path, provider: str, keep: list, evaluated_at: str):
     path.write_text(yaml.safe_dump(data))
 
 
-def _keep(model_id, pricing=None, benchmarks=None):
+def _keep(model_id, pricing=None, benchmarks=None, evidence_level="strong", coding_score=55, aa_model_id="aa-test-id", evidence=None):
+    if pricing is None:
+        pricing_val = {"price_1m_blended_3_to_1": 0.5, "price_1m_input_tokens": 0.3, "price_1m_output_tokens": 0.9}
+    else:
+        pricing_val = pricing
+    if benchmarks is None:
+        benchmarks_val = {"scores": {"aa_intelligence": {"score": 50, "source": "https://example.com/aa"}}, "raw_benchmarks": [], "benchmark_coverage": 0.25}
+    else:
+        benchmarks_val = benchmarks
+    if evidence is None:
+        evidence_val = ["https://example.com/evidence for " + model_id]
+    else:
+        evidence_val = evidence
     return {
         "model_id": model_id,
         "provider_model_id": model_id,
         "decision": "keep",
-        "pricing": pricing or {"price_1m_blended_3_to_1": 0.5, "price_1m_input_tokens": 0.3, "price_1m_output_tokens": 0.9},
-        "benchmarks": benchmarks or {"scores": {"aa_intelligence": {"score": 50, "source": "aa"}}, "raw_benchmarks": [], "benchmark_coverage": 0.25},
+        "evidence_level": evidence_level,
+        "coding_score": coding_score,
+        "aa_model_id": aa_model_id,
+        "aa_score": 50,
+        "confidence": 0.9,
+        "pricing": pricing_val,
+        "benchmarks": benchmarks_val,
+        "evidence": evidence_val,
     }
 
 

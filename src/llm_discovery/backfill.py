@@ -14,6 +14,7 @@ from typing import Any
 
 import yaml
 
+from .gate import is_accurate_enough
 from .model_info_store import (
     ModelInfoRecord,
     ModelInfoStore,
@@ -68,6 +69,12 @@ def backfill(
         for rec in keep:
             total_keep += 1
             model_id = rec.get("model_id") or rec.get("provider_model_id") or ""
+            # Accurate-Enough Gate: only Keeps passing all 7 floors become Keepers
+            ok, reason = is_accurate_enough(rec)
+            if not ok:
+                gate_skipped += 1
+                weak_skipped += 1
+                continue
             key = normalize_store_key(str(model_id))
             if not key:
                 weak_skipped += 1

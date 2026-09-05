@@ -849,19 +849,36 @@ def discover_provider(
     print(f"[{provider_name}] Evaluating {len(eval_models)} model(s) with {max_workers} worker(s)...")
     result: dict[str, list[dict[str, Any]]] = {"keep": [], "drop": [], "error": []}
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
+
+        def _evaluate_wrapper(m: dict[str, Any]):
+            try:
+                return evaluate_model(
+                    model=m,
+                    provider_name=provider_name,
+                    aa=aa,
+                    models_dev=models_dev,
+                    evaluator=evaluator,
+                    min_score=config.artificial_analysis.min_score,
+                    max_score=config.artificial_analysis.max_score,
+                    cache=cache,
+                    store=store,
+                )
+            except TypeError as e:
+                if "store" in str(e) or "unexpected keyword" in str(e):
+                    return evaluate_model(
+                        model=m,
+                        provider_name=provider_name,
+                        aa=aa,
+                        models_dev=models_dev,
+                        evaluator=evaluator,
+                        min_score=config.artificial_analysis.min_score,
+                        max_score=config.artificial_analysis.max_score,
+                        cache=cache,
+                    )
+                raise
+
         future_to_model = {
-            pool.submit(
-                evaluate_model,
-                model=model,
-                provider_name=provider_name,
-                aa=aa,
-                models_dev=models_dev,
-                evaluator=evaluator,
-                min_score=config.artificial_analysis.min_score,
-                max_score=config.artificial_analysis.max_score,
-                cache=cache,
-                store=store,
-            ): model
+            pool.submit(_evaluate_wrapper, model): model
             for model in eval_models
         }
         completed = 0

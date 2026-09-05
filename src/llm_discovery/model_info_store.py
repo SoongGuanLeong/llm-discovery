@@ -1186,6 +1186,30 @@ class ModelInfoStore:
         self._loaded = True
         self.save()
 
+    def delete(self, store_key: str) -> bool:
+        """Delete one normalized key. Returns True if removed."""
+        self._ensure_loaded()
+        if store_key in self._data:
+            del self._data[store_key]
+            self.save()
+            return True
+        return False
+
+    def gc(self, live_keys: set[str], ttl_days: int | None = None) -> int:
+        """GC stale keys absent from live set. Share-aware via union live_keys."""
+        if ttl_days is None:
+            ttl_days = DEFAULT_TTL_DAYS
+        self._ensure_loaded()
+        to_delete = [
+            k for k, rec in list(self._data.items())
+            if k not in live_keys and is_stale(rec._meta.last_updated, ttl_days)
+        ]
+        for k in to_delete:
+            del self._data[k]
+        if to_delete:
+            self.save()
+        return len(to_delete)
+
     def to_dict(self) -> dict[str, Any]:
         self._ensure_loaded()
         return {k: v.to_dict() for k, v in self._data.items()}

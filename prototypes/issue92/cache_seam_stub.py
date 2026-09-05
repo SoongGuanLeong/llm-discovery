@@ -35,6 +35,7 @@ TTL_DAYS = 14  # per #91 + CONTEXT Record TTL (pricing-only)
 
 # --- Hit classification (strong-only per #91 Q1 A) ---
 
+
 def classify_hit(record: ModelInfoRecord | None) -> str:
     if record is None:
         return "miss"
@@ -133,6 +134,7 @@ def build_cached_keep_record(
 
 # --- Seam: evaluate_model early return (chosen) ---
 
+
 def evaluate_model_with_cache(
     model: dict[str, Any],
     provider_name: str,
@@ -184,6 +186,7 @@ def evaluate_model_with_cache(
         if cache is not None:
             try:
                 from llm_discovery.benchmarks import BenchmarkDataCache, build_benchmark_profile
+
                 if isinstance(cache, BenchmarkDataCache):
                     profile = build_benchmark_profile(raw_id, provider_name, cache)
                     fresh_bm = profile.to_dict() if profile.scores else None
@@ -195,8 +198,18 @@ def evaluate_model_with_cache(
     packet = EvidenceCollector(provider_name).collect(model, cache, models_dev, resolution)
     if packet.is_specialized():
         # keep vision exception parity with pipeline.py
-        from llm_discovery.pipeline import _is_vision_only, _is_coding_capable, _is_cheap_or_free, deterministic_drop_record
-        if _is_vision_only(packet.deterministic_flags) and _is_coding_capable(resolution, cache, raw_id, provider_name) and _is_cheap_or_free(resolution, raw_id, models_dev):
+        from llm_discovery.pipeline import (
+            _is_cheap_or_free,
+            _is_coding_capable,
+            _is_vision_only,
+            deterministic_drop_record,
+        )
+
+        if (
+            _is_vision_only(packet.deterministic_flags)
+            and _is_coding_capable(resolution, cache, raw_id, provider_name)
+            and _is_cheap_or_free(resolution, raw_id, models_dev)
+        ):
             pass
         else:
             reason = packet.deterministic_flags[0] if packet.deterministic_flags else "specialized_model"
@@ -216,7 +229,9 @@ def evaluate_model_with_cache(
     if store is not None and rec.get("decision") == "keep" and rec.get("evidence_level") == "strong":
         try:
             # from_provider_record expects provider/evaluated_at
-            mir = ModelInfoRecord.from_provider_record(rec, provider=provider_name, evaluated_at=datetime.now(UTC).isoformat())
+            mir = ModelInfoRecord.from_provider_record(
+                rec, provider=provider_name, evaluated_at=datetime.now(UTC).isoformat()
+            )
             # merge via store.put semantics (gap-fill + pricing avg handled by ModelInfoStore)
             store.put(cache_key, mir)
         except Exception:

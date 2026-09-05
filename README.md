@@ -208,3 +208,32 @@ export AA_API_KEY=aa_xxx  # or ARTIFICIAL_ANALYSIS_API_KEY
 .venv/bin/python -m llm_discovery.cli aa filter --min-score 50
 .venv/bin/python -m llm_discovery.cli models show groq
 ```
+
+## Bifrost gateway config (file-only, no container)
+
+Generate Bifrost `config.json` + `shim_map.json` from `data/results/*.yaml` Ephemeral Reports:
+
+```bash
+# 1. Export provider keys from Infisical to local env file (gitignored)
+infisical export --projectId "$LLM_SHARED_PROJECT_ID" --env dev --format dotenv > ~/.config/bifrost/bifrost.env
+
+# 2. Source it and generate artifacts
+source ~/.config/bifrost/bifrost.env
+.venv/bin/python scripts/generate-bifrost-config.py
+
+# 3. Restart Bifrost (systemd user unit or npx)
+systemctl --user restart bifrost
+# or: npx -y @maximhq/bifrost --app-dir ./data/bifrost
+```
+
+Dry-run (lists providers with/without keys, exits non-zero if any tier empty):
+
+```bash
+source ~/.config/bifrost/bifrost.env
+.venv/bin/python scripts/generate-bifrost-config.py --check
+```
+
+- Artifacts written to `data/bifrost/` (gitignored under `data/`).
+- `config.json` is file-only (no config_store), binds to `/app/data/config.json` in container.
+- `shim_map.json` maps tier → model_id[] for the shim's 503-on-empty-tier behavior.
+- Run after `build_all` or manually; no file watcher — regeneration is deterministic.

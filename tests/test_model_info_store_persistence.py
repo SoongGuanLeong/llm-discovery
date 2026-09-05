@@ -23,7 +23,7 @@ class TestLocationFormat:
         assert RECOMMENDED_STORE_PATH_OBJ == Path("data/model_info_store.json")
 
     def test_file_version(self):
-        assert STORE_FILE_VERSION == 1
+        assert STORE_FILE_VERSION == 2
 
     def test_lazy_load_empty_when_missing(self, tmp_path):
         store = ModelInfoStore(tmp_path / "missing.json")
@@ -82,16 +82,21 @@ class TestInvalidationTTL:
         assert store.get_if_fresh("old-model", ttl_days=300) is not None
 
     def test_stronger_evidence_overwrites_via_merge(self, tmp_path):
-        # #72 Q10 b gap-fill: existing scalar kept, not overwritten by stronger
+        # v2 slim: gap-fill not overwrite, slim meta version 2, no source_providers
         p = tmp_path / "s.json"
         store = ModelInfoStore(p)
-        r1 = ModelInfoRecord(aa_score=50, evidence_level="strong", confidence=0.8, _meta=StoreMeta(last_updated="2026-09-04T01:00:00+00:00", source_providers=["a"]))
-        r2 = ModelInfoRecord(aa_score=60, evidence_level="strong", confidence=0.9, _meta=StoreMeta(last_updated="2026-09-04T02:00:00+00:00", source_providers=["b"]))
+        r1 = ModelInfoRecord(aa_score=50, evidence_level="strong", confidence=0.8, _meta=StoreMeta(first_seen="2026-09-04T01:00:00+00:00", last_updated="2026-09-04T01:00:00+00:00"))
+        r2 = ModelInfoRecord(aa_score=60, evidence_level="strong", confidence=0.9, _meta=StoreMeta(first_seen="2026-09-04T02:00:00+00:00", last_updated="2026-09-04T02:00:00+00:00"))
         store.put("m", r1)
         store.put("m", r2)
         got = store.get_by_key("m")
-        assert got.aa_score == 50  # gap-fill only, keep existing
-        assert set(got._meta.source_providers) == {"a", "b"}
+        # slim v2 keeps benchmarks/pricing only; legacy aa_score gap-fill remains in memory but not asserted for persistence
+        # Ensure merge kept first_seen min and last_updated max
+        assert got._meta.first_seen == "2026-09-04T01:00:00+00:00"
+        assert got._meta.last_updated == "2026-09-04T02:00:00+00:00"
+        assert got._meta.version == 2
+        # legacy field still gap-filled in memory
+        assert got.aa_score == 50
 
 
 class TestConcurrency:

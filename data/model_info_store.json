@@ -1,0 +1,1024 @@
+{
+  "version": 2,
+  "models": {
+    "glm-4.7": {
+      "benchmarks": {
+        "scores": {
+          "swe_bench_verified": {
+            "score": 73.8,
+            "metric": "resolved",
+            "source": "https://huggingface.co/zai-org/GLM-4.7"
+          },
+          "terminal_bench_2_1": {
+            "score": 33.4,
+            "metric": "score",
+            "source": "https://huggingface.co/zai-org/GLM-4.7"
+          }
+        },
+        "raw_benchmarks": [
+          {
+            "name": "SWE-Bench Verified",
+            "score": 73.8,
+            "metric": "resolved",
+            "source": "https://huggingface.co/zai-org/GLM-4.7"
+          },
+          {
+            "name": "Terminal Bench 2.0",
+            "score": 33.4,
+            "metric": "score",
+            "source": "https://huggingface.co/zai-org/GLM-4.7"
+          }
+        ],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.17
+      },
+      "pricing": {
+        "blended": 1,
+        "input": 0.6,
+        "output": 2.2,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 1,
+        "price_1m_input_tokens": 0.6,
+        "price_1m_output_tokens": 2.2
+      },
+      "_meta": {
+        "first_seen": "2026-09-04T11:36:26.642137+00:00",
+        "last_updated": "2026-09-04T11:36:26.642137+00:00",
+        "version": 2
+      }
+    },
+    "glm-5": {
+      "benchmarks": {
+        "scores": {
+          "swe_bench_verified": {
+            "score": 72.8,
+            "metric": "resolved",
+            "source": "https://www.swebench.com/"
+          },
+          "swe_atlas_codebase_qna": {
+            "score": 20.5,
+            "metric": "score",
+            "source": "https://labs.scale.com/leaderboard/sweatlas-qna"
+          },
+          "swe_atlas_refactoring": {
+            "score": 24.24,
+            "metric": "score",
+            "source": "https://labs.scale.com/leaderboard/sweatlas-refactoring"
+          },
+          "swe_atlas_test_writing": {
+            "score": 28.74,
+            "metric": "score",
+            "source": "https://labs.scale.com/leaderboard/sweatlas-tw"
+          },
+          "aa_intelligence": {
+            "score": 40.6,
+            "metric": "index",
+            "source": "artificial_analysis"
+          }
+        },
+        "raw_benchmarks": [
+          {
+            "name": "SWE-Bench Verified",
+            "score": 72.8,
+            "metric": "resolved",
+            "source": "https://www.swebench.com/"
+          },
+          {
+            "name": "SWE-Atlas Codebase QnA",
+            "score": 20.5,
+            "metric": "score",
+            "source": "https://labs.scale.com/leaderboard/sweatlas-qna"
+          },
+          {
+            "name": "SWE-Atlas Refactoring",
+            "score": 24.24,
+            "metric": "score",
+            "source": "https://labs.scale.com/leaderboard/sweatlas-refactoring"
+          },
+          {
+            "name": "SWE-Atlas Test Writing",
+            "score": 28.74,
+            "metric": "score",
+            "source": "https://labs.scale.com/leaderboard/sweatlas-tw"
+          }
+        ],
+        "benchmark_coverage": 0.5,
+        "coverage_with_supplements": 0.17
+      },
+      "pricing": {
+        "blended": 1.55,
+        "input": 1,
+        "output": 3.2,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 1.55,
+        "price_1m_input_tokens": 1,
+        "price_1m_output_tokens": 3.2
+      },
+      "_meta": {
+        "first_seen": "2026-09-04T11:36:26.642137+00:00",
+        "last_updated": "2026-09-04T11:36:26.642137+00:00",
+        "version": 2
+      }
+    },
+    "kimi-k2-thinking": {
+      "benchmarks": {
+        "scores": {
+          "swe_bench_verified": {
+            "score": 71.3,
+            "metric": "resolved",
+            "source": "https://huggingface.co/moonshotai/Kimi-K2-Thinking"
+          },
+          "aa_intelligence": {
+            "score": 33.5,
+            "metric": "index",
+            "source": "artificial_analysis"
+          }
+        },
+        "raw_benchmarks": [
+          {
+            "name": "SWE-Bench Verified",
+            "score": 71.3,
+            "metric": "resolved",
+            "source": "https://huggingface.co/moonshotai/Kimi-K2-Thinking"
+          }
+        ],
+        "benchmark_coverage": 0.5,
+        "coverage_with_supplements": 0.17
+      },
+      "pricing": {
+        "blended": 1.075,
+        "input": 0.6,
+        "output": 2.5,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 1.075,
+        "price_1m_input_tokens": 0.6,
+        "price_1m_output_tokens": 2.5
+      },
+      "_meta": {
+        "first_seen": "2026-09-04T11:36:26.642137+00:00",
+        "last_updated": "2026-09-04T11:36:26.642137+00:00",
+        "version": 2
+      }
+    },
+    "minimax-m2.5": {
+      "benchmarks": {
+        "scores": {
+          "swe_bench_verified": {
+            "score": 75.8,
+            "metric": "resolved",
+            "source": "https://www.swebench.com/"
+          },
+          "swe_atlas_codebase_qna": {
+            "score": 10.3,
+            "metric": "score",
+            "source": "https://labs.scale.com/leaderboard/sweatlas-qna"
+          },
+          "swe_atlas_refactoring": {
+            "score": 19.52,
+            "metric": "score",
+            "source": "https://labs.scale.com/leaderboard/sweatlas-refactoring"
+          },
+          "swe_atlas_test_writing": {
+            "score": 18.6,
+            "metric": "score",
+            "source": "https://labs.scale.com/leaderboard/sweatlas-tw"
+          }
+        },
+        "raw_benchmarks": [
+          {
+            "name": "SWE-Bench Verified",
+            "score": 75.8,
+            "metric": "resolved",
+            "source": "https://www.swebench.com/"
+          },
+          {
+            "name": "SWE-Atlas Codebase QnA",
+            "score": 10.3,
+            "metric": "score",
+            "source": "https://labs.scale.com/leaderboard/sweatlas-qna"
+          },
+          {
+            "name": "SWE-Atlas Refactoring",
+            "score": 19.52,
+            "metric": "score",
+            "source": "https://labs.scale.com/leaderboard/sweatlas-refactoring"
+          },
+          {
+            "name": "SWE-Atlas Test Writing",
+            "score": 18.6,
+            "metric": "score",
+            "source": "https://labs.scale.com/leaderboard/sweatlas-tw"
+          }
+        ],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.08
+      },
+      "pricing": {
+        "blended": 0.525,
+        "input": 0.3,
+        "output": 1.2,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 0.525,
+        "price_1m_input_tokens": 0.3,
+        "price_1m_output_tokens": 1.2
+      },
+      "_meta": {
+        "first_seen": "2026-09-04T11:36:26.642137+00:00",
+        "last_updated": "2026-09-04T11:36:26.642137+00:00",
+        "version": 2
+      }
+    },
+    "nemotron-3-ultra-550b-a55b": {
+      "benchmarks": {
+        "scores": {
+          "swe_bench_verified": {
+            "score": 70.7,
+            "metric": "resolved",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          },
+          "terminal_bench": {
+            "score": 56.4,
+            "metric": "success rate",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          },
+          "gpqa": {
+            "score": 87,
+            "metric": "accuracy",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          },
+          "humanity_last_exam": {
+            "score": 26.7,
+            "metric": "accuracy",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          },
+          "livecodebench": {
+            "score": 89,
+            "metric": "pass@1",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          },
+          "mmlu_pro": {
+            "score": 86.8,
+            "metric": "accuracy",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          },
+          "aa_intelligence": {
+            "score": 38.3,
+            "metric": "index",
+            "source": "artificial_analysis"
+          },
+          "aa_coding": {
+            "score": 49.3,
+            "metric": "index",
+            "source": "artificial_analysis"
+          }
+        },
+        "raw_benchmarks": [
+          {
+            "name": "SWE-Bench Verified",
+            "score": 70.7,
+            "metric": "resolved",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          },
+          {
+            "name": "SWE-Bench Multilingual",
+            "score": 67.7,
+            "metric": "resolve rate",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          },
+          {
+            "name": "Terminal-Bench",
+            "score": 56.4,
+            "metric": "success rate",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          },
+          {
+            "name": "GPQA",
+            "score": 87,
+            "metric": "accuracy",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          },
+          {
+            "name": "Humanity's Last Exam",
+            "score": 26.7,
+            "metric": "accuracy",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          },
+          {
+            "name": "Humanity's Last Exam",
+            "score": 37.4,
+            "metric": "accuracy",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          },
+          {
+            "name": "LiveCodeBench",
+            "score": 89,
+            "metric": "pass@1",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          },
+          {
+            "name": "MMLU-Pro",
+            "score": 86.8,
+            "metric": "accuracy",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          },
+          {
+            "name": "BrowseComp",
+            "score": 44.4,
+            "metric": "accuracy",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          },
+          {
+            "name": "IFBench",
+            "score": 81.7,
+            "metric": "accuracy",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          },
+          {
+            "name": "GDPval",
+            "score": 46.7,
+            "metric": "wins or ties",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          }
+        ],
+        "benchmark_coverage": 0.75,
+        "coverage_with_supplements": 0.33
+      },
+      "pricing": {
+        "blended": 1.175,
+        "input": 0.675,
+        "output": 2.675,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 1.175,
+        "price_1m_input_tokens": 0.675,
+        "price_1m_output_tokens": 2.675
+      },
+      "_meta": {
+        "first_seen": "2026-09-04T12:00:12.444064+00:00",
+        "last_updated": "2026-09-04T12:31:23.980451+00:00",
+        "version": 2
+      }
+    },
+    "step-3.7-flash": {
+      "benchmarks": {
+        "scores": {
+          "swe_bench_verified": {
+            "score": 76.5,
+            "metric": "resolved",
+            "source": "https://static.stepfun.com/blog/step-3.7-flash/"
+          },
+          "terminal_bench": {
+            "score": 59.6,
+            "metric": "success rate",
+            "source": "https://static.stepfun.com/blog/step-3.7-flash/"
+          },
+          "humanity_last_exam": {
+            "score": 47.2,
+            "metric": "accuracy",
+            "source": "https://static.stepfun.com/blog/step-3.7-flash/"
+          },
+          "aa_coding": {
+            "score": 37.1,
+            "metric": "index",
+            "source": "https://openrouter.ai/stepfun/step-3.7-flash/benchmarks"
+          },
+          "scicode": {
+            "score": 40,
+            "metric": "percent correct",
+            "source": "https://openrouter.ai/stepfun/step-3.7-flash/benchmarks"
+          },
+          "terminal_bench_hard": {
+            "score": 35.6,
+            "metric": "success rate",
+            "source": "https://openrouter.ai/stepfun/step-3.7-flash/benchmarks"
+          }
+        },
+        "raw_benchmarks": [
+          {
+            "name": "SWE-Bench Pro",
+            "score": 56.3,
+            "metric": "resolve rate",
+            "source": "https://static.stepfun.com/blog/step-3.7-flash/"
+          },
+          {
+            "name": "SWE-Bench Verified",
+            "score": 76.5,
+            "metric": "resolved",
+            "source": "https://static.stepfun.com/blog/step-3.7-flash/"
+          },
+          {
+            "name": "Terminal-Bench",
+            "score": 59.6,
+            "metric": "success rate",
+            "source": "https://static.stepfun.com/blog/step-3.7-flash/"
+          },
+          {
+            "name": "Humanity's Last Exam",
+            "score": 47.2,
+            "metric": "accuracy",
+            "source": "https://static.stepfun.com/blog/step-3.7-flash/"
+          },
+          {
+            "name": "BrowseComp",
+            "score": 75.8,
+            "metric": "accuracy",
+            "source": "https://static.stepfun.com/blog/step-3.7-flash/"
+          },
+          {
+            "name": "Toolathlon",
+            "score": 49.5,
+            "metric": "success rate",
+            "source": "https://static.stepfun.com/blog/step-3.7-flash/"
+          },
+          {
+            "name": "GDPval",
+            "score": 45.8,
+            "metric": "wins or ties",
+            "source": "https://static.stepfun.com/blog/step-3.7-flash/"
+          },
+          {
+            "name": "ClawEval",
+            "score": 67.1,
+            "metric": "pass^3",
+            "source": "https://static.stepfun.com/blog/step-3.7-flash/"
+          },
+          {
+            "name": "Artificial Analysis Coding Index",
+            "score": 37.1,
+            "metric": "index",
+            "source": "https://openrouter.ai/stepfun/step-3.7-flash/benchmarks"
+          },
+          {
+            "name": "SciCode",
+            "score": 40,
+            "metric": "percent correct",
+            "source": "https://openrouter.ai/stepfun/step-3.7-flash/benchmarks"
+          },
+          {
+            "name": "Terminal-Bench Hard",
+            "score": 35.6,
+            "metric": "success rate",
+            "source": "https://openrouter.ai/stepfun/step-3.7-flash/benchmarks"
+          }
+        ],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.25
+      },
+      "pricing": {
+        "blended": 0.438,
+        "input": 0.2,
+        "output": 1.15,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 0.438,
+        "price_1m_input_tokens": 0.2,
+        "price_1m_output_tokens": 1.15
+      },
+      "_meta": {
+        "first_seen": "2026-09-04T12:00:12.444064+00:00",
+        "last_updated": "2026-09-04T12:15:08.303311+00:00",
+        "version": 2
+      }
+    },
+    "claude-opus-5": {
+      "benchmarks": {
+        "scores": {
+          "swe_bench_verified": {
+            "score": 96,
+            "metric": "resolved",
+            "source": "https://www.anthropic.com/claude-opus-5-system-card"
+          },
+          "deepswe": {
+            "score": 68.8,
+            "metric": "resolve rate",
+            "source": "https://www.anthropic.com/claude-opus-5-system-card"
+          },
+          "humanity_last_exam": {
+            "score": 56.3,
+            "metric": "accuracy",
+            "source": "https://www.anthropic.com/claude-opus-5-system-card"
+          },
+          "osworld": {
+            "score": 70.6,
+            "metric": "success rate",
+            "source": "https://www.anthropic.com/claude-opus-5-system-card"
+          },
+          "aa_intelligence": {
+            "score": 63.1,
+            "metric": "index",
+            "source": "artificial_analysis"
+          },
+          "aa_coding": {
+            "score": 78,
+            "metric": "index",
+            "source": "artificial_analysis"
+          }
+        },
+        "raw_benchmarks": [
+          {
+            "name": "SWE-Bench Verified",
+            "score": 96,
+            "metric": "resolved",
+            "source": "https://www.anthropic.com/claude-opus-5-system-card"
+          },
+          {
+            "name": "SWE-Bench Pro",
+            "score": 79.2,
+            "metric": "resolve rate",
+            "source": "https://www.anthropic.com/claude-opus-5-system-card"
+          },
+          {
+            "name": "SWE-Bench Multilingual",
+            "score": 89.5,
+            "metric": "resolve rate",
+            "source": "https://www.anthropic.com/claude-opus-5-system-card"
+          },
+          {
+            "name": "SWE-Bench Multimodal",
+            "score": 59.4,
+            "metric": "resolve rate",
+            "source": "https://www.anthropic.com/claude-opus-5-system-card"
+          },
+          {
+            "name": "DeepSWE",
+            "score": 68.8,
+            "metric": "resolve rate",
+            "source": "https://www.anthropic.com/claude-opus-5-system-card"
+          },
+          {
+            "name": "FrontierCode",
+            "score": 53.4,
+            "metric": "mean@5",
+            "source": "https://www.anthropic.com/claude-opus-5-system-card"
+          },
+          {
+            "name": "Frontier-Bench",
+            "score": 43.3,
+            "metric": "mean reward",
+            "source": "https://www.anthropic.com/claude-opus-5-system-card"
+          },
+          {
+            "name": "BrowseComp",
+            "score": 90.8,
+            "metric": "accuracy",
+            "source": "https://www.anthropic.com/claude-opus-5-system-card"
+          },
+          {
+            "name": "Humanity's Last Exam",
+            "score": 56.3,
+            "metric": "accuracy",
+            "source": "https://www.anthropic.com/claude-opus-5-system-card"
+          },
+          {
+            "name": "Humanity's Last Exam",
+            "score": 64.7,
+            "metric": "accuracy",
+            "source": "https://www.anthropic.com/claude-opus-5-system-card"
+          },
+          {
+            "name": "DeepSearchQA",
+            "score": 95,
+            "metric": "F1",
+            "source": "https://www.anthropic.com/news/claude-opus-5"
+          },
+          {
+            "name": "OSWorld",
+            "score": 70.6,
+            "metric": "success rate",
+            "source": "https://www.anthropic.com/claude-opus-5-system-card"
+          },
+          {
+            "name": "GDPval-AA",
+            "score": 1861,
+            "metric": "Elo",
+            "source": "https://www.anthropic.com/claude-opus-5-system-card"
+          },
+          {
+            "name": "AA-Briefcase",
+            "score": 1720,
+            "metric": "Elo",
+            "source": "https://www.anthropic.com/claude-opus-5-system-card"
+          },
+          {
+            "name": "AutomationBench",
+            "score": 26,
+            "metric": "success rate",
+            "source": "https://www.anthropic.com/claude-opus-5-system-card"
+          },
+          {
+            "name": "ARC-AGI-1",
+            "score": 97.5,
+            "metric": "accuracy",
+            "source": "https://www.anthropic.com/claude-opus-5-system-card"
+          },
+          {
+            "name": "ARC-AGI-2",
+            "score": 90.4,
+            "metric": "accuracy",
+            "source": "https://www.anthropic.com/claude-opus-5-system-card"
+          },
+          {
+            "name": "ARC-AGI-3",
+            "score": 30.2,
+            "metric": "RHAE",
+            "source": "https://www.anthropic.com/claude-opus-5-system-card"
+          },
+          {
+            "name": "HealthBench Professional",
+            "score": 59.8,
+            "metric": "score",
+            "source": "https://www.anthropic.com/claude-opus-5-system-card"
+          }
+        ],
+        "benchmark_coverage": 0.5,
+        "coverage_with_supplements": 0.25
+      },
+      "pricing": {
+        "blended": 10,
+        "input": 5,
+        "output": 25,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 10,
+        "price_1m_input_tokens": 5,
+        "price_1m_output_tokens": 25
+      },
+      "_meta": {
+        "first_seen": "2026-09-04T12:04:16.381432+00:00",
+        "last_updated": "2026-09-04T12:04:16.381432+00:00",
+        "version": 2
+      }
+    },
+    "gpt-5.6-terra": {
+      "benchmarks": {
+        "scores": {
+          "terminal_bench": {
+            "score": 87.4,
+            "metric": "success rate",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          "deepswe": {
+            "score": 69.6,
+            "metric": "resolve rate",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          "gpqa_diamond": {
+            "score": 92.9,
+            "metric": "accuracy",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          "osworld": {
+            "score": 50.2,
+            "metric": "success rate",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          "aa_intelligence": {
+            "score": 55,
+            "metric": "index score",
+            "source": "https://artificialanalysis.ai/articles/gpt-5-6-has-landed"
+          },
+          "aa_agentic": {
+            "score": 77.4,
+            "metric": "index score",
+            "source": "https://artificialanalysis.ai/articles/gpt-5-6-has-landed"
+          }
+        },
+        "raw_benchmarks": [
+          {
+            "name": "SWE-Bench Pro",
+            "score": 63.4,
+            "metric": "resolve rate",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          {
+            "name": "Terminal-Bench",
+            "score": 87.4,
+            "metric": "success rate",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          {
+            "name": "DeepSWE",
+            "score": 69.6,
+            "metric": "resolve rate",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          {
+            "name": "GPQA Diamond",
+            "score": 92.9,
+            "metric": "accuracy",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          {
+            "name": "FrontierMath",
+            "score": 84.9,
+            "metric": "accuracy",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          {
+            "name": "BrowseComp",
+            "score": 87.5,
+            "metric": "accuracy",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          {
+            "name": "OSWorld",
+            "score": 50.2,
+            "metric": "success rate",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          {
+            "name": "MMMU Pro",
+            "score": 80.7,
+            "metric": "accuracy",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          {
+            "name": "Agents' Last Exam",
+            "score": 50.4,
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          {
+            "name": "Toolathlon",
+            "score": 53.1,
+            "metric": "success rate",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          {
+            "name": "Artificial Analysis Intelligence Index",
+            "score": 55,
+            "metric": "index score",
+            "source": "https://artificialanalysis.ai/articles/gpt-5-6-has-landed"
+          },
+          {
+            "name": "Artificial Analysis Coding Agent Index",
+            "score": 77.4,
+            "metric": "index score",
+            "source": "https://artificialanalysis.ai/articles/gpt-5-6-has-landed"
+          }
+        ],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.33
+      },
+      "pricing": {
+        "blended": 4.5,
+        "input": 2,
+        "output": 12,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 4.5,
+        "price_1m_input_tokens": 2,
+        "price_1m_output_tokens": 12
+      },
+      "_meta": {
+        "first_seen": "2026-09-04T12:04:16.381432+00:00",
+        "last_updated": "2026-09-04T12:04:16.381432+00:00",
+        "version": 2
+      }
+    },
+    "mistral-medium-2604": {
+      "benchmarks": {
+        "scores": {
+          "swe_bench_verified": {
+            "score": 77.6,
+            "metric": "resolved",
+            "source": "https://huggingface.co/mistralai/Mistral-Medium-3.5-128B"
+          }
+        },
+        "raw_benchmarks": [
+          {
+            "name": "SWE-Bench Verified",
+            "score": 77.6,
+            "metric": "resolved",
+            "source": "https://huggingface.co/mistralai/Mistral-Medium-3.5-128B"
+          },
+          {
+            "name": "τ³-Telecom",
+            "score": 91.4,
+            "metric": "accuracy",
+            "source": "https://mistral.ai/news/vibe-remote-agents-mistral-medium-3-5/"
+          }
+        ],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.08
+      },
+      "pricing": {
+        "blended": 3,
+        "input": 1.5,
+        "output": 7.5,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 3,
+        "price_1m_input_tokens": 1.5,
+        "price_1m_output_tokens": 7.5
+      },
+      "_meta": {
+        "first_seen": "2026-09-04T12:08:44.408176+00:00",
+        "last_updated": "2026-09-04T12:08:44.408176+00:00",
+        "version": 2
+      }
+    },
+    "mistral-medium-latest": {
+      "benchmarks": {
+        "scores": {
+          "swe_bench_verified": {
+            "score": 77.6,
+            "metric": "resolved",
+            "source": "https://huggingface.co/mistralai/Mistral-Medium-3.5-128B"
+          }
+        },
+        "raw_benchmarks": [
+          {
+            "name": "SWE-Bench Verified",
+            "score": 77.6,
+            "metric": "resolved",
+            "source": "https://huggingface.co/mistralai/Mistral-Medium-3.5-128B"
+          }
+        ],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.08
+      },
+      "pricing": {
+        "blended": 3,
+        "input": 1.5,
+        "output": 7.5,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 3,
+        "price_1m_input_tokens": 1.5,
+        "price_1m_output_tokens": 7.5
+      },
+      "_meta": {
+        "first_seen": "2026-09-04T12:08:44.408176+00:00",
+        "last_updated": "2026-09-04T12:27:43.609434+00:00",
+        "version": 2
+      }
+    },
+    "qwen3.5-122b-a10b": {
+      "benchmarks": {
+        "scores": {
+          "swe_bench_verified": {
+            "score": 72,
+            "metric": "resolved",
+            "source": "https://huggingface.co/Qwen/Qwen3.5-122B-A10B"
+          }
+        },
+        "raw_benchmarks": [
+          {
+            "name": "SWE-Bench Verified",
+            "score": 72,
+            "metric": "resolved",
+            "source": "https://huggingface.co/Qwen/Qwen3.5-122B-A10B"
+          }
+        ],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.08
+      },
+      "pricing": {
+        "blended": 1.1,
+        "input": 0.4,
+        "output": 3.2,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 1.1,
+        "price_1m_input_tokens": 0.4,
+        "price_1m_output_tokens": 3.2
+      },
+      "_meta": {
+        "first_seen": "2026-09-04T12:15:08.303311+00:00",
+        "last_updated": "2026-09-04T12:15:08.303311+00:00",
+        "version": 2
+      }
+    },
+    "qwen3.5-27b": {
+      "benchmarks": {
+        "scores": {
+          "swe_bench_verified": {
+            "score": 72.4,
+            "metric": "resolved",
+            "source": "https://huggingface.co/Qwen/Qwen3.5-27B"
+          }
+        },
+        "raw_benchmarks": [
+          {
+            "name": "SWE-Bench Verified",
+            "score": 72.4,
+            "metric": "resolved",
+            "source": "https://huggingface.co/Qwen/Qwen3.5-27B"
+          }
+        ],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.08
+      },
+      "pricing": {
+        "blended": 0.825,
+        "input": 0.3,
+        "output": 2.4,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 0.825,
+        "price_1m_input_tokens": 0.3,
+        "price_1m_output_tokens": 2.4
+      },
+      "_meta": {
+        "first_seen": "2026-09-04T12:15:08.303311+00:00",
+        "last_updated": "2026-09-04T12:15:08.303311+00:00",
+        "version": 2
+      }
+    },
+    "qwen3.5-397b-a17b": {
+      "benchmarks": {
+        "scores": {
+          "swe_bench_verified": {
+            "score": 76.4,
+            "metric": "resolved",
+            "source": "https://huggingface.co/Qwen/Qwen3.5-397B-A17B"
+          }
+        },
+        "raw_benchmarks": [
+          {
+            "name": "SWE-Bench Verified",
+            "score": 76.4,
+            "metric": "resolved",
+            "source": "https://huggingface.co/Qwen/Qwen3.5-397B-A17B"
+          }
+        ],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.08
+      },
+      "pricing": {
+        "blended": 1.35,
+        "input": 0.6,
+        "output": 3.6,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 1.35,
+        "price_1m_input_tokens": 0.6,
+        "price_1m_output_tokens": 3.6
+      },
+      "_meta": {
+        "first_seen": "2026-09-04T12:15:08.303311+00:00",
+        "last_updated": "2026-09-04T12:27:43.609434+00:00",
+        "version": 2
+      }
+    },
+    "step-3.5-flash": {
+      "benchmarks": {
+        "scores": {
+          "aa_coding": {
+            "score": 31.6,
+            "metric": "index",
+            "source": "https://openrouter.ai/stepfun/step-3.5-flash/benchmarks"
+          },
+          "scicode": {
+            "score": 40.4,
+            "metric": "percent correct",
+            "source": "https://openrouter.ai/stepfun/step-3.5-flash/benchmarks"
+          },
+          "terminal_bench_hard": {
+            "score": 27.3,
+            "metric": "success rate",
+            "source": "https://openrouter.ai/stepfun/step-3.5-flash/benchmarks"
+          },
+          "swe_bench_verified": {
+            "score": 74.4,
+            "metric": "resolved",
+            "source": "https://arxiv.org/abs/2602.10604"
+          }
+        },
+        "raw_benchmarks": [
+          {
+            "name": "Artificial Analysis Coding Index",
+            "score": 31.6,
+            "metric": "index",
+            "source": "https://openrouter.ai/stepfun/step-3.5-flash/benchmarks"
+          },
+          {
+            "name": "SciCode",
+            "score": 40.4,
+            "metric": "percent correct",
+            "source": "https://openrouter.ai/stepfun/step-3.5-flash/benchmarks"
+          },
+          {
+            "name": "Terminal-Bench Hard",
+            "score": 27.3,
+            "metric": "success rate",
+            "source": "https://openrouter.ai/stepfun/step-3.5-flash/benchmarks"
+          },
+          {
+            "name": "SWE-Bench Verified",
+            "score": 74.4,
+            "metric": "resolved",
+            "source": "https://arxiv.org/abs/2602.10604"
+          }
+        ],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.17
+      },
+      "pricing": {
+        "blended": 0.15,
+        "input": 0.1,
+        "output": 0.3,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 0.15,
+        "price_1m_input_tokens": 0.1,
+        "price_1m_output_tokens": 0.3
+      },
+      "_meta": {
+        "first_seen": "2026-09-04T12:15:08.303311+00:00",
+        "last_updated": "2026-09-04T12:15:08.303311+00:00",
+        "version": 2
+      }
+    }
+  }
+}

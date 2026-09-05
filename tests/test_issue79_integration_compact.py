@@ -86,7 +86,7 @@ class TestBuildAllEmptyTmpDir:
         assert "version" in payload, "missing version header"
         assert "models" in payload, "missing models dict"
         assert isinstance(payload["models"], dict)
-        assert payload["version"] == 1
+        assert payload["version"] == 2
         # only store committed, no benchmarks
         assert not (data_dir / "benchmarks.json").exists()
         assert not (data_dir / "nararouter_raw_full.json").exists()
@@ -135,8 +135,8 @@ class TestBuildAllEmptyTmpDir:
         store.load = counting_load  # type: ignore
         rec_alpha = store.get_by_key("alpha-model")
         rec_beta = store.get_by_key("beta-model")
-        assert rec_alpha is not None and rec_alpha.aa_score == 50
-        assert rec_beta is not None and rec_beta.aa_score == 60
+        assert rec_alpha is not None and rec_alpha.benchmarks.scores["aa_intelligence"]["score"] == 50
+        assert rec_beta is not None and rec_beta.benchmarks.scores["aa_intelligence"]["score"] == 60
         # get_by_key should not trigger file load after already loaded
         assert calls["n"] == 0, "get_by_key re-read whole file"
         # also get() normalizes key

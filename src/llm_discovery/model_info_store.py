@@ -518,19 +518,20 @@ class BenchmarkSnapshot:
 
 @dataclass
 class StoreMeta:
-    """Provenance / freshness metadata per key."""
+    """Freshness metadata per key — slim v2 (only first_seen, last_updated, version)."""
+
     first_seen: str | None = None
     last_updated: str | None = None
-    source_providers: list[str] = field(default_factory=list)
-    source_evidence_levels: list[str] = field(default_factory=list)
-    version: int = 1
+    version: int = 2
+    # LegacyCompat: v1 fields kept for compat read but never written
+    source_providers: list[str] = field(default_factory=list, repr=False, compare=False)
+    source_evidence_levels: list[str] = field(default_factory=list, repr=False, compare=False)
 
     def to_dict(self) -> dict[str, Any]:
+        # Slim v2: only 3 keys
         return {
             "first_seen": self.first_seen,
             "last_updated": self.last_updated,
-            "source_providers": self.source_providers,
-            "source_evidence_levels": self.source_evidence_levels,
             "version": self.version,
         }
 
@@ -538,12 +539,13 @@ class StoreMeta:
     def from_dict(cls, data: dict[str, Any] | None) -> "StoreMeta":
         if not data:
             return cls()
+        # Compat: accept v1 dict with source_providers etc, ignore on write
         return cls(
             first_seen=data.get("first_seen"),
             last_updated=data.get("last_updated"),
+            version=int(data.get("version", 2)),
             source_providers=list(data.get("source_providers", [])),
             source_evidence_levels=list(data.get("source_evidence_levels", [])),
-            version=int(data.get("version", 1)),
         )
 
 
@@ -592,67 +594,56 @@ class PricingSnapshot:
 @dataclass
 class ModelInfoRecord:
     """
-    Reusable store record keyed by normalized model_id.
+    Slim Source of Truth v2 record keyed by normalize_store_key(provider model_id).
 
-    Shape matches ProviderBatchWriter._to_record trimmed to reusable fields:
-    - Includes aa_model_id, aa_score, coding_score, benchmarks, evidence,
-      evidence_level, confidence, tier, pricing
-    - Omits per-provider decision/drop/error, evaluated_at (moved to _meta),
-      stage, provider name (provenance tracked in _meta.source_providers)
-    - _meta holds persistence-agnostic provenance (first_seen, last_updated,
-      source_providers[], source_evidence_levels[]).
-
-    Persistence location (per #66 decision): data/model_info_store.json
-    (JSON, committed snapshot, atomic write with .bak). YAML considered but
-    rejected: machine-managed store favors JSON for atomic reads/writes and
-    consistency with data/benchmarks.json and catalogs. Location finalized
-    in #68 but schema stable here.
+    Durable shape (file): {benchmarks, pricing, _meta} only.
+    _meta = {first_seen, last_updated, version:2}
+    Dropped vs v1: aa_model_id, aa_score, coding_score, evidence, evidence_level,
+    confidence, tier, _meta.source_providers/source_evidence_levels.
+    Keys are normalize_store_key(raw provider model_id).
+    Compat: from_dict reads v1 files (with dropped fields) but to_dict writes v2.
     """
-    # Core reusable fields (from _to_record, trimmed)
-    aa_model_id: str | None = None
-    aa_score: float | None = None
-    coding_score: float | None = None
     benchmarks: BenchmarkSnapshot | None = None
-    evidence: list[str] = field(default_factory=list)
-    evidence_level: str | None = None  # strong | moderate | weak | none (cached only strong/moderate)
-    confidence: float | None = None
-    tier: str | None = None  # normalized via _normalize_tier
     pricing: PricingSnapshot | None = None
-    # Provenance / freshness
     _meta: StoreMeta = field(default_factory=StoreMeta)
+    # LegacyCompat: v1 fields kept for compat read / gate checks but never persisted
+    aa_model_id: str | None = field(default=None, repr=False, compare=False)
+    aa_score: float | None = field(default=None, repr=False, compare=False)
+    coding_score: float | None = field(default=None, repr=False, compare=False)
+    evidence: list[str] = field(default_factory=list, repr=False, compare=False)
+    evidence_level: str | None = field(default=None, repr=False, compare=False)
+    confidence: float | None = field(default=None, repr=False, compare=False)
+    tier: str | None = field(default=None, repr=False, compare=False)
 
     def to_dict(self) -> dict[str, Any]:
+        # Slim v2: only benchmarks, pricing, _meta
         return {
-            "aa_model_id": self.aa_model_id,
-            "aa_score": self.aa_score,
-            "coding_score": self.coding_score,
-            "benchmarks": self.benchmarks.to_dict() if self.benchmarks else {},
-            "evidence": self.evidence,
-            "evidence_level": self.evidence_level,
-            "confidence": self.confidence,
-            "tier": self.tier,
-            "pricing": self.pricing.to_dict() if self.pricing else {},
+            "benchmarks": self.benchmarks.to_dict() if self.benchmarks else {"scores": {}, "raw_benchmarks": []},
+            "pricing": self.pricing.to_dict() if self.pricing else {"per_provider_overrides": {}},
             "_meta": self._meta.to_dict(),
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ModelInfoRecord":
+        # Compat: accept both v1 (with dropped fields) and v2 slim
+        if not isinstance(data, dict):
+            data = {}
         return cls(
+            benchmarks=BenchmarkSnapshot.from_dict(data.get("benchmarks")),
+            pricing=PricingSnapshot.from_dict(data.get("pricing")),
+            _meta=StoreMeta.from_dict(data.get("_meta")),
             aa_model_id=data.get("aa_model_id"),
             aa_score=data.get("aa_score"),
             coding_score=data.get("coding_score"),
-            benchmarks=BenchmarkSnapshot.from_dict(data.get("benchmarks")),
             evidence=list(data.get("evidence", [])),
             evidence_level=data.get("evidence_level"),
             confidence=data.get("confidence"),
             tier=data.get("tier"),
-            pricing=PricingSnapshot.from_dict(data.get("pricing")),
-            _meta=StoreMeta.from_dict(data.get("_meta")),
         )
 
     @classmethod
     def from_provider_record(cls, rec: dict[str, Any], provider: str | None = None, evaluated_at: str | None = None) -> "ModelInfoRecord":
-        """Build from a ProviderBatchWriter._to_record-style dict."""
+        """Build slim v2 from a ProviderBatchWriter._to_record-style dict."""
         bm = rec.get("benchmarks")
         if isinstance(bm, dict):
             bench = BenchmarkSnapshot(
@@ -673,30 +664,28 @@ class ModelInfoRecord:
                 per_provider_overrides=dict(pricing_raw.get("per_provider_overrides", {})),
             )
         elif pricing_raw is not None:
-            # scalar blended fallback
             try:
                 pricing_snap = PricingSnapshot(blended=float(pricing_raw))
             except Exception:
                 pricing_snap = None
-        tier = _normalize_tier(rec.get("tier", rec.get("category")))
         now = evaluated_at or datetime.now(UTC).isoformat()
         meta = StoreMeta(
             first_seen=now,
             last_updated=now,
-            source_providers=[provider] if provider else [],
-            source_evidence_levels=[rec.get("evidence_level")] if rec.get("evidence_level") else [],
+            version=2,
         )
+        # Keep legacy fields for in-memory gate/compat but they will not be persisted
         return cls(
+            benchmarks=bench,
+            pricing=pricing_snap,
+            _meta=meta,
             aa_model_id=rec.get("aa_model_id"),
             aa_score=rec.get("aa_score"),
             coding_score=rec.get("coding_score"),
-            benchmarks=bench,
             evidence=list(rec.get("evidence", [])),
             evidence_level=rec.get("evidence_level"),
             confidence=rec.get("confidence"),
-            tier=tier,
-            pricing=pricing_snap,
-            _meta=meta,
+            tier=_normalize_tier(rec.get("tier", rec.get("category"))),
         )
 
 # ---------------------------------------------------------------------------
@@ -745,43 +734,19 @@ def _benchmark_union_max(existing: BenchmarkSnapshot | None, incoming: Benchmark
 
 def merge_records(existing: ModelInfoRecord | None, incoming: ModelInfoRecord) -> ModelInfoRecord:
     """
-    Merge incoming into existing per #72 Q10 b (price re-avg + gap-fill):
-    - Pricing: always re-aggregated via aggregate_pricing (avg across providers, outlier guard)
-    - Other scalar fields (aa_model_id, aa_score, coding_score, evidence, evidence_level, confidence, tier):
-      gap-fill only — if existing not None, keep existing; else take incoming. Never overwrite.
-      Rationale: model capability tied to identity, not provider; first strong write freezes.
-    - Benchmarks: union max per key (coverage max, scores max) — monotonic growth.
-    - Provenance: union source_providers / source_evidence_levels, bump last_updated.
-    Replaces #64 stronger-wins logic for scalars; benchmarks/pricing keep union semantics.
+    Slim v2 merge: benchmarks gap-fill union (never overwrite), pricing re-aggregated,
+    freshness min(first_seen)/max(last_updated). No scalar overwrite for dropped fields.
+    Legacy fields gap-filled only in memory for compat (not persisted).
     """
     if existing is None:
         return incoming
 
-    def _gap_fill(field_name: str):
-        e_val = getattr(existing, field_name)
-        i_val = getattr(incoming, field_name)
-        if e_val is not None and e_val != "" and e_val != []:
-            # existing has value — keep (even if empty list vs None handled)
-            # For evidence list: keep existing if non-empty
-            if isinstance(e_val, list) and len(e_val) == 0 and isinstance(i_val, list) and len(i_val) > 0:
-                return i_val
-            return e_val
-        if i_val is not None:
-            return i_val
-        return e_val
-
-    # Pricing: always re-aggregate (avg). Convert snapshots to dict obs for helper.
-    def _snap_to_obs(snap):
-        if not snap:
-            return None
-        d = snap.to_dict() if hasattr(snap, 'to_dict') else dict(snap)
-        return {k: d.get(k) for k in ('blended','input','output','provider','source_provider') if k in d}
+    # Pricing: always re-aggregate (avg across observations, outlier to overrides)
     merged_pricing = None
     obs_list = []
     for snap in (existing.pricing, incoming.pricing):
         if snap:
             obs = snap.to_dict() if hasattr(snap, 'to_dict') else dict(snap)
-            # normalize keys for aggregate_pricing
             obs_list.append(obs)
     if len(obs_list) >= 2:
         try:
@@ -793,35 +758,43 @@ def merge_records(existing: ModelInfoRecord | None, incoming: ModelInfoRecord) -
         except Exception:
             merged_pricing = existing.pricing or incoming.pricing
     elif len(obs_list) == 1:
-        # single obs — keep as is, no outlier logic
         merged_pricing = existing.pricing or incoming.pricing
     else:
         merged_pricing = None
 
-    merged = ModelInfoRecord(
+    # Slim freshness: first_seen = min, last_updated = max, version = 2
+    first_seen_vals = [t for t in [existing._meta.first_seen, incoming._meta.first_seen] if t]
+    last_vals = [t for t in [existing._meta.last_updated, incoming._meta.last_updated] if t]
+    merged_meta = StoreMeta(
+        first_seen=min(first_seen_vals) if first_seen_vals else (existing._meta.first_seen or incoming._meta.first_seen),
+        last_updated=max(last_vals) if last_vals else (incoming._meta.last_updated or existing._meta.last_updated),
+        version=2,
+    )
+
+    # Legacy gap-fill for compat (not persisted in v2 file)
+    def _gap_fill(field_name: str):
+        e_val = getattr(existing, field_name, None)
+        i_val = getattr(incoming, field_name, None)
+        if e_val is not None and e_val != "" and e_val != []:
+            if isinstance(e_val, list) and len(e_val) == 0 and isinstance(i_val, list) and len(i_val) > 0:
+                return i_val
+            return e_val
+        if i_val is not None:
+            return i_val
+        return e_val
+
+    return ModelInfoRecord(
+        benchmarks=_benchmark_union_max(existing.benchmarks, incoming.benchmarks),
+        pricing=merged_pricing,
+        _meta=merged_meta,
         aa_model_id=_gap_fill("aa_model_id"),
         aa_score=_gap_fill("aa_score"),
         coding_score=_gap_fill("coding_score"),
-        benchmarks=_benchmark_union_max(existing.benchmarks, incoming.benchmarks),
         evidence=_gap_fill("evidence"),
         evidence_level=_gap_fill("evidence_level"),
         confidence=_gap_fill("confidence"),
         tier=_gap_fill("tier"),
-        pricing=merged_pricing,
-        _meta=StoreMeta(
-            first_seen=existing._meta.first_seen or incoming._meta.first_seen,
-            last_updated=max(
-                [t for t in [existing._meta.last_updated, incoming._meta.last_updated] if t],
-                default=incoming._meta.last_updated or existing._meta.last_updated,
-            ),
-            source_providers=sorted(set((existing._meta.source_providers or []) + (incoming._meta.source_providers or []))),
-            source_evidence_levels=sorted(set((existing._meta.source_evidence_levels or []) + (incoming._meta.source_evidence_levels or []))),
-            version=max(existing._meta.version, incoming._meta.version),
-        ),
     )
-    # Fix benchmarks provenance: ensure evidence_level/confidence source not lost
-    # If incoming had stronger evidence, evidence should reflect that winner (handled by _pick)
-    return merged
 
 # ---------------------------------------------------------------------------
 # Schema helpers & example
@@ -943,7 +916,7 @@ __all__ = [
 # Versioning: STORE_FILE_VERSION at file level, StoreMeta.version per record.
 # Read path: lazy load on first get(), in-memory dict, per-model lookup.
 
-STORE_FILE_VERSION: int = 1
+STORE_FILE_VERSION: int = 2
 DEFAULT_TTL_DAYS: int = 14  # SCD1 freshness gate per #72 Q7
 RECOMMENDED_STORE_PATH_OBJ: Path = Path(RECOMMENDED_STORE_PATH)
 
@@ -1099,43 +1072,60 @@ class ModelInfoStore:
 
     def put(self, store_key: str, record: ModelInfoRecord) -> None:
         self._ensure_loaded()
-        if not should_cache(record.evidence_level, record.confidence):
-            return
-        # Reload current file to avoid lost updates when multiple Store instances race (ThreadPool).
-        # Best-effort lock + re-read before merge.
+        if record.evidence_level is not None or record.coding_score is not None:
+            if not should_cache(record.evidence_level, record.confidence):
+                return
+        # File-lock protected critical section to avoid lost updates in ThreadPool
+        lock_fh = None
         try:
-            if self.path.exists():
-                raw = json.loads(self.path.read_text())
-                if isinstance(raw, dict) and "models" in raw:
-                    fresh = {}
-                    for k, v in (raw.get("models", {}) or {}).items():
-                        try:
-                            fresh[str(k)] = ModelInfoRecord.from_dict(v) if isinstance(v, dict) else v
-                        except Exception:
-                            continue
-                    # merge fresh from disk into self._data without overwriting newer in-memory that not yet flushed?
-                    # Keep self._data entries that are newer (by last_updated) otherwise take fresh.
-                    for k, v in fresh.items():
-                        if k not in self._data:
-                            self._data[k] = v
-                        else:
-                            # if disk has newer last_updated, it was written by another instance after our load; keep disk's fresher value for other keys
-                            # but for the target key we will merge below anyway; preserve other keys from disk
-                            if k != store_key:
-                                # prefer fresher by last_updated
-                                try:
-                                    disk_ts = v._meta.last_updated or ""
-                                    mem_ts = self._data[k]._meta.last_updated or ""
-                                    if disk_ts > mem_ts:
-                                        self._data[k] = v
-                                except Exception:
-                                    pass
-        except Exception:
-            pass
-        existing = self._data.get(store_key)
-        merged = merge_records(existing, record)
-        self._data[store_key] = merged
-        self.save()
+            try:
+                import fcntl
+                lock_path = self.path.parent / ".store.lock"
+                lock_path.parent.mkdir(parents=True, exist_ok=True)
+                lock_fh = open(lock_path, "w")
+                fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+            except Exception:
+                lock_fh = None
+            # Reload fresh inside lock
+            try:
+                if self.path.exists():
+                    raw = json.loads(self.path.read_text())
+                    if isinstance(raw, dict) and "models" in raw:
+                        fresh = {}
+                        for k, v in (raw.get("models", {}) or {}).items():
+                            try:
+                                fresh[str(k)] = ModelInfoRecord.from_dict(v) if isinstance(v, dict) else v
+                            except Exception:
+                                continue
+                        for k, v in fresh.items():
+                            if k not in self._data:
+                                self._data[k] = v
+                            else:
+                                if k != store_key:
+                                    try:
+                                        disk_ts = v._meta.last_updated or ""
+                                        mem_ts = self._data[k]._meta.last_updated or ""
+                                        if disk_ts > mem_ts:
+                                            self._data[k] = v
+                                    except Exception:
+                                        pass
+            except Exception:
+                pass
+            existing = self._data.get(store_key)
+            merged = merge_records(existing, record)
+            self._data[store_key] = merged
+            self.save()
+        finally:
+            if lock_fh is not None:
+                try:
+                    import fcntl
+                    fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
+                    lock_fh.close()
+                except Exception:
+                    try:
+                        lock_fh.close()
+                    except Exception:
+                        pass
 
     def put_for_model(self, provider_model_id: str, record: ModelInfoRecord) -> None:
         key = normalize_store_key(provider_model_id)

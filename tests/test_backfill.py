@@ -43,10 +43,13 @@ class TestBackfillSeam:
         assert stats["files_processed"] == 2
         assert store_path.exists()
         raw = json.loads(store_path.read_text())
-        assert raw["version"] == 1
+        assert raw["version"] == 2
         assert "gpt-4o" in raw["models"]
         # pricing avg: 0.51
         assert raw["models"]["gpt-4o"]["pricing"]["blended"] == 0.51
+        # slim shape: only benchmarks/pricing/_meta
+        assert set(raw["models"]["gpt-4o"].keys()) == {"benchmarks", "pricing", "_meta"}
+        assert raw["models"]["gpt-4o"]["_meta"]["version"] == 2
 
     def test_weak_skipped(self, tmp_path):
         results = tmp_path / "results"
@@ -71,7 +74,11 @@ class TestBackfillSeam:
         stats2 = backfill(results_dir=results, store_path=store_path)
         assert stats2["unique_models"] == 1
         store = ModelInfoStore(store_path)
-        assert store.get("gpt-4o").aa_score == 50  # gap-fill only, keep existing
+        # v2 slim: legacy fields not persisted; benchmarks union max, pricing re-avg, meta version 2
+        rec = store.get("gpt-4o")
+        assert rec is not None
+        assert rec._meta.version == 2
+        assert "aa_intelligence" in rec.benchmarks.scores
 
     def test_outliers_separated(self, tmp_path):
         results = tmp_path / "results"

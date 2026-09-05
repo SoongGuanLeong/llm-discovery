@@ -123,9 +123,12 @@ class TestSecondProviderPriceAvg:
         # blended avg (0.5+0.52)/2 = 0.51
         assert pricing["blended"] == 0.51
         assert pricing["per_provider_overrides"] == {}
-        # scalar gap-fill: aa_score keeps first value (55) even though second same here
+        # v2 slim: legacy aa_score not persisted, verify slim shape and pricing avg
         store = ModelInfoStore(store_path)
-        assert store.get("shared-model").aa_score == 55
+        rec = store.get("shared-model")
+        assert rec is not None
+        assert rec._meta.version == 2
+        assert rec.pricing.blended == 0.51
 
     def test_pricing_outlier_to_overrides(self, tmp_path):
         results = tmp_path / "results"
@@ -146,15 +149,19 @@ class TestScalarGapFill:
     def test_scalar_gap_fill_only(self, tmp_path):
         results = tmp_path / "results"
         results.mkdir()
-        # both providers in single backfill: aa_score 55 vs 90 gap-fill keeps first (55)
+        # v2 slim: benchmarks union max, pricing re-avg, no scalar aa_score persistence
         _write_yaml(results / "a.yaml", "a", [_keep("gap-model", evidence_level="strong", aa_score=55, pricing={"price_1m_blended_3_to_1": 0.5})], evaluated_at=_fresh_ts())
         _write_yaml(results / "b.yaml", "b", [_keep("gap-model", evidence_level="strong", aa_score=90, pricing={"price_1m_blended_3_to_1": 0.52})], evaluated_at=_fresh_ts())
         store_path = tmp_path / "store.json"
         backfill(results_dir=results, store_path=store_path)
         store = ModelInfoStore(store_path)
-        assert store.get("gap-model").aa_score == 55  # gap-fill keeps existing
+        rec = store.get("gap-model")
+        assert rec is not None
+        assert rec._meta.version == 2
         # pricing re-averaged (0.5+0.52)/2 = 0.51
-        assert store.get("gap-model").pricing.blended == 0.51
+        assert rec.pricing.blended == 0.51
+        # benchmarks union max keeps higher score
+        assert rec.benchmarks.scores["aa_intelligence"]["score"] == 90
 
     def test_gap_fill_evidence_and_tier(self, tmp_path):
         # direct store put path also gap-fill
@@ -206,7 +213,7 @@ class TestMonotonicStore:
         store2 = ModelInfoStore(store_path)
         # monotonic: delete-model retained even though no provider reports it
         assert store2.get("delete-model") is not None
-        assert store2.get("delete-model").aa_score == 70
+        assert store2.get("delete-model")._meta.version == 2
 
     def test_retained_record_still_updatable_for_price(self, tmp_path):
         results = tmp_path / "results"

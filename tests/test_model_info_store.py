@@ -135,13 +135,13 @@ class TestPricingAggregation:
 
 class TestMergeRecords:
     def test_strong_wins_over_moderate(self):
-        # #72 Q10 b: pricing re-avg, other scalars gap-fill only — existing value kept even if incoming stronger
-        r1 = ModelInfoRecord(aa_score=50, evidence_level="moderate", confidence=0.8, evidence=["x"], _meta=StoreMeta(last_updated="2026-09-04T01:00:00+00:00", source_providers=["a"]))
-        r2 = ModelInfoRecord(aa_score=55, evidence_level="strong", confidence=0.9, evidence=["y"], _meta=StoreMeta(last_updated="2026-09-04T02:00:00+00:00", source_providers=["b"]))
+        # #72 Q10 b + v2 slim: pricing re-avg, legacy scalars gap-fill, freshness min/max, no source_providers
+        r1 = ModelInfoRecord(aa_score=50, evidence_level="moderate", confidence=0.8, evidence=["x"], _meta=StoreMeta(last_updated="2026-09-04T01:00:00+00:00"))
+        r2 = ModelInfoRecord(aa_score=55, evidence_level="strong", confidence=0.9, evidence=["y"], _meta=StoreMeta(last_updated="2026-09-04T02:00:00+00:00"))
         m = merge_records(r1, r2)
-        assert m.aa_score == 50  # gap-fill only, keep existing
+        assert m.aa_score == 50  # gap-fill only, keep existing (legacy not persisted but kept in memory)
         assert m.evidence == ["x"]
-        assert set(m._meta.source_providers) == {"a", "b"}
+        assert m._meta.version == 2
 
     def test_gap_fill(self):
         r1 = ModelInfoRecord(aa_model_id=None, aa_score=None, evidence_level="strong", _meta=StoreMeta(last_updated="2026-09-04T01:00:00+00:00"))
@@ -166,10 +166,13 @@ class TestMergeRecords:
         assert m.aa_score == 10
 
     def test_provenance_union(self):
-        r1 = ModelInfoRecord(evidence_level="strong", _meta=StoreMeta(source_providers=["groq"], source_evidence_levels=["strong"], last_updated="2026-09-04T01:00:00+00:00"))
-        r2 = ModelInfoRecord(evidence_level="moderate", _meta=StoreMeta(source_providers=["openrouter"], source_evidence_levels=["moderate"], last_updated="2026-09-04T02:00:00+00:00"))
+        # v2 slim: only first_seen/last_updated/version
+        r1 = ModelInfoRecord(evidence_level="strong", _meta=StoreMeta(first_seen="2026-09-04T01:00:00+00:00", last_updated="2026-09-04T01:00:00+00:00"))
+        r2 = ModelInfoRecord(evidence_level="moderate", _meta=StoreMeta(first_seen="2026-09-04T02:00:00+00:00", last_updated="2026-09-04T02:00:00+00:00"))
         m = merge_records(r1, r2)
-        assert set(m._meta.source_providers) == {"groq", "openrouter"}
+        assert m._meta.first_seen == "2026-09-04T01:00:00+00:00"
+        assert m._meta.last_updated == "2026-09-04T02:00:00+00:00"
+        assert m._meta.version == 2
 
 
 class TestSchema:
@@ -177,22 +180,22 @@ class TestSchema:
         assert RECOMMENDED_STORE_PATH == "data/model_info_store.json"
 
     def test_record_roundtrip(self):
+        # v2 slim roundtrip: only benchmarks/pricing/_meta persisted
         rec = ModelInfoRecord(
-            aa_model_id="muse-spark-1-2",
-            aa_score=56.8,
-            coding_score=58.3,
             benchmarks=BenchmarkSnapshot(scores={"aa_intelligence": {"score": 56.8}}),
-            evidence=["AA 56.8"],
-            evidence_level="strong",
-            confidence=0.92,
-            tier="flash",
             pricing=PricingSnapshot(blended=0.45, input=0.3, output=0.9),
+            _meta=StoreMeta(first_seen="2026-09-04T05:00:00+00:00", last_updated="2026-09-04T05:00:00+00:00", version=2),
         )
         d = rec.to_dict()
+        assert set(d.keys()) == {"benchmarks", "pricing", "_meta"}
+        assert d["_meta"]["version"] == 2
+        assert "aa_model_id" not in d
         rec2 = ModelInfoRecord.from_dict(d)
-        assert rec2.aa_model_id == "muse-spark-1-2"
-        assert rec2.tier == "flash"
+        assert rec2.benchmarks.scores["aa_intelligence"]["score"] == 56.8
         assert rec2.pricing.blended == 0.45
+        assert rec2._meta.version == 2
+        # Legacy fields not persisted
+        assert rec2.aa_model_id is None
 
     def test_from_provider_record(self):
         rec = {
@@ -208,6 +211,10 @@ class TestSchema:
             "pricing": {"price_1m_blended_3_to_1": 0.45, "price_1m_input_tokens": 0.3, "price_1m_output_tokens": 0.9},
         }
         mir = ModelInfoRecord.from_provider_record(rec, provider="groq", evaluated_at="2026-09-04T05:00:00+00:00")
+        # v2 slim: tier not persisted separately, but legacy still set in memory for compat
         assert mir.tier == "contributor_free"
         assert mir.pricing.blended == 0.45
-        assert mir._meta.source_providers == ["groq"]
+        assert mir._meta.version == 2
+        assert mir._meta.first_seen == "2026-09-04T05:00:00+00:00"
+        # slim _meta has no source_providers
+        assert mir._meta.source_providers == []

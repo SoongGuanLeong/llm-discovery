@@ -143,8 +143,8 @@ class ProviderBatchWriter:
             "coding_score": rec.get("coding_score"),
             "pricing": rec.get("pricing"),
             "benchmarks": benchmarks,
-            "confidence": rec.get("confidence", 0.9),
-            "evidence_level": rec.get("evidence_level", "strong"),
+            "confidence": rec.get("confidence"),
+            "evidence_level": rec.get("evidence_level"),
             "evidence": clean_evidence(rec.get("evidence", [])),
             "coding_assessment": rec.get("coding_assessment"),
         }

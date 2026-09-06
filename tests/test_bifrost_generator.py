@@ -97,7 +97,8 @@ class TestGenerateBifrostConfig:
         empty_tiers = result["empty_tiers"]
 
         assert config["version"] == 2
-        assert config["config_store"]["enabled"] is False
+        assert config["config_store"]["enabled"] is True
+        assert config["config_store"]["type"] == "sqlite"
         assert "groq" in config["providers"]
         assert "cerebras" in config["providers"]
         assert "bazaarlink" in config["providers"]

@@ -239,7 +239,7 @@ def generate_bifrost_config(
 
     config = {
         "version": 2,
-        "config_store": {"enabled": False},
+        "config_store": {"enabled": True, "type": "sqlite", "config": {"path": "/app/data/config.db"}},
         "providers": providers_block,
     }
 

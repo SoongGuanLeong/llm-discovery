@@ -71,6 +71,14 @@ providers:
   - name: navy_ai
     base_url: https://api.navy/v1
     secret: NAVY_AI_API_KEY
+
+  - name: nvidia_nim
+    base_url: https://integrate.api.nvidia.com/v1
+    secret: NVIDIA_NIM_API_KEY
+
+  - name: ollama_cloud
+    base_url: https://ollama.com/v1
+    secret: OLLAMA_CLOUD_API_KEY
   
   - name: opencode_zen
     base_url: https://opencode.ai/zen/v1
@@ -79,3 +87,19 @@ providers:
   - name: openrouter
     base_url: https://openrouter.ai/api/v1
     secret: OPENROUTER_API_KEY
+
+  - name: reka
+    base_url: https://api.reka.ai/v1
+    secret: REKA_API_KEY
+
+  - name: requesty
+    base_url: https://router.requesty.ai/v1
+    secret: REQUESTY_API_KEY
+
+  - name: sea-lion
+    base_url: https://api.sea-lion.ai/v1
+    secret: SEALION_API_KEY
+
+  - name: zai
+    base_url: https://api.z.ai/api/paas/v4
+    secret: ZAI_API_KEY

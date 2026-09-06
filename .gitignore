@@ -21,6 +21,8 @@ wheels/
 data/
 !data/model_info_store.json
 
+# data/derived/cache.db (issue #139) derived SQLite — covered by data/ above
+
 .dsh-worktrees/
 
 # Local review / debug artifacts - do not commit

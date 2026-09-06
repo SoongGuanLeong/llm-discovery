@@ -32,6 +32,10 @@ _Avoid_: cache, model cache, database
 A per-provider `data/results/<provider>.yaml` file produced by discovery. Overwritten on each build and gitignored; its keep records are backfilled into the Source of Truth but the file itself is not retained for audit.
 _Avoid_: results file, YAML store, provider report
 
+**Derived Cache**:
+The regenerable SQLite file `data/derived/cache.db` rebuilt at build_all tail from the Source of Truth for ad-hoc SQL / DBeaver inspection. WAL-enabled, gitignored, atomic temp->replace. Never consulted for TTL reuse or correctness; delete and rebuild from the store at any time.
+_Avoid_: cache, model cache, store DB
+
 **Accurate-Enough Gate**:
 Predicate that decides whether a keep record may become a Keeper. Requires: evidence_level == strong, coding_score != null, pricing present or free-marker exception, aa_model_id present or qualifying supplement (SWE/Terminal >=50) with URL, benchmark_coverage >=0.25, at least one http URL in evidence, and no hallucinated or UUID model_id.
 _Avoid_: eligibility gate, cache gate

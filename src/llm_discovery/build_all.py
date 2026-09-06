@@ -207,6 +207,20 @@ def build_all(
     except AssertionError:
         pass
 
+    # 8. Derived Cache (data/derived/cache.db) for DBeaver/SQL inspection (issue #139)
+    # Hybrid: JSON remains Source of Truth; this is regenerable, WAL, atomic.
+    try:
+        from .cache_db import rebuild_cache_db, verify_cache_db
+
+        cache_res = rebuild_cache_db(store_path=store_path, db_path=data_dir / "derived" / "cache.db")
+        cache_check = verify_cache_db(store_path=store_path, db_path=data_dir / "derived" / "cache.db")
+        if cache_check["ok"]:
+            print(f"[build-all] cache.db rows={cache_res['row_count']} store={cache_res['store_size']} verified path={cache_res['db_path']}")
+        else:
+            print(f"[build-all] cache.db verify MISMATCH (store JSON unchanged): {cache_check['mismatches']}")
+    except Exception as exc:  # warn-only, never fails build
+        print(f"[build-all] cache.db rebuild skipped: {exc}")
+
     return {
         "providers_discovered": discovered,
         "providers": provider_list,

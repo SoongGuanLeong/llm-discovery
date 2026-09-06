@@ -3,120 +3,87 @@
 This document describes how to deploy the Bifrost AI Gateway locally using Podman Quadlet
 (user systemd services) with an npx fallback for hosts where Quadlet is unavailable.
 
-## Quick Start (Podman Quadlet)
+## Quick Start (Podman Quadlet via setup.sh)
 
 ### Prerequisites
 
-- Podman 4.0+ with Quadlet support (podman --version)
-- User linger enabled: loginctl enable-linger $USER
-- Infisical CLI (for secrets) or manual environment file
+- Podman 4.0+ with Quadlet support (`podman --version`)
+- User linger enabled: `loginctl enable-linger $USER`
+- Infisical CLI (`infisical --version`) and `.env` with `LLM_SHARED_PROJECT_ID` + `LLM_DISCOVERY_PROJECT_ID` (see `.env.example`)
+- Python 3.12+ (and `uv` preferred, fallback to `.venv/bin/python`)
 
-### 1. Export Secrets to Environment File
-
-Bifrost requires API keys for each provider. These are supplied via a single
-environment file consumed by the Quadlet service.
-
-**Option A: Infisical (recommended for team/shared secrets)**
+### 0. Configure .env (once, no sourcing needed)
 
 ```bash
-# Login to Infisical (one-time)
-infisical login
-
-# Export dev environment secrets to the expected location
-mkdir -p ~/.config/bifrost
-infisical export --projectId $LLM_SHARED_PROJECT_ID --env dev > ~/.config/bifrost/bifrost.env
-chmod 600 ~/.config/bifrost/bifrost.env
+cp .env.example .env
+# edit .env: set LLM_SHARED_PROJECT_ID + LLM_DISCOVERY_PROJECT_ID (UUIDs)
+# exported env vars override .env; quotes/comments/whitespace are stripped, last occurrence wins
+cat .env
 ```
 
-**Option B: Manual .env file**
+### 1. Preflight + Setup (one command after infisical login)
 
-Create ~/.config/bifrost/bifrost.env with your provider API keys:
+```bash
+# Login to Infisical (one-time, stores token in ~/.infisical / OS keyring)
+infisical login
+
+# Read-only preflight: prints [1/6]..[6/6] OK/WARN/FAIL + PASS/FAIL table, writes nothing
+scripts/setup.sh --check
+# -> All checks PASS - ready for: ./scripts/setup.sh --yes
+
+# Default: Podman secret handoff (Secret type=env, no plaintext file)
+scripts/setup.sh --yes
+
+# Fallback: explicit file handoff (atomic 0600 file at ~/.config/bifrost/bifrost.env)
+scripts/setup.sh --yes --secrets=file
+```
+
+What setup does (idempotent reconciliation, safe to re-run):
+- Parses `.env` directly (no `source`), validates UUIDs
+- Probes `infisical export` check-only; on fail prints `infisical login` hint
+- Exports secrets via `infisical export --format dotenv --include-imports=false --silent` and hands to Bifrost:
+  - default `podman`: `podman secret create --env-file` (`type=env`), removes stale plaintext file, Quadlet uses `Secret=bifrost-env,type=env`
+  - `--secrets=file`: atomic `mktemp + chmod 600 + mv` to `~/.config/bifrost/bifrost.env` (or `.tmp/bifrost.env` fallback when HOME read-only), Quadlet uses `EnvironmentFile=%h/.config/bifrost/bifrost.env`
+- Generates `data/bifrost/config.json` + `shim_map.json` (env.VAR refs, never inline secrets)
+- Installs Quadlet units to `~/.config/containers/systemd/` (diff-before-copy, `Source=` patched to absolute `$(pwd)/data/bifrost`, 0644 perms, daemon-reload only on change, then `restart`/`enable --now`)
+
+Flags: `--check` (dry-run, no writes), `--yes` (skip overwrite prompt), `--secrets=file|podman` (default: podman), `--help`.
+
+Permissions: secrets file is forced 0600 (warn/fix if drift). Re-run is idempotent: `up-to-date (no rewrite)` and quadlet `up-to-date (no copy)`, daemon-reload skipped when unchanged.
+
+### 2. Manual secrets (without Infisical)
+
+Create `~/.config/bifrost/bifrost.env` with provider keys (0600):
 
 ```bash
 mkdir -p ~/.config/bifrost
 cat > ~/.config/bifrost/bifrost.env <<'EOF'
-# Provider API keys (referenced as env.VAR in config.json)
 GROQ_API_KEY=your-groq-key
 CEREBRAS_API_KEY=your-cerebras-key
-OPENAI_API_KEY=your-openai-key
-ANTHROPIC_API_KEY=your-anthropic-key
-# ... add other provider keys as needed
-
-# Cloudflare requires BOTH vars to be present
+# ... add other provider keys (see Environment File Schema below)
 CLOUDFLARE_API_KEY=your-cf-key
 CLOUDFLARE_ACCOUNT_ID=your-cf-account-id
-
-# Bifrost encryption key (optional for file-only mode)
-# BIFROST_ENCRYPTION_KEY=your-encryption-key
 EOF
 chmod 600 ~/.config/bifrost/bifrost.env
+# then run setup with file mode or generate directly:
+scripts/setup.sh --yes --secrets=file
+# or: uv run python scripts/generate-bifrost-config.py
 ```
 
-### 2. Generate Bifrost Config
-
-Run the generator after build_all (or manually) to create config.json and shim_map.json
-in data/bifrost/:
+### 3. Verify Health
 
 ```bash
-# From project root
-uv run python scripts/generate-bifrost-config.py
-```
-
-This reads data/results/*.yaml (Ephemeral Reports) and config/providers.yaml,
-checks which provider keys are present in ~/.config/bifrost/bifrost.env,
-and emits a file-only Bifrost config.
-
-**Dry-run check** (lists providers with/without keys, exits non-zero if any tier empty):
-
-```bash
-uv run python scripts/generate-bifrost-config.py --check
-```
-
-### 3. Install and Start Quadlet Service
-
-Copy Quadlet files to user systemd directory and customize the bind-mount path:
-
-```bash
-mkdir -p ~/.config/containers/systemd/
-cp config/quadlet/bifrost-data.volume ~/.config/containers/systemd/
-cp config/quadlet/bifrost.container ~/.config/containers/systemd/
-
-# IMPORTANT: Edit the volume file to point to your project's data/bifrost directory
-# Use absolute path - systemd user services don't have a project-relative working directory
-sed -i "s|Source=/home/soongguanleong/projects/llm-discovery/data/bifrost|Source=$(pwd)/data/bifrost|" ~/.config/containers/systemd/bifrost-data.volume
-```
-
-Reload systemd and start the service:
-
-```bash
-systemctl --user daemon-reload
-systemctl --user start bifrost
-```
-
-Enable auto-start on login (requires linger):
-
-```bash
-systemctl --user enable bifrost
+curl http://localhost:8080/health
+curl http://localhost:8080/v1/models
+systemctl --user status bifrost
+# enable linger for auto-start after logout:
 loginctl enable-linger $USER
 ```
 
-### 4. Verify Health
+### 4. View Logs
 
 ```bash
-# Health endpoint (should return 200 OK with JSON)
-curl http://localhost:8080/health
-
-# List available models (shows all provider/model entries)
-curl http://localhost:8080/v1/models
-```
-
-### 5. View Logs
-
-```bash
-# Follow logs
 journalctl --user -u bifrost -f
-
-# Show last 100 lines
 journalctl --user -u bifrost -n 100
 ```
 

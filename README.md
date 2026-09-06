@@ -209,31 +209,35 @@ export AA_API_KEY=aa_xxx  # or ARTIFICIAL_ANALYSIS_API_KEY
 .venv/bin/python -m llm_discovery.cli models show groq
 ```
 
-## Bifrost gateway config (file-only, no container)
+## Bifrost gateway (setup.sh quick start)
 
-Generate Bifrost `config.json` + `shim_map.json` from `data/results/*.yaml` Ephemeral Reports:
+Fresh clone to running gateway (Podman Quadlet canonical, npx fallback manual):
 
 ```bash
-# 1. Export provider keys from Infisical to local env file (gitignored)
+cp .env.example .env          # set LLM_SHARED_PROJECT_ID + LLM_DISCOVERY_PROJECT_ID (UUIDs)
+infisical login               # one-time, token in ~/.infisical / OS keyring
+scripts/setup.sh --check      # read-only preflight: [1/6]..[6/6] + PASS/FAIL table, writes nothing
+scripts/setup.sh --yes        # default: podman secret type=env (no plaintext file)
+# fallback when Podman type=env unsupported:
+scripts/setup.sh --yes --secrets=file   # atomic 0600 file at ~/.config/bifrost/bifrost.env
+curl http://localhost:8080/health
+# linger for auto-start after logout:
+loginctl enable-linger $USER
+```
+
+Manual alternative (without setup.sh):
+
+```bash
 infisical export --projectId "$LLM_SHARED_PROJECT_ID" --env dev --format dotenv > ~/.config/bifrost/bifrost.env
-
-# 2. Source it and generate artifacts
-source ~/.config/bifrost/bifrost.env
+chmod 600 ~/.config/bifrost/bifrost.env
 .venv/bin/python scripts/generate-bifrost-config.py
-
-# 3. Restart Bifrost (systemd user unit or npx)
-systemctl --user restart bifrost
+systemctl --user daemon-reload && systemctl --user restart bifrost
 # or: npx -y @maximhq/bifrost --app-dir ./data/bifrost
 ```
 
-Dry-run (lists providers with/without keys, exits non-zero if any tier empty):
-
-```bash
-source ~/.config/bifrost/bifrost.env
-.venv/bin/python scripts/generate-bifrost-config.py --check
-```
-
-- Artifacts written to `data/bifrost/` (gitignored under `data/`).
-- `config.json` is file-only (no config_store), binds to `/app/data/config.json` in container.
-- `shim_map.json` maps tier → model_id[] for the shim's 503-on-empty-tier behavior.
-- Run after `build_all` or manually; no file watcher — regeneration is deterministic.
+- `scripts/setup.sh` parses `.env` directly (no `source`; quotes/comments/whitespace stripped, last occurrence wins, exported env overrides file).
+- Secrets handoff: default `podman secret type=env` (`Secret=bifrost-env,type=env` in Quadlet); `--secrets=file` writes 0600 atomically.
+- Artifacts: `data/bifrost/config.json` + `shim_map.json` (env.VAR refs, never inline secrets; see `docs/bifrost-deployment.md`).
+- Idempotent re-run: `up-to-date (no rewrite)` and quadlet diff-before-copy, daemon-reload only on change.
+- Preflight fails print one-line reason + fix (`Missing .env`, `Not logged into Infisical`, Podman missing) and leave no partial writes.
+- See `scripts/setup.sh --help` for flags. Details: `docs/bifrost-deployment.md`.

@@ -78,7 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
     build_parser.add_argument("--data-dir", type=Path, default=DATA_DIR, help="Data directory (default: data)")
     build_parser.add_argument("--config", type=Path, default=Path("config/providers.yaml"), help="Providers YAML path")
     build_parser.add_argument("--providers", nargs="*", help="Optional subset of provider names")
-    build_parser.add_argument("--max-workers", type=int, default=4, help="Workers per provider")
+    build_parser.add_argument("--max-workers", type=int, default=8, help="Workers per provider")
 
     return parser
 

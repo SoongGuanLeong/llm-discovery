@@ -58,7 +58,7 @@ def build_all(
     config_path: str | Path = "config/providers.yaml",
     provider_names: list[str] | None = None,
     discover_fn: Callable[..., dict[str, list[dict[str, Any]]]] | None = None,
-    max_workers: int = 4,
+    max_workers: int = 8,
 ) -> dict[str, Any]:
     """Build store from providers.yaml in one invocation.
 
@@ -231,7 +231,7 @@ def main() -> None:
     parser.add_argument("--providers", nargs="*", help="Optional subset of provider names to build")
     parser.add_argument("--all-providers", action="store_true", help="Build all providers (default, parity with discover.py)")
     parser.add_argument("providers_pos", nargs="*", help=argparse.SUPPRESS)
-    parser.add_argument("--workers", "--max-workers", dest="max_workers", type=int, default=4, help="Workers per provider (alias --workers for discover.py parity)")
+    parser.add_argument("--workers", "--max-workers", dest="max_workers", type=int, default=8, help="Workers per provider (alias --workers for discover.py parity)")
     args = parser.parse_args()
     # Parity with discover.py: allow positional provider names like "kilo_ai" or "kilo_ai --all"
     providers = args.providers

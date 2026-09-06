@@ -763,7 +763,7 @@ def discover_provider(
     config: Any,
     aa: Any,
     models_dev: Any,
-    max_workers: int = 4,
+    max_workers: int = 8,
     store: ModelInfoStore | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """T3 path: evaluate every model for a provider in parallel.
@@ -913,7 +913,7 @@ def discover_all_providers(
     config: Any,
     aa: Any,
     models_dev: Any,
-    max_workers: int = 4,
+    max_workers: int = 8,
     output_dir: Path = Path("data/results"),
     store: ModelInfoStore | None = None,
 ) -> dict[str, dict[str, list[dict[str, Any]]]]:

@@ -7,6 +7,7 @@
 #   canonical hard-fail, flags --check + --yes only, --secrets=file fallback.
 # Secrets (per #123): podman secret type=env by default, file fallback via --secrets=file
 # Prerequisites + idempotency (per #124): preflight fail-fast, atomic writes, daemon-reload only on change.
+# Quadlet (per #130): diff-before-copy, Source patched, Secret vs EnvironmentFile, 0644 perms, daemon-reload + restart/enable.
 #
 # Usage:
 #   ./scripts/setup.sh --check          # read-only preflight, no writes
@@ -43,7 +44,8 @@ Usage: scripts/setup.sh [OPTIONS]
 Single reconciliation command from fresh clone to running Bifrost gateway.
 Parses .env directly (no source), verifies Infisical login check-only,
 prepares secrets via Podman secret (default) or file fallback, generates
-Bifrost config and Quadlet units. Idempotent; stops before daemon-reload.
+Bifrost config and Quadlet units. Idempotent; installs units (diff-before-copy,
+daemon-reload only on change) and starts service.
 
 Options:
   --check              Dry-run preflight: print [1/6]..[6/6] OK/WARN/FAIL and
@@ -387,7 +389,7 @@ if [[ "$GEN_OK" -eq 1 ]]; then
 fi
 
 echo ""
-echo "Quadlet prepare (dry, no daemon-reload yet - prototype boundary per #122):"
+echo "Quadlet prepare (idempotent install per #130):"
 if ! mkdir -p "$QUADLET_DST_DIR" 2>/dev/null || ! touch "$QUADLET_DST_DIR/.writetest" 2>/dev/null; then
   log_warn "$QUADLET_DST_DIR not writable (sandbox RO) - using $REPO_ROOT/.tmp/quadlet (demo fallback)"
   QUADLET_DST_DIR="$REPO_ROOT/.tmp/quadlet"
@@ -395,6 +397,7 @@ if ! mkdir -p "$QUADLET_DST_DIR" 2>/dev/null || ! touch "$QUADLET_DST_DIR/.write
 else
   rm -f "$QUADLET_DST_DIR/.writetest"
 fi
+QUADLET_CHANGED=0
 for unit in bifrost.container bifrost-data.volume; do
   src="$QUADLET_SRC_DIR/$unit"
   dst="$QUADLET_DST_DIR/$unit"
@@ -408,45 +411,72 @@ for unit in bifrost.container bifrost-data.volume; do
     sed "s|Source=.*|Source=$DATA_BIFROST_DIR|" "$src" > "$tmp_unit"
   else
     if [[ "$SECRETS_MODE" == "podman" ]]; then
-      # Replace EnvironmentFile with Secret (podman mode)
-      sed -E "s|^EnvironmentFile=.*|Secret=bifrost-env,type=env|" "$src" > "$tmp_unit"
-      # If source already had Secret (e.g. toggled), ensure it stays Secret
-      if grep -q "^Secret=" "$tmp_unit"; then
-        :
+      if grep -q "^EnvironmentFile=" "$src"; then
+        sed -E "s|^EnvironmentFile=.*|Secret=bifrost-env,type=env|" "$src" > "$tmp_unit"
       elif grep -q "^Secret=" "$src"; then
         sed -E "s|^Secret=.*|Secret=bifrost-env,type=env|" "$src" > "$tmp_unit"
+      else
+        cat "$src" > "$tmp_unit"
+        echo "Secret=bifrost-env,type=env" >> "$tmp_unit"
       fi
     else
-      # File mode: ensure EnvironmentFile, replace Secret if present
       if grep -q "^Secret=" "$src"; then
         sed -E "s|^Secret=.*|EnvironmentFile=%h/.config/bifrost/bifrost.env|" "$src" > "$tmp_unit"
       elif grep -q "^EnvironmentFile=" "$src"; then
         cat "$src" > "$tmp_unit"
       else
-        # Fallback: ensure EnvironmentFile line exists (append if missing)
         cat "$src" > "$tmp_unit"
-        if ! grep -q "^EnvironmentFile=" "$tmp_unit" && ! grep -q "^Secret=" "$tmp_unit"; then
-          echo "EnvironmentFile=%h/.config/bifrost/bifrost.env" >> "$tmp_unit"
-        fi
+        echo "EnvironmentFile=%h/.config/bifrost/bifrost.env" >> "$tmp_unit"
       fi
     fi
   fi
   if [[ -f "$dst" ]] && diff -q "$tmp_unit" "$dst" >/dev/null 2>&1; then
     echo "  $unit: up-to-date (no copy)"
+    # fix perms drift without triggering daemon-reload
+    _perms=$(stat -c %a "$dst" 2>/dev/null || stat -f %A "$dst" 2>/dev/null || echo "?")
+    if [[ "$_perms" != "644" && "$_perms" != "0644" ]]; then
+      chmod 0644 "$dst" 2>/dev/null || true
+    fi
   else
     tmp_dst=$(mktemp "$QUADLET_DST_DIR/.$unit.XXXXXX")
     TMP_FILES+=("$tmp_dst")
     cat "$tmp_unit" > "$tmp_dst"
+    chmod 0644 "$tmp_dst" 2>/dev/null || true
     mv -f "$tmp_dst" "$dst"
     TMP_FILES=("${TMP_FILES[@]/$tmp_dst}")
+    chmod 0644 "$dst" 2>/dev/null || true
     echo "  $unit: installed -> $dst (changed)"
+    QUADLET_CHANGED=1
   fi
 done
+# daemon-reload only on change (per #130)
+if [[ "$QUADLET_CHANGED" -eq 1 ]]; then
+  echo "  daemon-reload: systemctl --user daemon-reload (units changed)"
+  if systemctl --user daemon-reload 2>&1; then
+    log_ok "daemon-reload done"
+  else
+    log_warn "daemon-reload failed - run manually: systemctl --user daemon-reload"
+  fi
+  # service control: restart if active else enable --now (prepare-only boundary lifted)
+  if systemctl --user restart bifrost 2>&1; then
+    log_ok "bifrost restarted"
+  elif systemctl --user enable --now bifrost 2>&1; then
+    log_ok "bifrost enabled --now"
+  else
+    log_warn "could not auto-start bifrost - run manually: systemctl --user enable --now bifrost"
+  fi
+else
+  echo "  daemon-reload: skipped (units up-to-date)"
+fi
 echo ""
-echo "Next (manual, prototype stops before daemon-reload per #122):"
-echo "  systemctl --user daemon-reload"
-echo "  systemctl --user enable --now bifrost   # or: systemctl --user restart bifrost"
+echo "Next commands:"
 echo "  curl http://localhost:8080/health"
+if command -v loginctl >/dev/null 2>&1; then
+  _linger=$(loginctl show-user "${USER:-$(whoami 2>/dev/null || echo unknown)}" -p Linger --value 2>/dev/null || echo "unknown")
+  if [[ "$_linger" == "no" ]]; then
+    echo "  loginctl enable-linger ${USER:-$(whoami 2>/dev/null || echo user)}  # linger not enabled"
+  fi
+fi
 echo ""
 echo "npx fallback (if Podman unavailable, per docs/bifrost-deployment.md):"
 echo "  npx -y @maximhq/bifrost --app-dir ./data/bifrost"

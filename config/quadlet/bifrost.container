@@ -3,15 +3,18 @@ Description=Bifrost AI Gateway (file-only config, user service)
 Documentation=https://github.com/maximhq/bifrost
 After=network-online.target
 Wants=network-online.target
-Requires=bifrost-data.volume
-After=bifrost-data.volume
+# NOTE: bifrost-data.volume is kept in repo as template (Source is placeholder
+# patched by scripts/setup.sh). Container uses direct bind mount below to avoid
+# requiring bifrost-data-volume.service generation (Podman 5.7 flake).
 
 [Container]
 # Bifrost image - uses maximhq/bifrost from Docker Hub
 # UID 1000 matches typical non-root user
 Image=docker.io/maximhq/bifrost:latest
 # Mount the bifrost-data volume (bind-mount to project's data/bifrost)
-Volume=bifrost-data.volume:/app/data:Z
+# Direct bind mount - absolute path materialized by setup.sh via $DATA_BIFROST_DIR
+# (bifrost-data.volume is kept as repo template for documentation, not required at runtime)
+Volume=./data/bifrost.placeholder-will-be-replaced-by-setup.sh:/app/data:Z
 # Publish Bifrost HTTP port
 PublishPort=8080:8080
 # Environment file with secrets (Infisical export or manual .env)

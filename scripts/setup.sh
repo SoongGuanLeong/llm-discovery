@@ -191,8 +191,8 @@ else
 fi
 PODMAN_SECRET_ENV=0
 if [[ "$PODMAN_OK" -eq 1 ]]; then
-  if podman secret --help 2>&1 | grep -q "secret"; then
-    if podman secret create --help 2>&1 | grep -q "env"; then
+  if (set +o pipefail; podman secret --help 2>&1 | grep -q "secret"); then
+    if (set +o pipefail; podman secret create --help 2>&1 | grep -q "env"); then
       PODMAN_SECRET_ENV=1
       log_ok "podman secret type=env supported"
     else
@@ -299,8 +299,8 @@ if [[ "$SECRETS_MODE" == "podman" ]]; then
   if podman secret create --env-file "$TMP_ENV" bifrost-env >/dev/null 2>&1; then
     log_ok "podman secret bifrost-env created (type=env)"
   else
-    # Fallback: stdin form for older podman without --env-file (cat file into stdin)
-    if podman secret create bifrost-env - < "$TMP_ENV" >/dev/null 2>&1; then
+    # Fallback: stdin form for older podman without --env-file (pipe required for podman 5.7: `<` fails with "if `-` is used, data must be passed into stdin")
+    if cat "$TMP_ENV" | podman secret create bifrost-env - >/dev/null 2>&1; then
       log_ok "podman secret bifrost-env created (stdin fallback)"
     else
       die "podman secret create failed - try --secrets=file"
@@ -352,6 +352,22 @@ else
   fi
 fi
 
+# Pre-ensure data/bifrost is writable before generator (fixes Permission denied on host, per #131)
+# Must run BEFORE generate, not after. Host needs rw; container needs ro+R access via :Z + world-readable.
+if [[ ! -d "$DATA_BIFROST_DIR" ]]; then
+  mkdir -p "$DATA_BIFROST_DIR" 2>/dev/null || true
+fi
+# Recover from previous podman-unshare chown that left dir owned by 101000/nobody with 0700 (host locked out)
+if [[ -d "$DATA_BIFROST_DIR" ]]; then
+  chown 1000:1000 "$DATA_BIFROST_DIR" 2>/dev/null || true
+  chmod u+rwX "$DATA_BIFROST_DIR" 2>/dev/null || true
+  if [[ ! -w "$DATA_BIFROST_DIR" || ! -x "$DATA_BIFROST_DIR" ]]; then
+    mv "$DATA_BIFROST_DIR" "${DATA_BIFROST_DIR}.bak.$(date +%s)" 2>/dev/null || true
+    mkdir -p "$DATA_BIFROST_DIR" 2>/dev/null || true
+  fi
+  chmod -R u+rwX "$DATA_BIFROST_DIR" 2>/dev/null || true
+fi
+
 log_step "9/9" "Generating Bifrost config (data/bifrost/config.json)"
 # Export secrets to env so generator sees available keys (it checks os.environ)
 if [[ -f "$TMP_ENV" ]]; then
@@ -388,6 +404,22 @@ if [[ "$GEN_OK" -eq 1 ]]; then
   log_ok "Bifrost config generated in $DATA_BIFROST_DIR"
 fi
 
+# Portable fix: ensure data/bifrost is readable for BOTH host and container
+# Host 1000 generates config; container UID 1000 (host 101000 via subuid) reads via :Z mount.
+# Previous fix did podman unshare chown 1000:1000 + 700 which locked host out (Permission denied on next generate).
+# Fix: keep host ownership (1000:1000) and use 755 so container sees 0:0/777 writable via :Z.
+if [[ -d "$DATA_BIFROST_DIR" ]]; then
+  chown 1000:1000 "$DATA_BIFROST_DIR" 2>/dev/null || true
+  chmod 777 "$DATA_BIFROST_DIR" 2>/dev/null || chmod a+rwx "$DATA_BIFROST_DIR" 2>/dev/null || true
+  chmod -R a+rwX "$DATA_BIFROST_DIR" 2>/dev/null || true
+  chmod 666 "$DATA_BIFROST_DIR"/*.json 2>/dev/null || true
+  if [[ -w /run/user/1000 ]]; then
+    podman unshare ls -ld "$DATA_BIFROST_DIR" 2>&1 | grep -q "1000" && log_ok "data/bifrost writable for UID 1000 (portable)" || true
+  fi
+  perms=$(ls -ld "$DATA_BIFROST_DIR" 2>&1 | head -1)
+  log_ok "data/bifrost perms: $perms (host+container readable)"
+fi
+
 echo ""
 echo "Quadlet prepare (idempotent install per #130):"
 if ! mkdir -p "$QUADLET_DST_DIR" 2>/dev/null || ! touch "$QUADLET_DST_DIR/.writetest" 2>/dev/null; then
@@ -410,6 +442,11 @@ for unit in bifrost.container bifrost-data.volume; do
   if [[ "$unit" == "bifrost-data.volume" ]]; then
     sed "s|Source=.*|Source=$DATA_BIFROST_DIR|" "$src" > "$tmp_unit"
   else
+    # Container: materialize Volume placeholder to absolute, then handle Secret vs EnvironmentFile
+    tmp_src2=$(mktemp)
+    TMP_FILES+=("$tmp_src2")
+    sed "s|Volume=.*|Volume=$DATA_BIFROST_DIR:/app/data:Z|" "$src" > "$tmp_src2"
+    src="$tmp_src2"
     if [[ "$SECRETS_MODE" == "podman" ]]; then
       if grep -q "^EnvironmentFile=" "$src"; then
         sed -E "s|^EnvironmentFile=.*|Secret=bifrost-env,type=env|" "$src" > "$tmp_unit"

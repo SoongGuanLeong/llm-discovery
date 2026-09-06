@@ -291,18 +291,26 @@ if [[ "$SECRETS_MODE" == "podman" ]]; then
     die "podman secret type=env not supported. Upgrade Podman or re-run with --secrets=file"
   fi
   if podman secret exists bifrost-env >/dev/null 2>&1; then
-    podman secret rm bifrost-env >/dev/null
+    podman secret rm bifrost-env >/dev/null || true
     log_ok "removed old podman secret bifrost-env"
   fi
   if podman secret create --env-file "$TMP_ENV" bifrost-env >/dev/null 2>&1; then
     log_ok "podman secret bifrost-env created (type=env)"
   else
-    if podman secret create bifrost-env "$TMP_ENV" >/dev/null 2>&1; then
-      log_ok "podman secret bifrost-env created (file form)"
+    # Fallback: stdin form for older podman without --env-file (cat file into stdin)
+    if podman secret create bifrost-env - < "$TMP_ENV" >/dev/null 2>&1; then
+      log_ok "podman secret bifrost-env created (stdin fallback)"
     else
       die "podman secret create failed - try --secrets=file"
     fi
   fi
+  # No plaintext file should remain in podman mode - remove stale file if present
+  for _stale in "$BIFROST_ENV_FILE" "$REPO_ROOT/.tmp/bifrost.env"; do
+    if [[ -f "$_stale" ]]; then
+      rm -f "$_stale" 2>/dev/null || true
+      log_ok "removed stale plaintext $_stale (secret mode)"
+    fi
+  done
   echo "      hint: Quadlet bifrost.container should use Secret=bifrost-env,type=env (not EnvironmentFile)"
 else
   log_step "8/9" "Handoff via file $BIFROST_ENV_FILE (--secrets=file)"
@@ -400,9 +408,27 @@ for unit in bifrost.container bifrost-data.volume; do
     sed "s|Source=.*|Source=$DATA_BIFROST_DIR|" "$src" > "$tmp_unit"
   else
     if [[ "$SECRETS_MODE" == "podman" ]]; then
+      # Replace EnvironmentFile with Secret (podman mode)
       sed -E "s|^EnvironmentFile=.*|Secret=bifrost-env,type=env|" "$src" > "$tmp_unit"
+      # If source already had Secret (e.g. toggled), ensure it stays Secret
+      if grep -q "^Secret=" "$tmp_unit"; then
+        :
+      elif grep -q "^Secret=" "$src"; then
+        sed -E "s|^Secret=.*|Secret=bifrost-env,type=env|" "$src" > "$tmp_unit"
+      fi
     else
-      cat "$src" > "$tmp_unit"
+      # File mode: ensure EnvironmentFile, replace Secret if present
+      if grep -q "^Secret=" "$src"; then
+        sed -E "s|^Secret=.*|EnvironmentFile=%h/.config/bifrost/bifrost.env|" "$src" > "$tmp_unit"
+      elif grep -q "^EnvironmentFile=" "$src"; then
+        cat "$src" > "$tmp_unit"
+      else
+        # Fallback: ensure EnvironmentFile line exists (append if missing)
+        cat "$src" > "$tmp_unit"
+        if ! grep -q "^EnvironmentFile=" "$tmp_unit" && ! grep -q "^Secret=" "$tmp_unit"; then
+          echo "EnvironmentFile=%h/.config/bifrost/bifrost.env" >> "$tmp_unit"
+        fi
+      fi
     fi
   fi
   if [[ -f "$dst" ]] && diff -q "$tmp_unit" "$dst" >/dev/null 2>&1; then

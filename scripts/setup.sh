@@ -24,9 +24,9 @@ SECRETS_MODE="podman"
 FLAG_CHECK=0
 FLAG_YES=0
 
-BIFROST_ENV_FILE="$HOME/.config/bifrost/bifrost.env"
+BIFROST_ENV_FILE="${HOME:-/tmp}/.config/bifrost/bifrost.env"
 QUADLET_SRC_DIR="$REPO_ROOT/config/quadlet"
-QUADLET_DST_DIR="$HOME/.config/containers/systemd"
+QUADLET_DST_DIR="${HOME:-/tmp}/.config/containers/systemd"
 DATA_BIFROST_DIR="$REPO_ROOT/data/bifrost"
 
 for arg in "$@"; do
@@ -225,11 +225,11 @@ else
   echo "      -> not found: $DATA_BIFROST_DIR/config.json (generator will create)"
 fi
 if command -v loginctl >/dev/null 2>&1; then
-  linger=$(loginctl show-user "$USER" -p Linger --value 2>/dev/null || echo "unknown")
+  linger=$(loginctl show-user "${USER:-$(whoami 2>/dev/null || echo unknown)}" -p Linger --value 2>/dev/null || echo "unknown")
   if [[ "$linger" == "yes" ]]; then
     log_ok "linger enabled"
   elif [[ "$linger" == "no" ]]; then
-    log_warn "linger not enabled - Bifrost will not auto-start after logout. Run: loginctl enable-linger $USER"
+    log_warn "linger not enabled - Bifrost will not auto-start after logout. Run: loginctl enable-linger ${USER:-$(whoami 2>/dev/null || echo user)}"
   else
     echo "      -> linger: $linger"
   fi
@@ -317,12 +317,39 @@ else
   TMP_FILES+=("$TMP_DST")
   cat "$TMP_ENV" > "$TMP_DST"
   chmod 600 "$TMP_DST"
-  mv -f "$TMP_DST" "$EFFECTIVE_ENV_FILE"
-  TMP_FILES=("${TMP_FILES[@]/$TMP_DST}")
-  log_ok "wrote $EFFECTIVE_ENV_FILE (0600, atomic)"
+  if [[ -f "$EFFECTIVE_ENV_FILE" ]] && cmp -s "$TMP_DST" "$EFFECTIVE_ENV_FILE"; then
+    # Same content: keep existing file, fix perms if needed, no rewrite
+    perms_now=$(stat -c %a "$EFFECTIVE_ENV_FILE" 2>/dev/null || stat -f %A "$EFFECTIVE_ENV_FILE" 2>/dev/null || echo "?")
+    if [[ "$perms_now" != "600" && "$perms_now" != "0600" ]]; then
+      chmod 600 "$EFFECTIVE_ENV_FILE"
+      log_ok "$EFFECTIVE_ENV_FILE up-to-date, fixed perms to 600"
+    else
+      log_ok "$EFFECTIVE_ENV_FILE up-to-date (no rewrite, 0600)"
+    fi
+    rm -f "$TMP_DST"
+    TMP_FILES=("${TMP_FILES[@]/$TMP_DST}")
+  else
+    mv -f "$TMP_DST" "$EFFECTIVE_ENV_FILE"
+    TMP_FILES=("${TMP_FILES[@]/$TMP_DST}")
+    # Ensure 0600 even if mv preserves tmp perms; double-check
+    chmod 600 "$EFFECTIVE_ENV_FILE" 2>/dev/null || true
+    # Verify no world-readable window: stat should be 600
+    perms_after=$(stat -c %a "$EFFECTIVE_ENV_FILE" 2>/dev/null || stat -f %A "$EFFECTIVE_ENV_FILE" 2>/dev/null || echo "?")
+    if [[ "$perms_after" != "600" && "$perms_after" != "0600" ]]; then
+      log_warn "$EFFECTIVE_ENV_FILE perms $perms_after != 600"
+    fi
+    log_ok "wrote $EFFECTIVE_ENV_FILE (0600, atomic)"
+  fi
 fi
 
 log_step "9/9" "Generating Bifrost config (data/bifrost/config.json)"
+# Export secrets to env so generator sees available keys (it checks os.environ)
+if [[ -f "$TMP_ENV" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$TMP_ENV" 2>/dev/null || export $(grep -v '^#' "$TMP_ENV" | xargs 2>/dev/null || true)
+  set +a
+fi
 GEN_OK=0
 # uv cache may be RO outside workspace (workspace-write sandbox); use repo cache
 if command -v uv >/dev/null 2>&1; then

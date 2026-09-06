@@ -26,8 +26,21 @@ from llm_discovery.config import load_config
 
 def _atomic_write_json(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    content = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    if path.exists():
+        try:
+            existing = path.read_text()
+            if existing == content:
+                return
+        except Exception:
+            pass
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    tmp.write_text(content)
+    # Ensure tmp is not world-readable before replace
+    try:
+        tmp.chmod(0o644)
+    except Exception:
+        pass
     tmp.replace(path)
 
 

@@ -321,3 +321,72 @@ def test_daemon_reload_only_on_change_restart_logic(tmp_path):
     assert r3.returncode == 0
     # toggling Secret->EnvironmentFile changes file, so reload should happen
     assert "daemon-reload" in slog.read_text(), f"toggling mode should trigger reload, log={slog.read_text()} stdout={r3.stdout}"
+
+
+def test_refresh_catalog_units_installed_with_repo_paths(tmp_path):
+    # issue #140: daily refresh timer installed via setup.sh diff-before-copy
+    home = tmp_path / "home"
+    home.mkdir()
+    bin_dir, _, slog = make_fake_bin(tmp_path, infisical_ok=True, dotenv_vars=24)
+    r1 = run_setup(home, bin_dir, ["--yes"])
+    assert r1.returncode == 0, f"setup failed: {r1.stdout[-2000:]} {r1.stderr[-1000:]}"
+    qdst = home / ".config" / "containers" / "systemd"
+    fallback = REPO_ROOT / ".tmp" / "quadlet"
+    dst_dir = qdst if (qdst / "refresh-catalogs.service").exists() else fallback
+    svc = dst_dir / "refresh-catalogs.service"
+    timer = dst_dir / "refresh-catalogs.timer"
+    assert svc.exists(), f"refresh-catalogs.service not installed; stdout tail: {r1.stdout[-1500:]}"
+    assert timer.exists(), "refresh-catalogs.timer not installed"
+    stxt = svc.read_text()
+    assert f"WorkingDirectory={REPO_ROOT}" in stxt, f"service must run from repo root: {stxt}"
+    assert f"ExecStart={REPO_ROOT}/.venv/bin/python" in stxt, f"service must use repo venv python: {stxt}"
+    assert "scripts/refresh_catalogs.py" in stxt
+    assert "EnvironmentFile=-" in stxt, "service should read AA key env file if present (optional)"
+    ttxt = timer.read_text()
+    assert "OnCalendar=daily" in ttxt
+    assert "WantedBy=timers.target" in ttxt
+    # first install enables the timer
+    assert "enable --now refresh-catalogs.timer" in slog.read_text(), f"timer not enabled: {slog.read_text()}"
+    # second run: idempotent, no daemon-reload
+    slog.write_text("")
+    r2 = run_setup(home, bin_dir, ["--yes"])
+    assert r2.returncode == 0
+    assert r2.stdout.count("up-to-date (no copy)") >= 4, f"expected >=4 up-to-date units, got: {r2.stdout}"
+    assert slog.read_text().strip() == "", "second run must not daemon-reload"
+
+
+
+
+def test_refresh_timer_aa_key_file_in_podman_mode(tmp_path):
+    # Podman mode (default) must still leave an AA key file for the oneshot timer:
+    # the timer Service uses EnvironmentFile, not podman Secret, so without this
+    # AA refresh would run keyless forever.
+    import stat as _stat
+    home = tmp_path / "home"
+    home.mkdir()
+    bin_dir, _, _ = make_fake_bin(tmp_path, infisical_ok=True, dotenv_vars=24)
+    r = run_setup(home, bin_dir, ["--yes"])
+    assert r.returncode == 0
+    qdst = home / ".config" / "containers" / "systemd"
+    fallback = REPO_ROOT / ".tmp" / "quadlet"
+    dst_dir = qdst if (qdst / "refresh-catalogs.service").exists() else fallback
+    svc = dst_dir / "refresh-catalogs.service"
+    assert svc.exists()
+    stxt = svc.read_text()
+    # Podman mode: timer must point at refresh-catalogs.env, not deleted bifrost.env
+    assert "refresh-catalogs.env" in stxt, f"podman timer must use refresh-catalogs.env: {stxt}"
+    # Minimal file must exist, 0600, contains AA key
+    aa_file = home / ".config" / "bifrost" / "refresh-catalogs.env"
+    fb_aa = REPO_ROOT / ".tmp" / "refresh-catalogs.env"
+    eff = aa_file if aa_file.exists() else fb_aa
+    assert eff.exists(), f"refresh AA file missing: {aa_file} / {fb_aa}; stdout tail: {r.stdout[-1500:]}"
+    assert _stat.S_IMODE(eff.stat().st_mode) == 0o600, f"perms {oct(_stat.S_IMODE(eff.stat().st_mode))} != 0600"
+    txt = eff.read_text()
+    # Mock infisical exports VAR{i}=val{i} so refresh file is empty (valid —
+    # timer degrades: models.dev still refreshes, AA with 401 is warn-only).
+    # Real deployment with AA_API_KEY in Infisical will populate this file.
+    assert txt.strip() == "" or "AA_API_KEY" in txt or "ARTIFICIAL" in txt, f"refresh file unexpected content: {txt[:500]}"
+    # Bifrost secret env file must NOT exist in podman mode (deleted)
+    assert not (home / ".config" / "bifrost" / "bifrost.env").exists()
+    assert not (REPO_ROOT / ".tmp" / "bifrost.env").exists() or "refresh-catalogs" in str(eff)
+

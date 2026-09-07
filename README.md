@@ -201,6 +201,17 @@ export AA_API_KEY=aa_xxx  # or ARTIFICIAL_ANALYSIS_API_KEY
 - Backups: `data/*.json.bak` (prior snapshot copied before atomic rename)
 - Atomic: temp file + `fsync` + `replace` in same directory
 
+### Automated refresh (systemd timer, issue #140)
+
+`scripts/setup.sh` also installs a daily user timer (`config/quadlet/refresh-catalogs.service` + `.timer`, `OnCalendar=daily`, diff-before-copy). It runs the same `scripts/refresh_catalogs.py` from the repo root with the repo venv python; the AA key is read from the Bifrost env file when present (models.dev needs no key).
+
+```bash
+systemctl --user status refresh-catalogs.timer   # next run + last status
+journalctl --user -u refresh-catalogs -f         # follow a run
+```
+
+The timer is optional — manual refresh above always works. Independently, `build-all` checks catalog `fetched_at` before pricing re-average: if either catalog is older than 14 days it refreshes first (warn-only — a failed refresh never fails the build). Tune with `--catalog-max-age-days N` (0 disables) or `--no-catalog-refresh`.
+
 ## Query catalogs
 
 ```bash

@@ -313,6 +313,29 @@ if [[ "$SECRETS_MODE" == "podman" ]]; then
       log_ok "removed stale plaintext $_stale (secret mode)"
     fi
   done
+  # Timer service is a systemd oneshot (not a container), so it needs AA_API_KEY
+  # via EnvironmentFile, not Secret=. Write minimal 0600 file for the timer only.
+  REFRESH_AA_FILE="$HOME/.config/bifrost/refresh-catalogs.env"
+  if ! mkdir -p "$(dirname "$REFRESH_AA_FILE")" 2>/dev/null; then
+    REFRESH_AA_FILE="$REPO_ROOT/.tmp/refresh-catalogs.env"
+    mkdir -p "$(dirname "$REFRESH_AA_FILE")" 2>/dev/null || true
+  fi
+  TMP_REFRESH=$(mktemp "$(dirname "$REFRESH_AA_FILE")/.refresh.XXXXXX")
+  TMP_FILES+=("$TMP_REFRESH")
+  # Extract AA key variants from TMP_ENV; always write file (may be empty key)
+  grep -E "^(AA_API_KEY|ARTIFICIAL_ANALYSIS_API_KEY|ARTIFICIALANALYSIS_API_KEY)=" "$TMP_ENV" > "$TMP_REFRESH" 2>/dev/null || true
+  chmod 600 "$TMP_REFRESH"
+  if [[ -f "$REFRESH_AA_FILE" ]] && cmp -s "$TMP_REFRESH" "$REFRESH_AA_FILE"; then
+    rm -f "$TMP_REFRESH"
+    TMP_FILES=("${TMP_FILES[@]/$TMP_REFRESH}")
+    chmod 600 "$REFRESH_AA_FILE" 2>/dev/null || true
+    log_ok "refresh AA key file up-to-date: $REFRESH_AA_FILE (0600)"
+  else
+    mv -f "$TMP_REFRESH" "$REFRESH_AA_FILE"
+    TMP_FILES=("${TMP_FILES[@]/$TMP_REFRESH}")
+    chmod 600 "$REFRESH_AA_FILE" 2>/dev/null || true
+    log_ok "wrote refresh AA key file: $REFRESH_AA_FILE (0600, atomic)"
+  fi
   echo "      hint: Quadlet bifrost.container should use Secret=bifrost-env,type=env (not EnvironmentFile)"
 else
   log_step "8/9" "Handoff via file $BIFROST_ENV_FILE (--secrets=file)"
@@ -430,7 +453,22 @@ else
   rm -f "$QUADLET_DST_DIR/.writetest"
 fi
 QUADLET_CHANGED=0
-for unit in bifrost.container bifrost-data.volume; do
+# refresh_catalogs.py interpreter: prefer repo venv (deps installed), then uv, then system python
+REFRESH_PYTHON="$REPO_ROOT/.venv/bin/python"
+if [[ ! -x "$REFRESH_PYTHON" ]]; then
+  if command -v uv >/dev/null 2>&1; then
+    REFRESH_PYTHON="uv --project $REPO_ROOT run python"
+  else
+    REFRESH_PYTHON="${PYTHON_BIN:-python3}"
+  fi
+fi
+# Optional 0600 env file with AA_API_KEY (refresh degrades gracefully without it)
+if [[ "$SECRETS_MODE" == "podman" && -n "${REFRESH_AA_FILE:-}" ]]; then
+  AA_KEY_FILE="$REFRESH_AA_FILE"
+else
+  AA_KEY_FILE="${EFFECTIVE_ENV_FILE:-$BIFROST_ENV_FILE}"
+fi
+for unit in bifrost.container bifrost-data.volume refresh-catalogs.service refresh-catalogs.timer; do
   src="$QUADLET_SRC_DIR/$unit"
   dst="$QUADLET_DST_DIR/$unit"
   if [[ ! -f "$src" ]]; then
@@ -441,6 +479,13 @@ for unit in bifrost.container bifrost-data.volume; do
   TMP_FILES+=("$tmp_unit")
   if [[ "$unit" == "bifrost-data.volume" ]]; then
     sed "s|Source=.*|Source=$DATA_BIFROST_DIR|" "$src" > "$tmp_unit"
+  elif [[ "$unit" == "refresh-catalogs.service" ]]; then
+    # Materialize repo root + python interpreter + optional AA key file (per #140)
+    sed -e "s|{{REPO_ROOT}}|$REPO_ROOT|g" \
+        -e "s|{{VENV_PYTHON}}|$REFRESH_PYTHON|g" \
+        -e "s|{{AA_KEY_FILE}}|$AA_KEY_FILE|g" "$src" > "$tmp_unit"
+  elif [[ "$unit" == "refresh-catalogs.timer" ]]; then
+    cat "$src" > "$tmp_unit"
   else
     # Container: materialize Volume placeholder to absolute, then handle Secret vs EnvironmentFile
     tmp_src2=$(mktemp)
@@ -501,6 +546,12 @@ if [[ "$QUADLET_CHANGED" -eq 1 ]]; then
     log_ok "bifrost enabled --now"
   else
     log_warn "could not auto-start bifrost - run manually: systemctl --user enable --now bifrost"
+  fi
+  # daily catalog refresh timer (per #140); idempotent enable
+  if systemctl --user enable --now refresh-catalogs.timer 2>&1; then
+    log_ok "refresh-catalogs.timer enabled --now"
+  else
+    log_warn "could not enable refresh-catalogs.timer - run manually: systemctl --user enable --now refresh-catalogs.timer"
   fi
 else
   echo "  daemon-reload: skipped (units up-to-date)"

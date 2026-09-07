@@ -1,0 +1,14 @@
+[Unit]
+Description=Refresh LLM catalogs (AA + models.dev + benchmarks) - user service
+Documentation=file:README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Paths materialized by scripts/setup.sh (repo root + venv python) at install time.
+WorkingDirectory={{REPO_ROOT}}
+ExecStart={{VENV_PYTHON}} scripts/refresh_catalogs.py
+# AA API key file, written by setup.sh from Infisical (0600, '-': optional).
+# models.dev refresh needs no key; AA degrades to a logged error when absent.
+EnvironmentFile=-{{AA_KEY_FILE}}

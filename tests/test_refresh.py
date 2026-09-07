@@ -184,3 +184,76 @@ def test_cli_refresh_help():
     assert ns.catalog == "refresh"
     assert ns.dry_run is True
 
+
+
+# --- issue #140: catalog freshness (systemd timer + staleness gate) ---
+
+def test_catalog_fetched_age_days_fresh(tmp_path: Path):
+    from llm_discovery.refresh import catalog_fetched_age_days
+    p = tmp_path / "aa.json"
+    p.write_text(json.dumps({"fetched_at": "2026-09-06T00:00:00+00:00", "models": []}))
+    # age vs real now: a few days (fixture predates the test clock)
+    age = catalog_fetched_age_days(p)
+    assert age is not None
+    assert 0 <= age <= 7
+
+
+def test_catalog_fetched_age_days_missing_file_returns_none(tmp_path: Path):
+    from llm_discovery.refresh import catalog_fetched_age_days
+    assert catalog_fetched_age_days(tmp_path / "nope.json") is None
+
+
+def test_catalog_fetched_age_days_missing_field_returns_none(tmp_path: Path):
+    from llm_discovery.refresh import catalog_fetched_age_days
+    p = tmp_path / "aa.json"
+    p.write_text(json.dumps({"models": []}))
+    assert catalog_fetched_age_days(p) is None
+
+
+def test_catalog_fetched_age_days_bad_json_returns_none(tmp_path: Path):
+    from llm_discovery.refresh import catalog_fetched_age_days
+    p = tmp_path / "aa.json"
+    p.write_text("{not json")
+    assert catalog_fetched_age_days(p) is None
+
+
+def test_catalog_stale_days_missing_treated_fresh(tmp_path: Path):
+    # fail-open: no fetched_at / no file -> not stale (build must not be forced)
+    from llm_discovery.refresh import catalog_stale_days
+    assert catalog_stale_days(tmp_path / "nope.json", 14) is False
+    p = tmp_path / "aa.json"
+    p.write_text(json.dumps({"models": []}))
+    assert catalog_stale_days(p, 14) is False
+
+
+def test_catalog_stale_days_old_fetched_at_is_stale(tmp_path: Path):
+    from llm_discovery.refresh import catalog_stale_days
+    p = tmp_path / "aa.json"
+    p.write_text(json.dumps({"fetched_at": "2026-08-01T00:00:00+00:00", "models": []}))
+    assert catalog_stale_days(p, 14) is True
+
+
+
+# --- issue #140: models.dev refresh stamps fetched_at (gate depends on it) ---
+
+def test_fetch_models_dev_stamps_fetched_at(tmp_path: Path):
+    from llm_discovery.refresh import fetch_models_dev
+    fake = {"models": {"a": {"id": "a"}}, "providers": {}}
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = fake
+    mock_resp.raise_for_status = MagicMock()
+    with patch("llm_discovery.refresh.httpx.get", return_value=mock_resp):
+        data = fetch_models_dev()
+    assert "fetched_at" in data
+
+
+def test_fetch_models_dev_flat_api_stamps_fetched_at():
+    from llm_discovery.refresh import fetch_models_dev
+    flat = {"groq": {"id": "groq", "name": "Groq", "models": {"llama": {"id": "llama"}}}}
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = flat
+    mock_resp.raise_for_status = MagicMock()
+    with patch("llm_discovery.refresh.httpx.get", return_value=mock_resp):
+        data = fetch_models_dev()
+    assert "fetched_at" in data
+

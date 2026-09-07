@@ -22,6 +22,44 @@ DEFAULT_AA_URL = "https://artificialanalysis.ai/api/v2/data/llms/models"
 DEFAULT_MODELS_DEV_URL = "https://models.dev/catalog.json"
 
 
+def catalog_fetched_age_days(path: str | Path) -> float | None:
+    """Age in days of a catalog snapshot's `fetched_at` field.
+
+    Returns None when the file is missing, unreadable, not valid JSON,
+    or has no parseable `fetched_at` (fail-open: callers treat None as
+    "unknown freshness", never as stale).
+    """
+    p = Path(path)
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    fetched_at = data.get("fetched_at")
+    if not isinstance(fetched_at, str):
+        return None
+    try:
+        dt = datetime.fromisoformat(fetched_at.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return (datetime.now(UTC) - dt).total_seconds() / 86400.0
+
+
+def catalog_stale_days(path: str | Path, max_age_days: int = 14) -> bool:
+    """True when catalog `fetched_at` is older than max_age_days.
+
+    Fail-open per ADR 0007 rank 6: missing/unreadable/absent `fetched_at`
+    is not treated as stale (stale alone never forces a rebuild).
+    """
+    age = catalog_fetched_age_days(path)
+    if age is None:
+        return False
+    return age > max_age_days
+
+
 def _atomic_write_json(path: Path, data: Any, backup: bool = True):
     """Write JSON atomically: temp file + rename, optionally backup prior file."""
     path = Path(path)
@@ -100,11 +138,15 @@ def fetch_artificial_analysis(api_key=None, url=DEFAULT_AA_URL, timeout=30):
 
 
 def fetch_models_dev(url=DEFAULT_MODELS_DEV_URL, timeout=30):
+    """Fetch models.dev catalog. Stamps fetched_at on every dict return path
+    (the build_all staleness gate, issue #140, reads it)."""
+    fetched_at = datetime.now(UTC).isoformat()
     headers = {"Accept": "application/json"}
     resp = httpx.get(url, headers=headers, timeout=timeout, follow_redirects=True)
     resp.raise_for_status()
     data = resp.json()
     if isinstance(data, dict) and "models" in data and "providers" in data:
+        data["fetched_at"] = fetched_at
         return data
     if isinstance(data, dict) and data and all(isinstance(v, dict) and "models" in v for v in list(data.values())[:1]):
         models = {}
@@ -123,7 +165,9 @@ def fetch_models_dev(url=DEFAULT_MODELS_DEV_URL, timeout=30):
                 if mid not in models:
                     models[mid] = m
                     models[mid].setdefault("id", mid)
-        return {"models": models, "providers": providers}
+        return {"models": models, "providers": providers, "fetched_at": fetched_at}
+    if isinstance(data, dict):
+        data["fetched_at"] = fetched_at
     return data
 
 

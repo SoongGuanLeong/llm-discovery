@@ -59,6 +59,8 @@ def build_all(
     provider_names: list[str] | None = None,
     discover_fn: Callable[..., dict[str, list[dict[str, Any]]]] | None = None,
     max_workers: int = 8,
+    catalog_max_age_days: int = 14,
+    no_catalog_refresh: bool = False,
 ) -> dict[str, Any]:
     """Build store from providers.yaml in one invocation.
 
@@ -69,6 +71,9 @@ def build_all(
         discover_fn: injectable discovery function (provider_name, config, aa, models_dev, max_workers) -> result dict.
                      If None, uses pipeline.discover_provider with real catalogs when available.
         max_workers: ThreadPool workers for per-provider discovery (passed to discover_fn).
+        catalog_max_age_days: staleness threshold for catalog fetched_at (ADR 0007 rank 6).
+            0 or negative disables the gate. Default 14.
+        no_catalog_refresh: skip the staleness gate entirely (offline builds).
 
     Returns:
         dict with keys: providers_discovered, files_written, backfill stats, store_path, store_size
@@ -90,6 +95,52 @@ def build_all(
     store_for_discovery = ModelInfoStore(store_path)
     store_for_discovery.load()
     before_keys = set(store_for_discovery.keys())
+
+    # 2a. Catalog freshness gate (issue #140, ADR 0007 rank 6): if either catalog
+    # fetched_at is older than catalog_max_age_days, refresh before the pricing
+    # re-average below. Warn-only: a failed refresh NEVER fails the build; the
+    # build proceeds with stale (or missing) catalogs, which are cache-optional.
+    catalog_status: dict[str, Any] = {"checked": False, "stale": {"aa": None, "models_dev": None}, "refresh": {}}
+    if not no_catalog_refresh and catalog_max_age_days > 0:
+        aa_path = data_dir / "artificial_analysis_models.json"
+        md_path = data_dir / "models_dev_catalog.json"
+        if aa_path.exists() or md_path.exists():
+            from .refresh import (
+                catalog_stale_days,
+                refresh_artificial_analysis,
+                refresh_benchmarks,
+                refresh_models_dev,
+            )
+
+            catalog_status["stale"]["aa"] = catalog_stale_days(aa_path, catalog_max_age_days)
+            catalog_status["stale"]["models_dev"] = catalog_stale_days(md_path, catalog_max_age_days)
+            catalog_status["checked"] = True
+            stale_names = [n for n, s in catalog_status["stale"].items() if s]
+            if stale_names:
+                print(f"[build-all] catalog stale (fetched_at >{catalog_max_age_days}d): {', '.join(stale_names)} - refreshing before pricing re-average (warn-only)")
+                # Per-catalog: one failure (e.g. AA 401 without key) must not
+                # block refreshing the other stale catalog.
+                if "aa" in stale_names:
+                    try:
+                        refresh_artificial_analysis(output=aa_path)
+                        catalog_status["refresh"]["aa"] = "ok"
+                    except Exception as exc:
+                        catalog_status["refresh"]["aa"] = "failed"
+                        print(f"[build-all] WARN: AA catalog refresh failed, continuing with stale catalog: {exc}")
+                if "models_dev" in stale_names:
+                    try:
+                        refresh_models_dev(output=md_path)
+                        catalog_status["refresh"]["models_dev"] = "ok"
+                    except Exception as exc:
+                        catalog_status["refresh"]["models_dev"] = "failed"
+                        print(f"[build-all] WARN: models.dev catalog refresh failed, continuing with stale catalog: {exc}")
+                if catalog_status["refresh"]:
+                    try:
+                        refresh_benchmarks(aa_path=aa_path, models_dev_path=md_path, output=data_dir / "benchmarks.json")
+                        catalog_status["refresh"]["benchmarks"] = "ok"
+                    except Exception as exc:
+                        catalog_status["refresh"]["benchmarks"] = "failed"
+                        print(f"[build-all] WARN: benchmarks rebuild failed (derived cache only): {exc}")
 
     # 2. Refresh cache-optional: benchmarks folded into per-model store; no
     # benchmarks.json is created. Only transient catalog caches are used as
@@ -228,6 +279,7 @@ def build_all(
         "backfill": stats,
         "store_path": str(store_path),
         "store_size": store.size(),
+        "catalogs": catalog_status,
         "pretty_bytes": len(pretty.encode("utf-8")),
         "compact_bytes": len(compact.encode("utf-8")),
         "telemetry": telemetry,
@@ -246,6 +298,8 @@ def main() -> None:
     parser.add_argument("--all-providers", action="store_true", help="Build all providers (default, parity with discover.py)")
     parser.add_argument("providers_pos", nargs="*", help=argparse.SUPPRESS)
     parser.add_argument("--workers", "--max-workers", dest="max_workers", type=int, default=8, help="Workers per provider (alias --workers for discover.py parity)")
+    parser.add_argument("--catalog-max-age-days", type=int, default=14, help="Refresh catalogs before build when fetched_at is older than this (0 disables, default 14)")
+    parser.add_argument("--no-catalog-refresh", action="store_true", help="Skip the catalog freshness gate entirely (offline builds)")
     args = parser.parse_args()
     # Parity with discover.py: allow positional provider names like "kilo_ai" or "kilo_ai --all"
     providers = args.providers
@@ -254,7 +308,7 @@ def main() -> None:
         pos = [p for p in args.providers_pos if p != "--all" and not p.startswith("-")]
         if pos:
             providers = pos
-    res = build_all(data_dir=args.data_dir, config_path=args.config, provider_names=providers, max_workers=args.max_workers)
+    res = build_all(data_dir=args.data_dir, config_path=args.config, provider_names=providers, max_workers=args.max_workers, catalog_max_age_days=args.catalog_max_age_days, no_catalog_refresh=args.no_catalog_refresh)
     print(json.dumps(res, indent=2))
     print(f"Done: store {res['store_path']} size={res['store_size']} compact {res['compact_bytes']} < pretty {res['pretty_bytes']}")
 

@@ -10,6 +10,10 @@ Usage:
 Also available as:
     python -m llm_discovery.refresh
     llm-discovery refresh  (if installed)
+
+Runs daily via systemd user timer (config/quadlet/refresh-catalogs.timer,
+installed by scripts/setup.sh per issue #140) and as a warn-only pre-check
+in build_all when a catalog fetched_at is older than 14 days.
 """
 from llm_discovery.refresh import main
 

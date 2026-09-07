@@ -79,6 +79,8 @@ def build_parser() -> argparse.ArgumentParser:
     build_parser.add_argument("--config", type=Path, default=Path("config/providers.yaml"), help="Providers YAML path")
     build_parser.add_argument("--providers", nargs="*", help="Optional subset of provider names")
     build_parser.add_argument("--max-workers", type=int, default=8, help="Workers per provider")
+    build_parser.add_argument("--catalog-max-age-days", type=int, default=14, help="Refresh catalogs when fetched_at older than this (0 disables, default 14)")
+    build_parser.add_argument("--no-catalog-refresh", action="store_true", help="Skip the catalog freshness gate entirely (offline builds)")
 
     return parser
 
@@ -95,6 +97,8 @@ def main() -> None:
                 config_path=args.config,
                 provider_names=args.providers,
                 max_workers=args.max_workers,
+                catalog_max_age_days=args.catalog_max_age_days,
+                no_catalog_refresh=args.no_catalog_refresh,
             )
             sp = res['store_path']
             sz = res['store_size']

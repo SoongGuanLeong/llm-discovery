@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily refresh of LLM catalogs (AA + models.dev + benchmarks)
+
+[Timer]
+OnCalendar=daily
+# Stagger away from 00:00 load; Persist catches up a missed run after suspend.
+RandomizedDelay=15min
+Persistent=true
+Unit=refresh-catalogs.service
+
+[Install]
+WantedBy=timers.target

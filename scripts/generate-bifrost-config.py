@@ -20,7 +20,11 @@ from pathlib import Path
 # Ensure src on path when run as script
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from llm_discovery.bifrost.generator import generate_bifrost_config, load_keeps_from_results_dir
+from llm_discovery.bifrost.generator import (
+    check_bifrost_drift,
+    generate_bifrost_config,
+    load_keeps_from_results_dir,
+)
 from llm_discovery.config import load_config
 
 
@@ -93,6 +97,38 @@ def main() -> int:
         if empty_tiers:
             print(f"--check: empty tier detected -> exit 1", file=sys.stderr)
             return 1
+        # Drift check: file (config.json/shim_map.json) vs live DB / API + mtimes
+        try:
+            drift_info = check_bifrost_drift(args.output_dir)
+            file_state = drift_info.get("file")
+            db_state = drift_info.get("db")
+            api_state = drift_info.get("api")
+            if file_state is not None and db_state is not None:
+                print(
+                    f"Drift check: file providers={file_state['providers']} models={file_state['models']} "
+                    f"vs db providers={db_state['providers']} models={db_state['models']}",
+                    file=sys.stderr if drift_info["drift"] else sys.stdout,
+                )
+                if file_state.get("mtime") and db_state.get("mtime"):
+                    print(f"  mtime file={file_state['mtime']:.0f} db={db_state['mtime']:.0f}", file=sys.stderr if drift_info["drift"] else sys.stdout)
+            if api_state and api_state.get("reachable"):
+                print(f"  api providers={api_state.get('providers')} models={api_state.get('models')} (reachable)")
+            elif api_state:
+                print(f"  api not reachable ({api_state.get('error','')})", file=sys.stdout)
+            if drift_info["drift"]:
+                for r in drift_info["reasons"]:
+                    print(f"  drift: {r}", file=sys.stderr)
+                print("--check: drift detected (file vs db/api mismatch or stale db) -> exit 1", file=sys.stderr)
+                print("  fix: restore secret/env, regen: uv run python scripts/generate-bifrost-config.py, restart: systemctl --user restart bifrost", file=sys.stderr)
+                return 1
+            else:
+                if drift_info["reasons"]:
+                    for r in drift_info["reasons"]:
+                        print(f"  note: {r}")
+                else:
+                    print("Drift check: OK (file vs db/api in sync)")
+        except Exception as exc:  # noqa: BLE001
+            print(f"Drift check skipped (error: {exc})", file=sys.stderr)
         print("--check: dry-run ok, no files written")
         return 0
 

@@ -48,7 +48,7 @@ Bifrost config and Quadlet units. Idempotent; installs units (diff-before-copy,
 daemon-reload only on change) and starts service.
 
 Options:
-  --check              Dry-run preflight: print [1/6]..[6/6] OK/WARN/FAIL and
+  --check              Dry-run preflight: print [1/7]..[7/7] OK/WARN/FAIL and
                        PASS/FAIL table, write nothing, exit 0 only if all PASS
   --yes                Skip overwrite prompt for existing secrets
   --secrets=file|podman  Secret handoff mode (default: podman). Podman uses
@@ -238,6 +238,73 @@ if command -v loginctl >/dev/null 2>&1; then
 fi
 
 if [[ "$FLAG_CHECK" -eq 1 ]]; then
+  # Bifrost drift check (read-only, no writes): file vs db/api + mtimes
+  echo ""
+  log_step "7/7" "Checking Bifrost config drift (file vs db/api, read-only)"
+  BIFROST_DRIFT_OK=1
+  if [[ -n "${BIFROST_SKIP_DRIFT_CHECK:-}" ]]; then
+    log_warn "drift check skipped (BIFROST_SKIP_DRIFT_CHECK set)"
+    BIFROST_DRIFT_OK=1
+  else
+    DRIFT_PY=""
+    if [[ -x "$REPO_ROOT/.venv/bin/python" ]]; then
+      DRIFT_PY="$REPO_ROOT/.venv/bin/python"
+    elif [[ -n "$PYTHON_BIN" ]] && command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+      DRIFT_PY="$PYTHON_BIN"
+    elif command -v python3 >/dev/null 2>&1; then
+      DRIFT_PY="python3"
+    fi
+    if [[ -z "$DRIFT_PY" ]]; then
+      log_warn "drift check skipped (no python)"
+      BIFROST_DRIFT_OK=1
+    else
+      # Export secrets to env for drift generator check (so empty-tiers reflects real keys, like 7/9 does)
+      DRIFT_ENV_TMP=""
+      if [[ "$INFISICAL_AUTH" -eq 1 && "$INFISICAL_BIN" -eq 1 ]]; then
+        DRIFT_ENV_TMP=$(mktemp)
+        TMP_FILES+=("$DRIFT_ENV_TMP")
+        chmod 600 "$DRIFT_ENV_TMP" 2>/dev/null || true
+        if infisical export --projectId "$LLM_SHARED_PROJECT_ID" --env dev --format dotenv --include-imports=false --silent > "$DRIFT_ENV_TMP" 2>&1; then
+          set -a
+          # shellcheck disable=SC1090
+          source "$DRIFT_ENV_TMP" 2>/dev/null || export $(grep -v '^#' "$DRIFT_ENV_TMP" | xargs 2>/dev/null || true)
+          set +a
+        fi
+      fi
+      DRIFT_TMP=$(mktemp)
+      TMP_FILES+=("$DRIFT_TMP")
+      set +e
+      "$DRIFT_PY" scripts/generate-bifrost-config.py --check >"$DRIFT_TMP" 2>&1
+      DRIFT_RC=$?
+      set -e
+      # Clean up exported drift env tmp
+      if [[ -n "$DRIFT_ENV_TMP" ]]; then
+        rm -f "$DRIFT_ENV_TMP" 2>/dev/null || true
+        TMP_FILES=("${TMP_FILES[@]/$DRIFT_ENV_TMP}")
+      fi
+      # Show drift output indented
+      if [[ -s "$DRIFT_TMP" ]]; then
+        sed 's/^/         /' "$DRIFT_TMP" 2>/dev/null || true
+      fi
+      if [[ "$DRIFT_RC" -ne 0 ]]; then
+        # generate script exits 1 on drift or empty_tiers; treat as drift FAIL
+        # If exit 2 is catalog load failure, consider it WARN not FAIL for setup preflight
+        if [[ "$DRIFT_RC" -eq 2 ]]; then
+          log_warn "drift check skipped (config/providers.yaml missing)"
+          BIFROST_DRIFT_OK=1
+        else
+          log_fail "bifrost drift detected (see above, fix: restore secret/env, regen, restart)"
+          BIFROST_DRIFT_OK=0
+        fi
+      else
+        log_ok "bifrost drift check OK (file vs db/api in sync)"
+        BIFROST_DRIFT_OK=1
+      fi
+      rm -f "$DRIFT_TMP" 2>/dev/null || true
+      # Remove from TMP_FILES array
+      TMP_FILES=("${TMP_FILES[@]/$DRIFT_TMP}")
+    fi
+  fi
   echo ""
   echo "--check summary (read-only, no writes):"
   printf "  %-28s %s\\n" ".env parse" "$([[ "$ENV_OK" -eq 0 ]] && echo PASS || echo FAIL)"
@@ -246,8 +313,9 @@ if [[ "$FLAG_CHECK" -eq 1 ]]; then
   printf "  %-28s %s\\n" "python 3.12+" "$([[ -n "$PYTHON_BIN" ]] && echo PASS || echo FAIL)"
   printf "  %-28s %s\\n" "podman/quadlet" "$([[ "$PODMAN_OK" -eq 1 ]] && echo PASS || echo FAIL)"
   printf "  %-28s %s\\n" "secrets mode" "$SECRETS_MODE ($([[ "$SECRETS_MODE" == "podman" ]] && [[ "$PODMAN_SECRET_ENV" -eq 1 ]] && echo supported || [[ "$SECRETS_MODE" == "file" ]] && echo file || echo unsupported))"
+  printf "  %-28s %s\\n" "bifrost drift" "$([[ "$BIFROST_DRIFT_OK" -eq 1 ]] && echo PASS || echo FAIL)"
   echo ""
-  if [[ "$ENV_OK" -eq 0 && "$INFISICAL_BIN" -eq 1 && "$INFISICAL_AUTH" -eq 1 && -n "$PYTHON_BIN" && "$PODMAN_OK" -eq 1 ]]; then
+  if [[ "$ENV_OK" -eq 0 && "$INFISICAL_BIN" -eq 1 && "$INFISICAL_AUTH" -eq 1 && -n "$PYTHON_BIN" && "$PODMAN_OK" -eq 1 && "$BIFROST_DRIFT_OK" -eq 1 ]]; then
     echo "All checks PASS - ready for: ./scripts/setup.sh --yes"
     exit 0
   else

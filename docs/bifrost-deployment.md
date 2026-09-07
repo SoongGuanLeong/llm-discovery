@@ -27,9 +27,14 @@ cat .env
 # Login to Infisical (one-time, stores token in ~/.infisical / OS keyring)
 infisical login
 
-# Read-only preflight: prints [1/6]..[6/6] OK/WARN/FAIL + PASS/FAIL table, writes nothing
+# Read-only preflight: prints [1/7]..[7/7] OK/WARN/FAIL + PASS/FAIL table, writes nothing
+# [7/7] is Bifrost drift: file vs db/api counts + mtimes (fails if 20 vs 16 or 314 vs 304)
 scripts/setup.sh --check
 # -> All checks PASS - ready for: ./scripts/setup.sh --yes
+# If drift FAIL: restore secret/env, regen, restart:
+#   uv run python scripts/generate-bifrost-config.py
+#   systemctl --user restart bifrost
+#   # or npx fallback: npx -y @maximhq/bifrost --app-dir ./data/bifrost
 
 # Default: Podman secret handoff (Secret type=env, no plaintext file)
 scripts/setup.sh --yes
@@ -209,6 +214,32 @@ systemctl --user restart bifrost
 ```
 
 For npx fallback, restart the npx process.
+
+### Drift: file fresh but DB stale (providers/models mismatch, health-filter)
+
+Symptom: `data/bifrost/config.json` (e.g. 20 providers, 314 models) is fresh but `data/bifrost/config.db` is stale (e.g. 16 providers, 304 models) or Bifrost `/api/models` differs. Caused by stale `config.db` + unresolved `env.VAR` health-filter: Bifrost stores keys as `env.VAR` refs and at request time resolves them against the container env; missing vars cause every key to be marked invalid and `/v1/models` health-filters to zero (only Cloudflare models survive if only Cloudflare vars were injected), while `/api/providers` still lists the catalog.
+
+Preflight catches it (read-only, no writes):
+
+```bash
+uv run python scripts/generate-bifrost-config.py --check   # compares config.json tier_counts vs live config.db / /api/models counts + mtimes; exits 1 on drift
+scripts/setup.sh --check                                    # includes same drift check (file vs db/api + mtimes), fails preflight on drift
+```
+
+Fix: restore secrets/env, regenerate, restart (file→DB sync, no DB-only migration):
+
+```bash
+# 1. Restore secrets (Infisical or manual .env)
+infisical login  # or recreate ~/.config/bifrost/bifrost.env (0600) with all provider keys
+# 2. Regenerate file configs from Ephemeral Reports (keeps file→DB sync)
+uv run python scripts/generate-bifrost-config.py
+# 3. Restart Bifrost so config.db re-ingests the fresh file
+systemctl --user restart bifrost
+# Verify: curl http://localhost:8080/api/models?limit=1000 | jq .total  (should match shim_map total)
+#         curl http://localhost:8080/api/providers | jq length          (should match config.json providers)
+```
+
+Health check remains in `bifrost.container` (`/health`); no DB-only migration is used — the file (`config.json` + `shim_map.json`) is the source of truth, `config.db` is derived on restart.
 
 ## Security Notes
 

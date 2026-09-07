@@ -331,7 +331,7 @@ def test_check_no_writes_and_pass_fail_table(tmp_path):
             p.unlink()
     cfg = REPO_ROOT / "data" / "bifrost" / "config.json"
     cfg_mtime_before = cfg.stat().st_mtime if cfg.exists() else None
-    result = run_setup(home, bin_dir, ["--check"])
+    result = run_setup(home, bin_dir, ["--check"], env_overrides={"BIFROST_SKIP_DRIFT_CHECK": "1"})
     assert result.returncode == 0, f"--check should pass when all preflights ok: stdout={result.stdout[-2000:]} stderr={result.stderr[-2000:]}"
     combined = result.stdout + result.stderr
     assert "PASS" in combined

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import json
 import os
+import sqlite3
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -287,3 +291,253 @@ def load_keeps_from_results_dir(
             )
     # Apply strict contributor_free filtering at load time as well? No, keep raw and let group handle.
     return keeps
+
+
+# ---------------------------------------------------------------------------
+# Drift detection: file (config.json + shim_map.json) vs live DB / API + mtimes
+# ---------------------------------------------------------------------------
+
+def _file_bifrost_state(output_dir: Path) -> dict[str, Any] | None:
+    """Read existing file artifacts and return provider/model counts + mtimes."""
+    output_dir = Path(output_dir)
+    config_path = output_dir / "config.json"
+    shim_path = output_dir / "shim_map.json"
+    if not config_path.exists():
+        return None
+    try:
+        cfg = json.loads(config_path.read_text())
+    except Exception:
+        return None
+    providers = cfg.get("providers", {}) or {}
+    file_providers = len(providers)
+    file_models = 0
+    for pdata in providers.values():
+        for k in pdata.get("keys", []) or []:
+            models = k.get("models", []) or []
+            file_models += len(models)
+    # Shim tier_counts as cross-check
+    tier_counts: dict[str, int] | None = None
+    tier_total: int | None = None
+    if shim_path.exists():
+        try:
+            shim = json.loads(shim_path.read_text())
+            tier_counts = {t: len(shim.get(t, []) or []) for t in ALL_TIERS if t in shim}
+            tier_total = sum(tier_counts.values()) if tier_counts else None
+        except Exception:
+            tier_counts = None
+    # mtime: max of config + shim (freshest file = truth)
+    mtimes = []
+    for p in (config_path, shim_path):
+        if p.exists():
+            try:
+                mtimes.append(p.stat().st_mtime)
+            except Exception:
+                pass
+    file_mtime = max(mtimes) if mtimes else None
+    return {
+        "providers": file_providers,
+        "models": file_models,
+        "tier_counts": tier_counts,
+        "tier_total": tier_total,
+        "mtime": file_mtime,
+        "config_path": config_path,
+        "shim_path": shim_path,
+    }
+
+
+def _db_bifrost_state(db_path: Path) -> dict[str, Any] | None:
+    """Read live config.db counts + mtime, or None if DB absent/unreadable."""
+    db_path = Path(db_path)
+    if not db_path.exists():
+        return None
+    try:
+        mtime = db_path.stat().st_mtime
+        # Include WAL mtime if newer (sqlite WAL holds freshest data)
+        wal = db_path.with_suffix(db_path.suffix + "-wal")
+        # config.db-wal variant
+        wal2 = db_path.parent / (db_path.name + "-wal")
+        for cand in (wal, wal2):
+            if cand.exists():
+                try:
+                    wt = cand.stat().st_mtime
+                    if wt > mtime:
+                        mtime = wt
+                except Exception:
+                    pass
+        # alt naming: config.db-wal already covered; also check -wal directly
+        # Query provider / model counts read-only
+        uri = f"file:{db_path}?mode=ro"
+        conn = sqlite3.connect(uri, uri=True, timeout=5.0)
+        try:
+            cur = conn.cursor()
+            # config_providers is the canonical table (Bifrost)
+            try:
+                cur.execute("SELECT COUNT(*) FROM config_providers")
+                prov_count = cur.fetchone()[0]
+            except Exception:
+                prov_count = 0
+            try:
+                cur.execute("SELECT models_json FROM config_keys")
+                model_total = 0
+                for (mj,) in cur.fetchall():
+                    if mj is None:
+                        continue
+                    try:
+                        arr = json.loads(mj)
+                        if isinstance(arr, list):
+                            model_total += len(arr)
+                    except Exception:
+                        continue
+            except Exception:
+                model_total = 0
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        return {
+            "providers": prov_count,
+            "models": model_total,
+            "mtime": mtime,
+            "path": db_path,
+        }
+    except Exception:
+        return None
+
+
+def _api_bifrost_state(api_base: str = "http://127.0.0.1:8080", timeout: float = 1.5) -> dict[str, Any]:
+    """Try management API counts. Returns dict with reachable flag."""
+    base = api_base.rstrip("/")
+    result: dict[str, Any] = {"reachable": False, "providers": None, "models": None, "error": None}
+    # /api/providers
+    try:
+        url = f"{base}/api/providers"
+        with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+            # Normalize: could be {providers: [...]}, or list
+            if isinstance(data, dict):
+                # Try common keys
+                if "providers" in data and isinstance(data["providers"], list):
+                    result["providers"] = len(data["providers"])
+                elif "data" in data and isinstance(data["data"], list):
+                    result["providers"] = len(data["data"])
+                elif "count" in data and isinstance(data["count"], int):
+                    result["providers"] = data["count"]
+                else:
+                    # Fallback: count keys if dict-of-providers
+                    result["providers"] = len(data)
+            elif isinstance(data, list):
+                result["providers"] = len(data)
+            result["reachable"] = True
+    except Exception as exc:  # noqa: BLE001
+        result["error"] = str(exc)
+    # /api/models?limit=1000
+    try:
+        url = f"{base}/api/models?limit=1000"
+        with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+            if isinstance(data, dict):
+                if "total" in data and isinstance(data["total"], int):
+                    result["models"] = int(data["total"])
+                elif "models" in data and isinstance(data["models"], list):
+                    result["models"] = len(data["models"])
+                elif "data" in data and isinstance(data["data"], list):
+                    result["models"] = len(data["data"])
+                elif "count" in data and isinstance(data["count"], int):
+                    result["models"] = int(data["count"])
+                else:
+                    result["models"] = None
+                result["reachable"] = True
+            elif isinstance(data, list):
+                result["models"] = len(data)
+                result["reachable"] = True
+    except Exception as exc:  # noqa: BLE001
+        # Keep providers reachable flag if already true
+        if result.get("error") is None:
+            result["error"] = str(exc)
+    return result
+
+
+def check_bifrost_drift(
+    output_dir: Path | str = Path("data/bifrost"),
+    *,
+    db_path: Path | str | None = None,
+    api_base: str = "http://127.0.0.1:8080",
+    api_timeout: float = 1.5,
+    check_api: bool = True,
+) -> dict[str, Any]:
+    """Compare file vs live DB/API + mtimes; report drift.
+
+    Drift if: provider or model counts differ between file and DB (or API when
+    reachable), or file mtime newer than DB mtime (stale DB).
+    Missing file or missing DB => no drift (fresh install) but reported.
+
+    Returns dict with keys: drift (bool), reasons (list[str]), file/db/api subdicts.
+    """
+    output_dir = Path(output_dir)
+    if db_path is None:
+        db_path = output_dir / "config.db"
+    else:
+        db_path = Path(db_path)
+
+    file_state = _file_bifrost_state(output_dir)
+    db_state = _db_bifrost_state(db_path)
+    api_state: dict[str, Any] | None = None
+    if check_api:
+        api_state = _api_bifrost_state(api_base, timeout=api_timeout)
+
+    reasons: list[str] = []
+    drift = False
+
+    if file_state is None and db_state is None:
+        # No artifacts yet – not drift, just fresh
+        return {
+            "drift": False,
+            "reasons": ["no file artifacts yet (fresh install)"],
+            "file": None,
+            "db": None,
+            "api": api_state,
+        }
+    if file_state is None:
+        reasons.append("config.json missing (needs regen)")
+        drift = True
+        return {"drift": drift, "reasons": reasons, "file": file_state, "db": db_state, "api": api_state}
+    if db_state is None:
+        # File exists but DB missing – likely not yet started; warn but not fail drift?
+        # Treat as not drift for --check (container not yet ingested), but note.
+        reasons.append("config.db missing (not yet ingested)")
+        # Not drift: file is truth, DB will be created on restart
+        return {"drift": False, "reasons": reasons, "file": file_state, "db": db_state, "api": api_state}
+
+    # Both present: compare counts
+    if file_state["providers"] != db_state["providers"]:
+        reasons.append(f"providers: file={file_state['providers']} vs db={db_state['providers']}")
+        drift = True
+    if file_state["models"] != db_state["models"]:
+        reasons.append(f"models: file={file_state['models']} vs db={db_state['models']}")
+        drift = True
+    # API comparison when reachable and counts available
+    if api_state is not None and api_state.get("reachable"):
+        if api_state.get("providers") is not None and file_state["providers"] != api_state["providers"]:
+            reasons.append(f"providers: file={file_state['providers']} vs api={api_state['providers']}")
+            drift = True
+        if api_state.get("models") is not None and file_state["models"] != api_state["models"]:
+            reasons.append(f"models: file={file_state['models']} vs api={api_state['models']}")
+            drift = True
+        # Cross-check DB vs API as extra signal (not file vs file)
+        if (
+            api_state.get("providers") is not None
+            and db_state["providers"] != api_state["providers"]
+        ):
+            reasons.append(f"providers: db={db_state['providers']} vs api={api_state['providers']}")
+            drift = True
+        if api_state.get("models") is not None and db_state["models"] != api_state["models"]:
+            reasons.append(f"models: db={db_state['models']} vs api={api_state['models']}")
+            drift = True
+    # mtime: stale DB if file newer (with 2s grace for atomic replace)
+    if file_state.get("mtime") is not None and db_state.get("mtime") is not None:
+        if file_state["mtime"] > db_state["mtime"] + 2.0:
+            reasons.append(f"mtime: file newer than db (stale db, restart needed)")
+            drift = True
+
+    return {"drift": drift, "reasons": reasons, "file": file_state, "db": db_state, "api": api_state}

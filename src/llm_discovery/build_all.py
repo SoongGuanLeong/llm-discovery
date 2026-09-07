@@ -4,7 +4,8 @@ Orchestrates in order:
   1. Parse config/providers.yaml
   2. Refresh catalogs cache-optional (skip when missing, no network required)
   3. Discover all providers (injectable discover_fn for tests; defaults to pipeline.discover_provider)
-     - Sequential providers, store threaded for in-pipeline early return (#96)
+     - Bounded parallelism (3-4 concurrent) for provider discovery; intra-provider judge still max_workers=8
+     - Store fcntl+atomic safe under cross-provider concurrent puts
   4. Backfill de-duplicates Ephemeral Reports by normalized key via benchmarks gap-fill + pricing aggregation
   5. GC scans live normalized keys from all keep lists; if key absent from live set and stale (>14d) delete, share-aware
   6. Atomic pretty store with version header (via ModelInfoStore) + telemetry
@@ -14,6 +15,8 @@ Demoable with tmp data-dir and 2 mocked providers, no network/LLM.
 from __future__ import annotations
 
 import json
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable
 
@@ -22,6 +25,9 @@ from collections import Counter
 from .backfill import backfill
 from .config import load_config
 from .model_info_store import DEFAULT_TTL_DAYS, ModelInfoStore, is_stale, normalize_store_key
+
+# Bounded provider concurrency: 3-4 concurrent per acceptance (issue #142)
+PROVIDER_CONCURRENCY = 4
 
 def _collect_live_keys(results_dir: Path) -> tuple[set[str], dict[str, int], int]:
     live: set[str] = set()
@@ -53,6 +59,31 @@ def _collect_live_keys(results_dir: Path) -> tuple[set[str], dict[str, int], int
     return live, dict(per_key), total
 
 
+def _collect_per_provider_stats(results_dir: Path) -> dict[str, dict[str, int]]:
+    """Collect per-provider keep/drop/error counts from result YAMLs."""
+    stats: dict[str, dict[str, int]] = {}
+    if not results_dir.exists():
+        return stats
+    for yf in sorted(results_dir.glob("*.yaml")):
+        provider = yf.stem
+        try:
+            data = yaml.safe_load(yf.read_text())
+        except Exception:
+            continue
+        if not isinstance(data, dict):
+            continue
+        keep = data.get("keep") or []
+        drop = data.get("drop") or data.get("drop_llm") or []
+        error = data.get("error") or []
+        # Backfill-projected keep entries still count as discovered
+        stats[provider] = {
+            "keep": len(keep) if isinstance(keep, list) else 0,
+            "drop": len(drop) if isinstance(drop, list) else 0,
+            "error": len(error) if isinstance(error, list) else 0,
+        }
+    return stats
+
+
 def build_all(
     data_dir: str | Path = "data",
     config_path: str | Path = "config/providers.yaml",
@@ -78,6 +109,7 @@ def build_all(
     Returns:
         dict with keys: providers_discovered, files_written, backfill stats, store_path, store_size, catalogs
     """
+    build_start = time.monotonic()
     data_dir = Path(data_dir)
     config_path = Path(config_path)
     results_dir = data_dir / "results"
@@ -167,67 +199,108 @@ def build_all(
 
     discovered = 0
     files_written: list[str] = []
+    # per-provider raw results for telemetry (keep/drop/error counts before backfill)
+    per_provider_raw: dict[str, dict[str, int]] = {}
+    provider_concurrency = min(PROVIDER_CONCURRENCY, len(provider_list))
+
     if discover_fn is not None:
-        # Mocked/ injected discovery for tests
+        # Mocked/injected discovery for tests — bounded parallelism (3-4 concurrent)
         from .results import ProviderBatchWriter
-        writer = ProviderBatchWriter()
-        for name in provider_list:
+
+        def _run_mock_provider(name: str) -> tuple[str, dict[str, list[dict[str, Any]]], Path]:
             result = None
             tried = False
-            for attempt in [lambda: discover_fn(name, config, aa, models_dev, max_workers, store=store_for_discovery), lambda: discover_fn(name, config, aa, models_dev, max_workers), lambda: discover_fn(name)]:
+            # Try signatures in order: (name, config, aa, models_dev, max_workers, store=...), then without store, then (name,)
+            attempts: list[Callable[[], Any]] = [
+                lambda n=name: discover_fn(n, config, aa, models_dev, max_workers, store=store_for_discovery),
+                lambda n=name: discover_fn(n, config, aa, models_dev, max_workers),
+                lambda n=name: discover_fn(n),
+            ]
+            for attempt in attempts:
                 try:
                     result = attempt()
                     tried = True
                     break
                 except TypeError as e:
-                    if "store" in str(e) or "positional" in str(e) or "missing" in str(e) or "unexpected" in str(e):
+                    msg = str(e)
+                    if "store" in msg or "positional" in msg or "missing" in msg or "unexpected" in msg:
                         continue
                     raise
             if not tried or result is None:
                 result = {"keep": [], "drop": [], "error": []}
-            # Normalize result shape
             if not isinstance(result, dict):
                 result = {"keep": [], "drop": [], "error": []}
             result.setdefault("keep", [])
             result.setdefault("drop", [])
             result.setdefault("error", [])
+            # Each thread creates its own writer to avoid shared-state races
+            writer = ProviderBatchWriter()
             path = writer.write(result, name, results_dir)
-            files_written.append(str(path))
-            discovered += 1
+            return name, result, path
+
+        if provider_concurrency <= 1 or len(provider_list) == 1:
+            for name in provider_list:
+                n, res, path = _run_mock_provider(name)
+                files_written.append(str(path))
+                discovered += 1
+                per_provider_raw[n] = {"keep": len(res.get("keep", [])), "drop": len(res.get("drop", [])), "error": len(res.get("error", []))}
+        else:
+            with ThreadPoolExecutor(max_workers=provider_concurrency) as pool:
+                fut_to_name = {pool.submit(_run_mock_provider, n): n for n in provider_list}
+                for fut in as_completed(fut_to_name):
+                    n, res, path = fut.result()
+                    files_written.append(str(path))
+                    discovered += 1
+                    per_provider_raw[n] = {"keep": len(res.get("keep", [])), "drop": len(res.get("drop", [])), "error": len(res.get("error", []))}
+            # deterministic output order for callers/tests
+            files_written.sort()
     else:
-        # Real discovery via pipeline.discover_provider (sequential, isolated per provider)
+        # Real discovery via pipeline.discover_provider — bounded parallelism
         from .pipeline import discover_provider
         from .results import save_provider_result
-        for name in provider_list:
+
+        # Prepare placeholder catalogs once (read-only, safe to share across threads)
+        if aa is None or models_dev is None:
+            class _EmptyAA:
+                path = data_dir / "artificial_analysis_models.json"
+                models: list[Any] = []
+            class _EmptyMD:
+                path = data_dir / "models_dev_catalog.json"
+                models: dict[str, Any] = {}
+                providers: dict[str, Any] = {}
+            _aa_shared = aa if aa is not None else _EmptyAA()  # type: ignore
+            _md_shared = models_dev if models_dev is not None else _EmptyMD()  # type: ignore
+        else:
+            _aa_shared, _md_shared = aa, models_dev
+
+        def _run_real_provider(name: str) -> tuple[str, dict[str, list[dict[str, Any]]], Path]:
             print(f"\n=== {name} === (build-all)")
             try:
-                # Ensure aa/models_dev are at least placeholder catalogs for pipeline
-                # If cache-miss, pipeline's BenchmarkDataCache will collect empty and discovery still filters.
-                # Pipeline requires aa/models_dev objects; create dummy empty ones if missing.
-                if aa is None or models_dev is None:
-                    # Create minimal empty cache handles for pipeline to proceed cache-miss
-                    # Pipeline's collect_from_local handles empty gracefully.
-                    class _EmptyAA:
-                        path = data_dir / "artificial_analysis_models.json"
-                        models = []
-                    class _EmptyMD:
-                        path = data_dir / "models_dev_catalog.json"
-                        models = {}
-                        providers = {}
-                    _aa = aa if aa is not None else _EmptyAA()  # type: ignore
-                    _md = models_dev if models_dev is not None else _EmptyMD()  # type: ignore
-                else:
-                    _aa, _md = aa, models_dev
-                result = discover_provider(name, config, _aa, _md, max_workers=max_workers, store=store_for_discovery)
+                result = discover_provider(name, config, _aa_shared, _md_shared, max_workers=max_workers, store=store_for_discovery)
             except Exception as exc:
                 from .pipeline import provider_error_result
                 result = provider_error_result(name, exc)
                 print(f"[{name}] discover failed: {exc}")
             path = save_provider_result(result, name, results_dir)
-            files_written.append(str(path))
-            discovered += 1
+            return name, result, path
 
-    # 4-5. Backfill with 14d filter + merge into store atomically
+        if provider_concurrency <= 1 or len(provider_list) == 1:
+            for name in provider_list:
+                n, res, path = _run_real_provider(name)
+                files_written.append(str(path))
+                discovered += 1
+                per_provider_raw[n] = {"keep": len(res.get("keep", [])), "drop": len(res.get("drop", [])), "error": len(res.get("error", []))}
+        else:
+            with ThreadPoolExecutor(max_workers=provider_concurrency) as pool:
+                fut_to_name = {pool.submit(_run_real_provider, n): n for n in provider_list}
+                for fut in as_completed(fut_to_name):
+                    n, res, path = fut.result()
+                    files_written.append(str(path))
+                    discovered += 1
+                    per_provider_raw[n] = {"keep": len(res.get("keep", [])), "drop": len(res.get("drop", [])), "error": len(res.get("error", []))}
+            files_written.sort()
+
+    # 4-5. Backfill with 14d filter + merge into store atomically — sequential tail (no concurrency)
     stats = backfill(results_dir=results_dir, store_path=store_path)
 
     # 6. GC: share-aware, single-threaded, no cross-provider race (sequential after backfill)
@@ -247,8 +320,20 @@ def build_all(
     store_hit_keys = {k for k in live_keys if k in before_keys}
     reused_unique = len(store_hit_keys | duplicate_keys) if live_keys else 0
     rebuilt_total = rebuilt_new + rebuilt_identity
-    telemetry = {"discovered": total_keep, "unique_discovered": len(live_keys), "reused": reused_unique, "rebuilt": rebuilt_total, "rebuilt_by_reason": {"new_key": rebuilt_new, "identity_bad": rebuilt_identity, "pricing_ttl_reavg": 0}, "gc": gc_count, "store_size": store.size(), "store_size_before": len(before_keys), "duplicate_keys": len(duplicate_keys), "live_keys": len(live_keys)}
-    print(f"[build-all] telemetry discovered={total_keep} unique={len(live_keys)} reused={reused_unique} rebuilt={rebuilt_total} (new={rebuilt_new} identity={rebuilt_identity}) gc={gc_count} store={store.size()}")
+    # per-provider keep after backfill (from YAML) plus before_keys reuse distinction
+    per_provider_stats = _collect_per_provider_stats(results_dir)
+    # enrich per_provider_raw with reuse signal if available (heuristic: keep that existed before)
+    for prov, counts in per_provider_stats.items():
+        raw = per_provider_raw.get(prov, {})
+        # keep per_provider_raw as discover-time, per_provider_stats as post-write; prefer raw if present
+        if prov not in per_provider_raw:
+            per_provider_raw[prov] = counts
+    build_wall = time.monotonic() - build_start
+    telemetry = {"discovered": total_keep, "unique_discovered": len(live_keys), "reused": reused_unique, "rebuilt": rebuilt_total, "rebuilt_by_reason": {"new_key": rebuilt_new, "identity_bad": rebuilt_identity, "pricing_ttl_reavg": 0}, "gc": gc_count, "store_size": store.size(), "store_size_before": len(before_keys), "duplicate_keys": len(duplicate_keys), "live_keys": len(live_keys), "per_provider": per_provider_raw, "per_provider_post": per_provider_stats, "provider_concurrency": provider_concurrency, "wall_seconds": round(build_wall, 3)}
+    print(f"[build-all] telemetry discovered={total_keep} unique={len(live_keys)} reused={reused_unique} rebuilt={rebuilt_total} (new={rebuilt_new} identity={rebuilt_identity}) gc={gc_count} store={store.size()} wall={build_wall:.2f}s conc={provider_concurrency}")
+    for prov in sorted(per_provider_raw):
+        c = per_provider_raw[prov]
+        print(f"[build-all] provider {prov}: keep={c.get('keep',0)} drop={c.get('drop',0)} error={c.get('error',0)}")
 
     # 7. Ensure pretty + version header already via ModelInfoStore.save
     pretty = store.dumps_pretty()

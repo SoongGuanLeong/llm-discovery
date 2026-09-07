@@ -453,13 +453,16 @@ else
   rm -f "$QUADLET_DST_DIR/.writetest"
 fi
 QUADLET_CHANGED=0
-# refresh_catalogs.py interpreter: prefer repo venv (deps installed), then uv, then system python
+# refresh_catalogs.py interpreter: absolute python only (systemd ExecStart splits on spaces,
+# so "uv --project ..." would be fragile). Prefer repo venv, then system python.
 REFRESH_PYTHON="$REPO_ROOT/.venv/bin/python"
 if [[ ! -x "$REFRESH_PYTHON" ]]; then
-  if command -v uv >/dev/null 2>&1; then
-    REFRESH_PYTHON="uv --project $REPO_ROOT run python"
+  if [[ -n "${PYTHON_BIN:-}" && -x "$(command -v "$PYTHON_BIN" 2>/dev/null || echo _)" ]]; then
+    REFRESH_PYTHON="$(command -v "$PYTHON_BIN")"
+  elif command -v python3 >/dev/null 2>&1; then
+    REFRESH_PYTHON="$(command -v python3)"
   else
-    REFRESH_PYTHON="${PYTHON_BIN:-python3}"
+    REFRESH_PYTHON="python3"
   fi
 fi
 # Optional 0600 env file with AA_API_KEY (refresh degrades gracefully without it)
@@ -547,14 +550,14 @@ if [[ "$QUADLET_CHANGED" -eq 1 ]]; then
   else
     log_warn "could not auto-start bifrost - run manually: systemctl --user enable --now bifrost"
   fi
-  # daily catalog refresh timer (per #140); idempotent enable
-  if systemctl --user enable --now refresh-catalogs.timer 2>&1; then
-    log_ok "refresh-catalogs.timer enabled --now"
-  else
-    log_warn "could not enable refresh-catalogs.timer - run manually: systemctl --user enable --now refresh-catalogs.timer"
-  fi
 else
   echo "  daemon-reload: skipped (units up-to-date)"
+fi
+# Timer enable is idempotent and must run even when units are up-to-date (no daemon-reload needed for enable).
+if systemctl --user enable --now refresh-catalogs.timer 2>&1; then
+  log_ok "refresh-catalogs.timer enabled --now"
+else
+  log_warn "could not enable refresh-catalogs.timer - run manually: systemctl --user enable --now refresh-catalogs.timer"
 fi
 echo ""
 echo "Next commands:"

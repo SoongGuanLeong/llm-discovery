@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Catalog refresh: fetch AA + models.dev + rebuild benchmarks with atomic write + backup."""
 import json
 import os

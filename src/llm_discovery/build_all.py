@@ -76,7 +76,7 @@ def build_all(
         no_catalog_refresh: skip the staleness gate entirely (offline builds).
 
     Returns:
-        dict with keys: providers_discovered, files_written, backfill stats, store_path, store_size
+        dict with keys: providers_discovered, files_written, backfill stats, store_path, store_size, catalogs
     """
     data_dir = Path(data_dir)
     config_path = Path(config_path)

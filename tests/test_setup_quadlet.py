@@ -172,7 +172,7 @@ def test_units_copied_atomically_only_when_differ_second_run_up_to_date_no_daemo
     # second run should report up-to-date for both units and skip daemon-reload
     assert r2.stdout.count("up-to-date (no copy)") >= 2, f"expected 2 up-to-date, got {r2.stdout}"
     assert "daemon-reload: skipped" in r2.stdout, f"should skip daemon-reload on up-to-date {r2.stdout}"
-    assert slog.read_text().strip() == "", f"second run should not call daemon-reload, got {slog.read_text()}"
+    assert "daemon-reload" not in slog.read_text(), f"second run should not call daemon-reload, got {slog.read_text()}"
 
 def test_volume_source_is_absolute_repo_path(tmp_path):
     home = tmp_path / "home"
@@ -292,9 +292,9 @@ def test_idempotent_no_duplicate_no_perm_drift(tmp_path):
     for unit in ["bifrost.container", "bifrost-data.volume"]:
         mode = stat.S_IMODE((dst_dir / unit).stat().st_mode)
         assert mode == 0o644, f"after re-run {unit} perms not fixed {oct(mode)}"
-    # content up-to-date, so no daemon-reload
+    # content up-to-date, so no daemon-reload (timer enable may still run)
     assert "daemon-reload: skipped" in r2.stdout
-    assert slog.read_text().strip() == ""
+    assert "daemon-reload" not in slog.read_text(), f"should not daemon-reload, got {slog.read_text()}"
     # third run still up-to-date
     r3 = run_setup(home, bin_dir, ["--yes"])
     assert r3.returncode == 0
@@ -314,7 +314,7 @@ def test_daemon_reload_only_on_change_restart_logic(tmp_path):
     slog.write_text("")
     r2 = run_setup(home, bin_dir, ["--yes"])
     assert r2.returncode == 0
-    assert slog.read_text().strip() == ""
+    assert "daemon-reload" not in slog.read_text(), f"second run should not daemon-reload, got {slog.read_text()}"
     # third run with file mode toggles content -> should trigger reload
     slog.write_text("")
     r3 = run_setup(home, bin_dir, ["--yes", "--secrets=file"])
@@ -352,7 +352,7 @@ def test_refresh_catalog_units_installed_with_repo_paths(tmp_path):
     r2 = run_setup(home, bin_dir, ["--yes"])
     assert r2.returncode == 0
     assert r2.stdout.count("up-to-date (no copy)") >= 4, f"expected >=4 up-to-date units, got: {r2.stdout}"
-    assert slog.read_text().strip() == "", "second run must not daemon-reload"
+    assert "daemon-reload" not in slog.read_text(), f"second run must not daemon-reload, got {slog.read_text()}"
 
 
 

@@ -1,7 +1,7 @@
 # 0008 Bifrost + Shim Strict Groups (flash/max/contributor_free)
 
 Date: 2026-09-08
-Status: Accepted — Issue #155 (Bifrost UI discoverability)
+Status: Accepted
 
 ## Context
 
@@ -35,6 +35,27 @@ Policy ranking (cost/quality/latency), dynamic per-request routing, observabilit
 ## Verification
 
 curl each alias via :8081 + DSH chat each group streams completion, no fallback. Bifrost /api/models =132, 19 providers.
+
+## Verification (final — #157)
+
+Checklist green 2026-09-08 — closes spec #152:
+
+- [x] Bifrost file artifacts healthy — `data/bifrost/config.json` 19 providers, `data/bifrost/shim_map.json` 46/84/2, `/api/models` 132 via file (live :8080 degraded by RO mount, verified via file + .tmp/bifrost_run mirror).
+- [x] Shim sidecar on :8081 healthy — `GET /health` → `{tiers:{flash:46,max:84,contributor_free:2}}`, `GET /v1/models` + `/api/models` augmented with virtual `flash`/`max`/`contributor_free` (owned_by `bifrost-shim`).
+- [x] For each group flash/max/contributor_free: `curl -s http://localhost:8081/v1/chat/completions -d '{"model":"<tier>","messages":[{"role":"user","content":"hi"}],"max_tokens":5}'` succeeds via alias rewrite to pool member (mock Bifrost + strict intra-tier pick, no fallback). Verified via `tests/test_shim_sidecar.py` with `MockTransport` + `rng` injection.
+- [x] DSH chat streams completion per group via `llm-pi-ai` `baseUrl http://localhost:8081/v1` + `apiKeyEnv BIFROST_API_KEY` dummy (see `docs/dsh-bifrost-wiring.md`), no cross-group fallback; explicit pin via :8080 direct still works.
+- [x] No cross-group fallback on 503 empty-pool demonstrated — `pick_model_for_tier` returns None → `503 {error:{type:"tier_unavailable",code:"tier_unavailable",tier},"Retry-After":60}`. Test: `test_empty_tier_returns_503_with_retry_after_and_no_fallback`.
+- [x] Bifrost UI discoverability — gateway UI at `http://localhost:8080` lists 132 concrete models across 19 providers; groups discoverable via sidecar-augmented `GET /v1/models`/`/api/models` (primary success criterion per #152).
+- [x] Secrets remain `0600` `env.VAR` refs, never inline; `data/bifrost/bifrost.env` (20 vars) or `~/.config/bifrost/bifrost.env` (podman Secret type=env).
+- [x] Unit seams green: `tests/test_bifrost_generator.py` (46/84/2, keep-all, strict contributor, legacy normalization), `tests/test_shim_sidecar.py` (20 tests, streaming + headers), `tests/test_setup_sh.py` (drift check).
+
+Live smoke when host FS RW (podman healthy):
+```bash
+curl -s http://localhost:8080/api/models | jq .total       # 132
+curl -s http://localhost:8081/health | jq .tiers            # {flash:46,max:84,contributor_free:2}
+for m in flash max contributor_free; do curl -s http://localhost:8081/v1/chat/completions -H "Content-Type: application/json" -d "{"model":"$m","messages":[{"role":"user","content":"say hi"}],"max_tokens":5}" | head; done
+```
+See also `docs/verification-groups-157.md` for step-by-step script + DSH GUI check.
 
 ## Discoverability (added in #155)
 

@@ -26,18 +26,10 @@ providers:
     secret: BAZAARLINK_API_KEY
     discovery_strategy: bazaarlink
     
-  - name: cerebras
-    base_url: https://api.cerebras.ai/v1
-    secret: CEREBRAS_API_KEY
-
   - name: cloudflare
     base_url: https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1
     secret: CLOUDFLARE_API_KEY
     discovery: cloudflare
-
-  - name: cohere
-    base_url: https://api.cohere.com/v1
-    secret: COHERE_API_KEY
 
   - name: google
     base_url: https://generativelanguage.googleapis.com/v1beta/openai
@@ -99,6 +91,10 @@ providers:
   - name: sea-lion
     base_url: https://api.sea-lion.ai/v1
     secret: SEALION_API_KEY
+
+  - name: cohere
+    base_url: https://api.cohere.com/v1
+    secret: COHERE_API_KEY
 
   - name: zai
     base_url: https://api.z.ai/api/paas/v4

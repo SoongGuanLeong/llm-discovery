@@ -9,8 +9,6 @@ dependencies = [
     "pydantic>=2.13.4",
     "python-dotenv>=1.2.3",
     "pyyaml>=6.0.3",
-    "fastapi>=0.110",
-    "uvicorn>=0.30",
 ]
 
 [build-system]
@@ -19,6 +17,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]
+norecursedirs = ["data", ".venv", ".uv-cache", ".tmp", ".local"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

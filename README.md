@@ -173,7 +173,33 @@ Programmatic writers: `src/llm_discovery/results.py:ProviderBatchWriter` / `Sing
 
 ### Downstream handoff
 
-`data/results/*.yaml` is the keep-list consumed by the gateway. The previous gateway is being retired in favor of **Bifrost**. To feed a new gateway, read `keep[].model_id` per provider and map each to the gateway config (use `base_url` and `secret` from `config/providers.yaml`). Diffing `data/results/*.yaml` across runs audits what entered/left the keep-list before promotion.
+`data/results/*.yaml` is the keep-list. To feed a gateway, read `keep[].model_id` per provider and map each to the gateway config (use `base_url` and `secret` from `config/providers.yaml`). Diffing `data/results/*.yaml` across runs audits what entered/left the keep-list before promotion.
+
+### OmniRoute export (per-provider model control)
+
+Single command pins every keep to an OmniRoute tier combo (`flash`/`max`/`contributor_free`, keep-all, reset-aware). Source of truth stays `config/providers.yaml` + `data/results/*.yaml`; secrets never inline.
+
+```bash
+# Dry-run — writes files only, no network, placeholder epiKey
+.venv/bin/python -m llm_discovery.omniroute_export --dry-run
+cat data/derived/omniroute_import.json        # [{provider,name,apiKey:"env:SECRET",baseUrl}]
+cat data/derived/omniroute_combos.json        # [{name,models:[{provider,model}],strategy:"reset-aware"}]
+# Example fixture committed for shape reference
+cat data/derived/examples/omniroute_combos.example.json
+
+# Apply — resolves env secrets and POSTs to gateway (idempotent)
+# Requires OmniRoute reachable at localhost:20128 and env keys (GROQ_API_KEY, etc.)
+# Auth via env OMNIROUTE_API_KEY or --api-key, fallback to unauthenticated local gateway
+.venv/bin/python -m llm_discovery.omniroute_export --apply --omniroute-url http://localhost:20128
+# Verify
+curl -s http://localhost:20128/api/combos | jq    # shows flash/max/contributor_free reset-aware
+curl -s http://localhost:20128/v1/chat/completions -H "Content-Type: application/json" \
+  -d '{"model":"flash","messages":[{"role":"user","content":"hi"}]}' | jq
+```
+
+- Import: one row per `config/providers.yaml` (22 providers), `baseUrl` verbatim, `apiKey` resolved from env only at apply.
+- Combos: pure tier partition keep-all (e.g. 100 keeps → 100 targets), `contributor_special` normalized, strict `contributor` filter, sorted deterministic.
+- CLI: `--dry-run` (local only), `--apply` (bulk import + `GET`/`POST`/`PUT /api/combos` upsert), `--omniroute-url`, `--api-key`; exit 0 success, non-zero on validation; no secrets logged.
 
 ## Catalog refresh (T6)
 
@@ -203,7 +229,7 @@ export AA_API_KEY=aa_xxx  # or ARTIFICIAL_ANALYSIS_API_KEY
 
 ### Automated refresh (systemd timer, issue #140)
 
-`scripts/setup.sh` also installs a daily user timer (`config/quadlet/refresh-catalogs.service` + `.timer`, `OnCalendar=daily`, diff-before-copy). It runs the same `scripts/refresh_catalogs.py` from the repo root with the repo venv python; the AA key is read from the Bifrost env file when present (models.dev needs no key).
+A daily user timer (`config/quadlet/refresh-catalogs.service` + `.timer`, `OnCalendar=daily`, diff-before-copy) can run `scripts/refresh_catalogs.py` from the repo root with the repo venv python (models.dev needs no key).
 
 ```bash
 systemctl --user status refresh-catalogs.timer   # next run + last status
@@ -220,35 +246,3 @@ The timer is optional — manual refresh above always works. Independently, `bui
 .venv/bin/python -m llm_discovery.cli models show groq
 ```
 
-## Bifrost gateway (setup.sh quick start)
-
-Fresh clone to running gateway (Podman Quadlet canonical, npx fallback manual):
-
-```bash
-cp .env.example .env          # set LLM_SHARED_PROJECT_ID + LLM_DISCOVERY_PROJECT_ID (UUIDs)
-infisical login               # one-time, token in ~/.infisical / OS keyring
-scripts/setup.sh --check      # read-only preflight: [1/6]..[6/6] + PASS/FAIL table, writes nothing
-scripts/setup.sh --yes        # default: podman secret type=env (no plaintext file)
-# fallback when Podman type=env unsupported:
-scripts/setup.sh --yes --secrets=file   # atomic 0600 file at ~/.config/bifrost/bifrost.env
-curl http://localhost:8080/health
-# linger for auto-start after logout:
-loginctl enable-linger $USER
-```
-
-Manual alternative (without setup.sh):
-
-```bash
-infisical export --projectId "$LLM_SHARED_PROJECT_ID" --env dev --format dotenv > ~/.config/bifrost/bifrost.env
-chmod 600 ~/.config/bifrost/bifrost.env
-.venv/bin/python scripts/generate-bifrost-config.py
-systemctl --user daemon-reload && systemctl --user restart bifrost
-# or: npx -y @maximhq/bifrost --app-dir ./data/bifrost
-```
-
-- `scripts/setup.sh` parses `.env` directly (no `source`; quotes/comments/whitespace stripped, last occurrence wins, exported env overrides file).
-- Secrets handoff: default `podman secret type=env` (`Secret=bifrost-env,type=env` in Quadlet); `--secrets=file` writes 0600 atomically.
-- Artifacts: `data/bifrost/config.json` + `shim_map.json` (env.VAR refs, never inline secrets; see `docs/bifrost-deployment.md`).
-- Idempotent re-run: `up-to-date (no rewrite)` and quadlet diff-before-copy, daemon-reload only on change.
-- Preflight fails print one-line reason + fix (`Missing .env`, `Not logged into Infisical`, Podman missing) and leave no partial writes.
-- See `scripts/setup.sh --help` for flags. Details: `docs/bifrost-deployment.md`.

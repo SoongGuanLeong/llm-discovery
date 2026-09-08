@@ -68,24 +68,7 @@ _Avoid_: price change, cost drift
 **UUID Model Id**:
 A provider model_id that is a UUID (8-4-4-4-12 hex) rather than a human name. Never cacheable; blocked by the gate until a human-name mapping exists.
 _Avoid_: infra id, opaque id
-### Model Groups (Bifrost)
-
-**Model Group**:
-
-User-facing Bifrost virtual-model pool mapped to the internal `TIER_*` pool (`flash` 46, `max` 84, `contributor_free` 2 via `group_keeps_by_tier` keep-all, strict `contributor` substring). Served via shim sidecar `:8081` alias rewrite to uniform weighted pick within strict tier; empty pool returns `503 tier_unavailable` with `Retry-After: 60`, no cross-group fallback. Concrete provider models remain pinnable via `:8080`.
-_Avoid_: tier group, model pool, virtual model (use Model Group for user-facing)
-
-**Bifrost Gateway**:
-
-File-only gateway on `:8080` (`data/bifrost/config.json` + `config.db` + `env.VAR` secrets from `~/.config/bifrost/bifrost.env` `0600`) that proxies to provider `base_url` with `keys.models` allowlist. `GET /api/models` lists 132 models across 19 emitted providers; `GET /v1/models` is health-filtered by key validity.
-_Avoid_: gateway, proxy, router
-
-**Shim Sidecar**:
-
-Process on `:8081` (`src/llm_discovery/bifrost/sidecar.py` via `scripts/run_sidecar.sh`) that rewrites `model: flash|max|contributor_free` to a pool member via `pick_model_for_tier` and proxies to Bifrost `:8080`; exposes `GET /health` tier counts and `GET /v1/models` + `/api/models` augmented with alias virtual models for discoverability.
-_Avoid_: shim, alias router
-
 **Tier**:
 
-Internal categorization token `flash`/`max`/`contributor_free` assigned by `categorize.py`. Groups derive purely from this pre-categorized field via `group_keeps_by_tier`; never recomputed at generation time. Legacy `contributor_special` normalizes to `contributor_free`; non-tier keeps (`drop`, `error`, `uncertain`) excluded.
+Internal categorization token `flash`/`max`/`contributor_free` assigned by `categorize.py`.
 _Avoid_: category, group type

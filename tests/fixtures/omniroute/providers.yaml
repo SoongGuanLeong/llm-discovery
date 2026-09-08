@@ -1,0 +1,10 @@
+providers:
+  - name: groq
+    base_url: https://api.groq.com/openai/v1
+    secret: GROQ_API_KEY
+  - name: cloudflare
+    base_url: https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1
+    secret: CLOUDFLARE_API_KEY
+  - name: custom_openai
+    base_url: https://custom.example.com/v1
+    secret: CUSTOM_API_KEY

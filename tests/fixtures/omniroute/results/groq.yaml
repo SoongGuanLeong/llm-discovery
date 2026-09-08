@@ -1,0 +1,22 @@
+provider: groq
+evaluated_at: "2026-09-08T04:00:00+00:00"
+keep:
+  - model_id: llama-3.3-70b-versatile
+    decision: keep
+    tier: max
+    aa_model_id: groq/llama-3.3-70b-versatile
+    aa_score: 55.0
+    confidence: 0.9
+    evidence_level: strong
+    evidence: ["https://example.com/evidence llama"]
+    coding_assessment: "coding, strong"
+  - model_id: contributor-model-free
+    decision: keep
+    tier: contributor_free
+    aa_model_id: groq/contributor-model-free
+    aa_score: 30.0
+    confidence: 0.88
+    evidence_level: strong
+    evidence: ["https://example.com/evidence contributor"]
+drop_llm: []
+error: []

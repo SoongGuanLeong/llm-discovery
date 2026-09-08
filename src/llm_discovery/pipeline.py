@@ -437,7 +437,7 @@ def evaluate_model(
     Early return right after resolve_model and before EvidenceCollector when
     store holds strong Keeper (slim v2). Hit = strong-only; moderate/weak = miss.
     Pricing stale (>14d) re-averaged via aggregate_pricing, benchmarks gap-fill only,
-    raw provider_model_id preserved verbatim for Ephemeral Report / Bifrost.
+    raw provider_model_id preserved verbatim for Ephemeral Report.
     """
     model_id = model["id"]  # raw verbatim per #90
     print(f"  [evaluate] {model_id}: starting...")

@@ -1,0 +1,26 @@
+provider: cerebras
+evaluated_at: "2026-09-08T04:00:00+00:00"
+keep:
+  - model_id: llama-4-maverick
+    decision: keep
+    tier: flash
+    aa_model_id: cerebras/llama-4-maverick
+    aa_score: 40.0
+    confidence: 0.85
+    evidence_level: strong
+    evidence: ["https://example.com/evidence flash"]
+  - model_id: contributor_special-model
+    decision: keep
+    tier: contributor_special
+    aa_model_id: cerebras/contributor_special-model
+    aa_score: 28.0
+    confidence: 0.82
+    evidence_level: strong
+    evidence: ["https://example.com/evidence special"]
+drop_llm:
+  - model_id: dropped-model
+    decision: drop
+    tier: drop
+    aa_model_id: cerebras/dropped-model
+    aa_score: 10.0
+error: []

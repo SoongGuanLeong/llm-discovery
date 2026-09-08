@@ -201,9 +201,11 @@ class TestBoundaries:
         assert "derived" not in src
 
     def test_bifrost_generator_does_not_read_cache_db(self) -> None:
-        src = (Path(__file__).resolve().parents[1] / "src" / "llm_discovery" / "bifrost" / "generator.py").read_text()
-        assert "cache_db" not in src
-        assert "cache.db" not in src
+        # Bifrost removed: ensure module and file no longer exist
+        import pathlib as _pl
+        bifrost_dir = _pl.Path(__file__).resolve().parents[1] / "src" / "llm_discovery" / "bifrost"
+        assert not bifrost_dir.exists(), "bifrost package should be removed"
+        assert not (_pl.Path(__file__).resolve().parents[1] / "scripts" / "generate-bifrost-config.py").exists()
 
     def test_gitignore_covers_derived(self) -> None:
         # data/ is gitignored wholesale (ADR-0005 pattern: ignore dir + one negation);

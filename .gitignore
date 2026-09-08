@@ -18,10 +18,11 @@ wheels/
 .venv
 
 # Local catalog snapshots
-data/
+data/**
 !data/model_info_store.json
-
-# data/derived/cache.db (issue #139) derived SQLite — covered by data/ above
+!data/derived/
+!data/derived/examples/
+!data/derived/examples/**
 
 .dsh-worktrees/
 

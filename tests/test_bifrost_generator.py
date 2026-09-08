@@ -109,7 +109,7 @@ class TestGenerateBifrostConfig:
         assert groq_cfg["keys"][0]["value"] == "env.GROQ_API_KEY"
         assert groq_cfg["keys"][0]["weight"] == 1.0
         assert groq_cfg["network_config"]["max_retries"] == 3
-        assert groq_cfg["custom_provider_config"]["base_provider_type"] == "openai"
+        assert groq_cfg["custom_provider_config"]["base_provider_type"] == "groq"
         # Order: flash tier processed first, then max
         assert groq_cfg["keys"][0]["models"] == ["llama-3.1-8b", "llama-3.1-70b"]
 

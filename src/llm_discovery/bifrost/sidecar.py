@@ -2,13 +2,40 @@ from __future__ import annotations
 
 import json
 import random
-from typing import Any
+from typing import Any, AsyncGenerator
 
 import httpx
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from .shim import ALIAS_TIERS, is_alias, pick_model_for_tier
+
+# Headers stripped before proxying to Bifrost (hop-by-hop + length recalculated)
+STRIP_REQUEST_HEADERS = {"host", "content-length", "connection", "transfer-encoding"}
+
+
+def _forward_headers(request_headers: Any) -> dict[str, str]:
+    return {k: v for k, v in request_headers.items() if k.lower() not in STRIP_REQUEST_HEADERS}
+
+
+def _response_headers(upstream_headers: Any) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for k, v in upstream_headers.items():
+        lk = k.lower()
+        if lk in ("retry-after", "content-type", "x-provider") or lk.startswith("x-"):
+            out[k] = v
+    # ensure retry-after case-insensitive preserved
+    if "retry-after" not in {k.lower() for k in out} and "retry-after" in upstream_headers:
+        out["retry-after"] = upstream_headers["retry-after"]
+    return out
+
+
+def _is_streaming_response(headers: Any) -> bool:
+    ct = headers.get("content-type", "") if hasattr(headers, "get") else ""
+    # httpx headers case-insensitive, check lower
+    if isinstance(ct, str) and "text/event-stream" in ct.lower():
+        return True
+    return False
 
 
 def create_app(
@@ -71,36 +98,47 @@ def create_app(
         # Proxy to Bifrost
         bifrost_path = f"{bifrost_url.rstrip('/')}/v1/chat/completions"
 
-        # Forward headers except host/content-length, preserve content-type
-        forward_headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length")}
-
-        # Use httpx client with optional mock transport
-        # For sync TestClient, we need sync httpx.Client; but endpoint is async so use AsyncClient
-        # We handle both transport types: if BaseTransport (sync), wrap via Client; if AsyncBaseTransport, use AsyncClient
-        # Simplify: try AsyncClient first, fallback to sync
-        headers_to_forward = forward_headers
+        forward_headers = _forward_headers(request.headers)
         data = json.dumps(body).encode()
 
-        # Detect transport type by checking if it has async methods
+        # Detect transport type
         is_async_transport = transport is not None and hasattr(transport, "handle_async_request")
 
         if is_async_transport or transport is None:
             async with httpx.AsyncClient(transport=transport) if transport else httpx.AsyncClient() as client:  # type: ignore
                 try:
-                    upstream = await client.post(bifrost_path, content=data, headers={**headers_to_forward, "content-type": "application/json"})
+                    upstream = await client.post(bifrost_path, content=data, headers={**forward_headers, "content-type": "application/json"})
                 except httpx.RequestError as e:
                     return JSONResponse(status_code=502, content={"error": {"message": f"upstream error: {e}", "type": "upstream_error"}})
-                # Proxy status, headers, body
-                # Preserve important headers including retry-after
-                resp_headers = {}
-                for k, v in upstream.headers.items():
-                    lk = k.lower()
-                    if lk in ("retry-after", "x-provider", "content-type") or lk.startswith("x-"):
-                        resp_headers[k] = v
-                # Also preserve retry-after case-insensitive
-                if "retry-after" not in {k.lower() for k in resp_headers} and "retry-after" in upstream.headers:
-                    resp_headers["retry-after"] = upstream.headers["retry-after"]
-                # Return JSON body if possible else raw
+                resp_headers = _response_headers(upstream.headers)
+                # Streaming forwarded: if upstream is event-stream, proxy as StreamingResponse
+                if _is_streaming_response(upstream.headers):
+                    # Preserve content-type, stream bytes
+                    media = upstream.headers.get("content-type", "text/event-stream")
+
+                    async def aiter() -> AsyncGenerator[bytes, None]:
+                        # upstream.content already buffered for MockTransport; for real streaming we'd use aiter_bytes
+                        # Try aiter_bytes if available (httpx streaming), else yield content splitted
+                        try:
+                            async for chunk in upstream.aiter_bytes():  # type: ignore
+                                yield chunk
+                        except Exception:
+                            # fallback: yield content in chunks
+                            content = upstream.content
+                            for i in range(0, len(content), 8192):
+                                yield content[i : i + 8192]
+
+                    # If aiter_bytes not available (buffered), just yield content
+                    if hasattr(upstream, "aiter_bytes"):
+                        return StreamingResponse(aiter(), status_code=upstream.status_code, headers=resp_headers, media_type=media)
+                    # fallback buffered streaming
+                    content = upstream.content
+
+                    async def buffered_iter():
+                        for i in range(0, len(content), 8192):
+                            yield content[i : i + 8192]
+
+                    return StreamingResponse(buffered_iter(), status_code=upstream.status_code, headers=resp_headers, media_type=media)
                 try:
                     content = upstream.json()
                 except Exception:
@@ -110,14 +148,19 @@ def create_app(
             # Sync transport (httpx.MockTransport is sync)
             with httpx.Client(transport=transport) as client:  # type: ignore
                 try:
-                    upstream = client.post(bifrost_path, content=data, headers={**headers_to_forward, "content-type": "application/json"})
+                    upstream = client.post(bifrost_path, content=data, headers={**forward_headers, "content-type": "application/json"})
                 except httpx.RequestError as e:
                     return JSONResponse(status_code=502, content={"error": {"message": f"upstream error: {e}", "type": "upstream_error"}})
-                resp_headers = {}
-                for k, v in upstream.headers.items():
-                    lk = k.lower()
-                    if lk in ("retry-after", "content-type") or lk.startswith("x-"):
-                        resp_headers[k] = v
+                resp_headers = _response_headers(upstream.headers)
+                if _is_streaming_response(upstream.headers):
+                    media = upstream.headers.get("content-type", "text/event-stream")
+                    content = upstream.content
+
+                    def sync_iter():
+                        for i in range(0, len(content), 8192):
+                            yield content[i : i + 8192]
+
+                    return StreamingResponse(sync_iter(), status_code=upstream.status_code, headers=resp_headers, media_type=media)
                 try:
                     content = upstream.json()
                 except Exception:

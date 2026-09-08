@@ -47,6 +47,8 @@ BULK_IMPORT_CANDIDATES = [
 COMBOS_LIST_PATH = "/api/combos"
 COMBO_CREATE_PATH = "/api/combos"
 
+PROVIDER_MODELS_PATH = "/api/provider-models"
+
 # Ticket 176: providers that map to custom OpenAI-compatible node ids
 # (registry entries lack modelsUrl; baseUrl honored only by compatible nodes)
 CUSTOM_NODE_MAP = {
@@ -67,6 +69,14 @@ _PROVIDER_ALIAS = {
     "navy_ai": "navy",
     "ollama_cloud": "ollama-cloud",
     "sea-lion": "sealion",
+}
+
+
+# Ticket 177: model provisioning provider mapping (same as T1)
+_MODEL_PROVIDER_MAP = {
+    **CUSTOM_NODE_MAP,
+    **OPENCOD_ZEN_MAP,
+    **_PROVIDER_ALIAS,
 }
 
 # Ticket 176: retired provider ids â frozen registry + free opencode
@@ -231,6 +241,48 @@ def group_keeps_by_tier(keeps: list[dict[str, Any]], *, strict_contributor_free:
     return grouped
 
 
+def _map_provider_for_model(p: str) -> str:
+    return _MODEL_PROVIDER_MAP.get(p, p)
+
+
+def build_model_entries(results_dir: Path = DEFAULT_RESULTS_DIR) -> list[dict[str, Any]]:
+    """Ticket 177: build one POST body per keep from the keep lists."""
+    keeps = _load_keep_records(results_dir)
+    entries: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for rec in keeps:
+        provider = str(rec.get("provider", ""))
+        model_id = str(rec.get("model_id", ""))
+        if not provider or not model_id:
+            continue
+        mapped = _map_provider_for_model(provider)
+        key = (mapped, model_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        entries.append({"provider": mapped, "modelId": model_id, "source": "manual"})
+    entries.sort(key=lambda e: (e["provider"], e["modelId"]))
+    return entries
+
+
+def build_gc_plan(results_dir: Path = DEFAULT_RESULTS_DIR) -> dict[str, set[str]]:
+    """Ticket 177: per-provider keep model_ids for guarded GC.
+
+    Only providers whose results file exists and parses are included.
+    Providers with missing or unparseable results files are skipped entirely.
+    """
+    keeps = _load_keep_records(results_dir)
+    plan: dict[str, set[str]] = {}
+    for rec in keeps:
+        provider = str(rec.get("provider", ""))
+        model_id = str(rec.get("model_id", ""))
+        if not provider or not model_id:
+            continue
+        mapped = _map_provider_for_model(provider)
+        plan.setdefault(mapped, set()).add(model_id)
+    return plan
+
+
 def build_combo_entries(results_dir: Path = DEFAULT_RESULTS_DIR, *, strict_contributor_free: bool = True) -> list[dict[str, Any]]:
     keeps = _load_keep_records(results_dir)
     grouped = group_keeps_by_tier(keeps, strict_contributor_free=strict_contributor_free)
@@ -241,7 +293,10 @@ def build_combo_entries(results_dir: Path = DEFAULT_RESULTS_DIR, *, strict_contr
             print(f"warning: tier {tier} has 0 targets, skipping combo", file=sys.stderr)
             continue
         recs_sorted = sorted(recs, key=lambda r: (str(r.get("provider", "")), str(r.get("model_id", ""))))
-        models = [{"provider": str(r["provider"]), "model": str(r["model_id"])} for r in recs_sorted]
+        models = [
+            {"provider": _map_provider_for_model(str(r["provider"])), "model": str(r["model_id"])}
+            for r in recs_sorted
+        ]
         combos.append({"name": tier, "models": models, "strategy": "reset-aware", "config": {}})
     combos.sort(key=lambda c: c.get("name", ""))
     return combos
@@ -259,11 +314,13 @@ def generate_payload(providers_path: Path = DEFAULT_PROVIDERS, results_dir: Path
             combos.sort(key=lambda c: c.get("name", ""))
     else:
         combos = [dict(c) for c in SCAFFOLD_COMBOS]
-    if import_rows or any(c.get("models") for c in combos):
+    model_entries = build_model_entries(results_dir) if results_dir.exists() else []
+    gc_plan = build_gc_plan(results_dir) if results_dir.exists() else {}
+    if import_rows or any(c.get("models") for c in combos) or model_entries:
         meta = {"version": 1, "scaffold": False}
     else:
         meta = {"version": 0, "scaffold": True}
-    return {"import": import_rows, "combos": combos, "meta": meta}
+    return {"import": import_rows, "models": model_entries, "gc": {k: sorted(v) for k, v in gc_plan.items()}, "combos": combos, "meta": meta}
 
 
 def write_payload_files(payload: dict[str, Any], output_dir: Path = DEFAULT_OUTPUT_DIR) -> dict[str, Path]:
@@ -538,11 +595,94 @@ def patch_provider_specific_data(base_url: str, import_rows: list[dict[str, Any]
     return {"patched": results, "count": len(results), "warnings": warnings}
 
 
+
+
+def apply_model_upserts(base_url: str, entries: list[dict[str, Any]], auth_headers: dict[str, str] | None = None, timeout: float = 15.0) -> dict[str, Any]:
+    """Ticket 177: POST each keep as a custom model row."""
+    httpx = _httpx_client()
+    headers = {"Content-Type": "application/json"}
+    if auth_headers:
+        headers.update(auth_headers)
+    base = base_url.rstrip("/")
+    results: list[dict[str, Any]] = []
+    for entry in entries:
+        url = base + PROVIDER_MODELS_PATH
+        try:
+            resp = httpx.post(url, json=entry, headers=headers, timeout=timeout)
+        except Exception as e:
+            results.append({"provider": entry.get("provider"), "modelId": entry.get("modelId"), "error": str(e)})
+            continue
+        if resp.status_code in (200, 201, 204):
+            try:
+                data = resp.json() if resp.content else {}
+            except Exception:
+                data = {"raw": resp.text[:200]}
+            results.append({"provider": entry.get("provider"), "modelId": entry.get("modelId"), "status": resp.status_code, "id": data.get("id")})
+        else:
+            results.append({"provider": entry.get("provider"), "modelId": entry.get("modelId"), "error": f"{resp.status_code}: {resp.text[:300]}"})
+    successes = [r for r in results if "status" in r]
+    return {"upserted": successes, "sent": len(entries), "results": results}
+
+
+def fetch_existing_models(base_url: str, provider: str, auth_headers: dict[str, str] | None = None, timeout: float = 15.0) -> list[dict[str, Any]]:
+    """Ticket 177: fetch existing custom models for a provider."""
+    httpx = _httpx_client()
+    headers: dict[str, str] = {}
+    if auth_headers:
+        headers.update(auth_headers)
+    url = base_url.rstrip("/") + PROVIDER_MODELS_PATH + "?provider=" + str(provider)
+    resp = httpx.get(url, headers=headers, timeout=timeout)
+    if resp.status_code != 200:
+        return []
+    data = resp.json()
+    if isinstance(data, dict):
+        return data.get("models", [])
+    if isinstance(data, list):
+        return data
+    return []
+
+
+def apply_gc(base_url: str, provider: str, keep_model_ids: set[str], auth_headers: dict[str, str] | None = None, timeout: float = 15.0) -> dict[str, Any]:
+    """Ticket 177: guarded GC - delete custom rows not in keep set."""
+    existing = fetch_existing_models(base_url, provider, auth_headers, timeout)
+    to_delete = [m for m in existing if m.get("modelId") not in keep_model_ids]
+    if not to_delete:
+        return {"provider": provider, "deleted": [], "count": 0, "skipped_empty": True}
+    httpx = _httpx_client()
+    headers = {"Content-Type": "application/json"}
+    if auth_headers:
+        headers.update(auth_headers)
+    base = base_url.rstrip("/")
+    results: list[dict[str, Any]] = []
+    for model in to_delete:
+        mid = model.get("modelId")
+        del_url = base + PROVIDER_MODELS_PATH + "?provider=" + str(provider) + "&modelId=" + str(mid)
+        try:
+            resp = httpx.delete(del_url, headers=headers, timeout=timeout)
+            if resp.status_code in (200, 201, 204):
+                results.append({"provider": provider, "modelId": mid, "status": resp.status_code})
+                continue
+        except Exception:
+            pass
+        model_id = model.get("id") or model.get("_id")
+        if model_id:
+            del_url2 = base + PROVIDER_MODELS_PATH + "/" + str(model_id)
+            try:
+                resp = httpx.delete(del_url2, headers=headers, timeout=timeout)
+                if resp.status_code in (200, 201, 204):
+                    results.append({"provider": provider, "modelId": mid, "status": resp.status_code})
+                    continue
+            except Exception:
+                pass
+        results.append({"provider": provider, "modelId": mid, "error": "delete_failed"})
+    return {"provider": provider, "deleted": results, "count": len(results)}
 def apply_payload(payload: dict[str, Any], base_url: str = DEFAULT_OMNIROUTE_URL, auth_headers: dict[str, str] | None = None, resolve_env: dict[str, str] | None = None) -> dict[str, Any]:
     if resolve_env is None:
         resolve_env = dict(os.environ)
     import_rows = payload.get("import", [])
     combos = payload.get("combos", [])
+    model_entries = payload.get("models", [])
+    gc_plan = payload.get("gc", {})
     resolved_import = resolve_import_secrets(import_rows, env=resolve_env)
     missing = [r["provider"] for r in resolved_import if str(r.get("apiKey", "")).startswith("env:")]
     if missing:
@@ -569,6 +709,24 @@ def apply_payload(payload: dict[str, Any], base_url: str = DEFAULT_OMNIROUTE_URL
         for w in patch_res["warnings"]:
             print(f"warning: {w}", file=sys.stderr)
     print(f"psd patched: {patch_res['count']}", file=sys.stderr)
+    # Ticket 177: model provisioning
+    if model_entries:
+        print(f"upserting {len(model_entries)} custom models to {base_url} ...", file=sys.stderr)
+        model_res = apply_model_upserts(base_url, model_entries, auth_headers=auth_headers)
+        summary["models"] = model_res
+        print(f"models ok: {model_res['sent']} sent, {len(model_res.get('upserted', []))} upserted", file=sys.stderr)
+    else:
+        summary["models"] = {"sent": 0, "skipped": True}
+    # Ticket 177: guarded GC
+    if gc_plan:
+        gc_results: list[dict[str, Any]] = []
+        for provider, keep_ids in gc_plan.items():
+            if not keep_ids:
+                continue
+            gc_res = apply_gc(base_url, provider, keep_ids, auth_headers=auth_headers)
+            gc_results.append(gc_res)
+            print(f"gc {provider}: {gc_res['count']} deleted", file=sys.stderr)
+        summary["gc"] = {"providers": gc_results, "total_deleted": sum(r["count"] for r in gc_results)}
     if combos:
         combos_nonempty = [c for c in combos if c.get("models")]
         if combos_nonempty:
@@ -582,9 +740,9 @@ def apply_payload(payload: dict[str, Any], base_url: str = DEFAULT_OMNIROUTE_URL
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="omniroute_export", description="OmniRoute export generator â emits import + combos")
+    p = argparse.ArgumentParser(prog="omniroute_export", description="OmniRoute export generator â tickets 166 + 167 + 168 + 176 + 177")
     p.add_argument("--dry-run", action="store_true", help="Write files without network (placeholder apiKey)")
-    p.add_argument("--apply", action="store_true", help="POST import + combos to OmniRoute gateway (requires --omniroute-url reachable)")
+    p.add_argument("--apply", action="store_true", help="POST import + models + combos to OmniRoute gateway (requires --omniroute-url reachable)")
     p.add_argument("--omniroute-url", type=str, default=DEFAULT_OMNIROUTE_URL, help="OmniRoute base URL (default http://localhost:20128)")
     p.add_argument("--api-key", type=str, default=None, help="Management API key / dashboard token (or env OMNIROUTE_API_KEY)")
     p.add_argument("--providers", type=Path, default=DEFAULT_PROVIDERS, help="providers.yaml path")
@@ -600,9 +758,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.apply:
         payload = generate_payload(Path(args.providers), Path(args.results_dir))
         write_payload_files(payload, Path(args.output_dir))
-        if not payload.get("import") and not any(c.get("models") for c in payload.get("combos", [])):
+        if not payload.get("import") and not payload.get("models") and not any(c.get("models") for c in payload.get("combos", [])):
             print("warning: payload empty (no providers/combos), nothing to apply", file=sys.stderr)
-        redacted = {"import": redact_rows(payload.get("import", [])), "combos": payload.get("combos", []), "meta": payload.get("meta", {})}
+        redacted = {"import": redact_rows(payload.get("import", [])), "models": payload.get("models", []), "combos": payload.get("combos", []), "gc": payload.get("gc", {}), "meta": payload.get("meta", {})}
         sys.stdout.write(json.dumps(redacted, indent=2, sort_keys=True) + "\n")
         auth_headers = get_auth_headers(args.api_key)
         try:

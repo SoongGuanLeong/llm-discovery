@@ -251,6 +251,152 @@ def test_retired_ids_never_recreated():
     assert "opencode" not in providers
 
 
+class _FakeResponse:
+    def __init__(self, payload, status_code=200):
+        self._payload = payload
+        self.status_code = status_code
+        self.content = b'{}'
+        self.text = '{}'
+
+    def json(self):
+        return self._payload
+
+
+# === Ticket 177: Model provisioning ===
+
+
+def test_build_model_entries_fixture_shape():
+    entries = mod.build_model_entries(Path("tests/fixtures/omniroute/results"))
+    providers = {e["provider"] for e in entries}
+    models = {e["modelId"] for e in entries}
+    assert "groq" in providers
+    assert "cerebras" in providers
+    assert "llama-3.3-70b-versatile" in models
+    assert "llama-4-maverick" in models
+    assert "contributor-model-free" in models
+    for e in entries:
+        assert set(e.keys()) >= {"provider", "modelId", "source"}
+        assert e["source"] == "manual"
+
+
+def test_build_model_entries_provider_mapping():
+    entries = mod.build_model_entries(Path("tests/fixtures/omniroute/results"))
+    mapped = {e["provider"] for e in entries}
+    assert "openai-compatible-nara" not in mapped
+    assert "openai-compatible-zai" not in mapped
+    assert "openai-compatible-agnes" not in mapped
+
+
+def test_build_model_entries_deduplicated():
+    entries = mod.build_model_entries(Path("tests/fixtures/omniroute/results"))
+    seen = set()
+    for e in entries:
+        key = (e["provider"], e["modelId"])
+        assert key not in seen
+        seen.add(key)
+
+
+def test_build_gc_plan_skips_missing_files(tmp_path: Path) -> None:
+    (tmp_path / "keep.yaml").write_text("provider: ghost\nkeep:\n  - model_id: live-model\n    decision: keep\n    tier: flash\n")
+    plan = mod.build_gc_plan(tmp_path)
+    assert "ghost" in plan
+    assert plan["ghost"] == {"live-model"}
+
+
+def test_build_gc_plan_skips_unparseable_files(tmp_path: Path) -> None:
+    (tmp_path / "broken.yaml").write_text("provider: broken\nkeep:\n  - model_id: live-model\n    decision: keep\n    tier: flash\n")
+    (tmp_path / "broken.yaml").write_text("{{invalid yaml")
+    plan = mod.build_gc_plan(tmp_path)
+    assert "broken" not in plan
+
+
+def test_build_gc_plan_dropped_keep_deleted() -> None:
+    plan = mod.build_gc_plan(Path("tests/fixtures/omniroute/results"))
+    assert "cerebras" in plan
+    assert "dropped-model" not in plan["cerebras"]
+    assert "llama-4-maverick" in plan["cerebras"]
+
+
+def test_combo_provider_mapping() -> None:
+    combos = mod.build_combo_entries(Path("tests/fixtures/omniroute/results"))
+    for combo in combos:
+        for m in combo.get("models", []):
+            assert m["provider"] not in {
+                "nararouter", "zai", "agnes", "opencode_zen",
+                "google", "nvidia_nim", "cloudflare", "kilo_ai",
+                "navy_ai", "ollama_cloud", "sea-lion",
+            }
+    flash = next(c for c in combos if c["name"] == "flash")
+    flash_providers = {m["provider"] for m in flash["models"]}
+    assert "cerebras" in flash_providers
+
+
+def test_dry_run_emits_complete_model_plan() -> None:
+    payload = mod.generate_payload(Path("tests/fixtures/omniroute/providers.yaml"), Path("tests/fixtures/omniroute/results"))
+    assert "models" in payload
+    assert "gc" in payload
+    assert len(payload["models"]) >= 3
+    model_providers = {e["provider"] for e in payload["models"]}
+    assert "cerebras" in model_providers
+    assert "groq" in model_providers
+    assert set(payload["gc"]["cerebras"]) == {"llama-4-maverick", "contributor_special-model"}
+    assert payload["gc"]["groq"] == sorted(["llama-3.3-70b-versatile", "contributor-model-free"])
+
+
+def test_double_apply_idempotency_models(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"post": 0, "get": 0, "delete": 0}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        calls["post"] += 1
+        return _FakeResponse({"id": "m1"}, status_code=200)
+
+    def fake_get(url, headers=None, timeout=None):
+        calls["get"] += 1
+        return _FakeResponse({"models": [
+            {"provider": "groq", "modelId": "llama-3.3-70b-versatile", "id": "m1"},
+            {"provider": "groq", "modelId": "contributor-model-free", "id": "m2"},
+        ]})
+
+    def fake_delete(url, headers=None, timeout=None):
+        calls["delete"] += 1
+        return _FakeResponse({}, status_code=204)
+
+    monkeypatch.setattr("httpx.post", fake_post)
+    monkeypatch.setattr("httpx.get", fake_get)
+    monkeypatch.setattr("httpx.delete", fake_delete)
+
+    entries = [
+        {"provider": "groq", "modelId": "llama-3.3-70b-versatile", "source": "manual"},
+        {"provider": "groq", "modelId": "contributor-model-free", "source": "manual"},
+    ]
+    gc_plan = {"groq": {"llama-3.3-70b-versatile", "contributor-model-free"}}
+
+    res1 = mod.apply_model_upserts("http://x", entries)
+    gc1 = mod.apply_gc("http://x", "groq", gc_plan["groq"])
+
+    res2 = mod.apply_model_upserts("http://x", entries)
+    gc2 = mod.apply_gc("http://x", "groq", gc_plan["groq"])
+
+    # second pass performs zero model mutations (gateway returns 200 for existing)
+    assert len(res1["upserted"]) == len(res2["upserted"]) == 2
+    assert gc1["count"] == 0
+    assert gc2["count"] == 0
+
+
+def test_redaction_includes_models() -> None:
+    payload = mod.generate_payload(Path("tests/fixtures/omniroute/providers.yaml"), Path("tests/fixtures/omniroute/results"))
+    redacted = {
+        "import": mod.redact_rows(payload.get("import", [])),
+        "models": payload.get("models", []),
+        "combos": payload.get("combos", []),
+        "gc": payload.get("gc", {}),
+        "meta": payload.get("meta", {}),
+    }
+    dumped = json.dumps(redacted)
+    assert "sk-" not in dumped
+
+
+
 def test_custom_node_row_shape():
     """Custom-node rows have correct shape (provider, name, apiKey, baseUrl)."""
     rows = mod.build_import_entries(Path("config/providers.yaml"))
@@ -321,3 +467,15 @@ def test_dry_run_emits_complete_plan():
     assert "zai" not in providers
     assert "agnes" not in providers
     assert "opencode" not in providers
+
+
+class _FakeResponse:
+    def __init__(self, payload, status_code=200):
+        self._payload = payload
+        self.status_code = status_code
+        self.content = b'{}'
+        self.text = '{}'
+
+    def json(self):
+        return self._payload
+

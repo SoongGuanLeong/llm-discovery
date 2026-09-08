@@ -19,6 +19,11 @@ from typing import Any
 
 import yaml
 
+try:
+    from .secrets import load_all_secrets
+except ImportError:  # pragma: no cover - optional dependency
+    load_all_secrets = None  # type: ignore
+
 DEFAULT_PROVIDERS = Path("config/providers.yaml")
 DEFAULT_RESULTS_DIR = Path("data/results")
 DEFAULT_OUTPUT_DIR = Path("data/derived")
@@ -937,6 +942,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if load_all_secrets is not None:
+        try:
+            load_all_secrets()
+        except Exception as e:
+            print(f"warning: failed to load infisical secrets: {e}", file=sys.stderr)
     if args.apply:
         payload = generate_payload(Path(args.providers), Path(args.results_dir))
         write_payload_files(payload, Path(args.output_dir))

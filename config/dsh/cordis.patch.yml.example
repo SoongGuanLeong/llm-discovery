@@ -1,0 +1,27 @@
+# DSH Bifrost Model Groups — cordis.patch.yml overlay
+# Copy to $DSH_HOME/profiles/web/cordis.patch.yml or apply via --patch
+# Provides bifrost Model Groups (flash/max/contributor_free) via shim :8081
+# and direct pins via Bifrost :8080. Requires BIFROST_API_KEY dummy in credentials.
+- id: llm-pi-ai
+  config:
+    providers:
+      bifrost-shim:
+        apiKeyEnv: BIFROST_API_KEY
+        api: openai-completions
+        baseUrl: http://localhost:8081/v1
+        models:
+          - id: flash
+            name: "Flash (tier alias → 46 models)"
+          - id: max
+            name: "Max (tier alias → 84 models)"
+          - id: contributor_free
+            name: "Contributor Free (2 models)"
+      bifrost-direct:
+        apiKeyEnv: BIFROST_API_KEY
+        api: openai-completions
+        baseUrl: http://localhost:8080/v1
+        models:
+          - id: deepseek-v4-flash
+            name: "deepseek-v4-flash (direct pin)"
+          - id: kimi-k3
+            name: "kimi-k3 (direct pin)"

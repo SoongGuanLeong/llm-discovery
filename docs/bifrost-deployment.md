@@ -152,6 +152,27 @@ The gateway exposes three logical model aliases via the shim (Phase 2):
 **Strict isolation:** No automatic cross-tier fallback. Empty tier returns
 503 Service Unavailable with Retry-After and tier_unavailable error.
 
+## DSH Wiring
+
+DSH (`llm-pi-ai` adapter) consumes the three Model Groups via the shim sidecar
+on `:8081` (alias) and direct pins via Bifrost on `:8080`. Full wiring,
+credentials, and verification are documented in [DSH Bifrost Wiring](dsh-bifrost-wiring.md).
+
+- Examples: `config/dsh/cordis.patch.yml.example` (profile overlay) and
+  `config/dsh/settings.yaml.example` (hot-reloaded settings)
+- Runner: `scripts/run_sidecar.sh` / `scripts/run-shim-sidecar.py` -> `:8081`
+- DSH needs only a dummy `BIFROST_API_KEY=sk-bifrost-dummy` (via `apiKeyEnv`);
+  real provider keys stay in `~/.config/bifrost/bifrost.env` (0600, `env.VAR` refs)
+
+Quick verify:
+
+```bash
+./scripts/run_sidecar.sh &   # :8081
+curl -s http://localhost:8081/health | jq .   # tiers 46/84/2
+dsh --profile web --dump-config | jq '.[] | select(.id=="llm-pi-ai")'
+# In browser: window.__DSH_BOOT__.plugins['llm-pi-ai']
+```
+
 ## File Layout
 
 ```

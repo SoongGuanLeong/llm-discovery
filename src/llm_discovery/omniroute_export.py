@@ -739,6 +739,184 @@ def apply_payload(payload: dict[str, Any], base_url: str = DEFAULT_OMNIROUTE_URL
     return summary
 
 
+def snapshot_gateway_state(
+    base_url: str,
+    auth_headers: dict[str, str] | None = None,
+    timeout: float = 15.0,
+) -> dict[str, Any]:
+    """Ticket 178: capture pre-apply gateway state for verification + revert."""
+    connections = _fetch_existing_connections(base_url, auth_headers, timeout)
+    combos = fetch_combos(base_url, auth_headers, timeout)
+    models: dict[str, list[dict[str, Any]]] = {}
+    for conn in connections:
+        provider = conn.get("provider")
+        if provider:
+            models[provider] = fetch_existing_models(base_url, provider, auth_headers, timeout)
+    return {"connections": connections, "combos": combos, "models": models}
+
+
+def revert_payload(
+    base_url: str,
+    summary: dict[str, Any],
+    snapshot_before: dict[str, Any],
+    auth_headers: dict[str, str] | None = None,
+    timeout: float = 15.0,
+) -> dict[str, Any]:
+    """Ticket 178: undo every mutation made by apply_payload using a pre-apply snapshot."""
+    httpx = _httpx_client()
+    headers = {"Content-Type": "application/json"}
+    if auth_headers:
+        headers.update(auth_headers)
+    base = base_url.rstrip("/")
+    revert_summary: dict[str, Any] = {"reverted": [], "errors": []}
+
+    # 1. Reactivate retired connections (PUT isActive=true)
+    for retired in summary.get("retire", {}).get("retired", []):
+        cid = retired.get("id")
+        provider = retired.get("provider")
+        if not cid or retired.get("method") != "PUT":
+            continue
+        put_url = f"{base}/api/providers/{cid}"
+        try:
+            resp = httpx.put(put_url, json={"isActive": True}, headers=headers, timeout=timeout)
+            if resp.status_code in (200, 201, 204):
+                revert_summary["reverted"].append({"id": cid, "provider": provider, "action": "reactivate"})
+        except Exception as e:
+            revert_summary["errors"].append({"id": cid, "error": str(e)})
+
+    # 2. Delete newly created connections (import created them)
+    for result in summary.get("import", {}).get("response", {}).get("results", []):
+        cid = result.get("id")
+        provider = result.get("provider")
+        if cid and "status" in result:
+            existed = any(c.get("id") == cid for c in snapshot_before.get("connections", []))
+            if not existed:
+                del_url = f"{base}/api/providers/{cid}"
+                try:
+                    resp = httpx.delete(del_url, headers=headers, timeout=timeout)
+                    if resp.status_code in (200, 201, 204):
+                        revert_summary["reverted"].append({"id": cid, "provider": provider, "action": "delete_connection"})
+                except Exception as e:
+                    revert_summary["errors"].append({"id": cid, "error": str(e)})
+
+    # 3. Restore providerSpecificData patches by comparing snapshots
+    snap_conns = {c.get("id"): c for c in snapshot_before.get("connections", [])}
+    current_conns = _fetch_existing_connections(base_url, auth_headers, timeout)
+    for conn in current_conns:
+        cid = conn.get("id")
+        old = snap_conns.get(cid)
+        if old:
+            old_psd = old.get("providerSpecificData", {})
+            curr_psd = conn.get("providerSpecificData", {})
+            if old_psd != curr_psd:
+                put_url = f"{base}/api/providers/{cid}"
+                try:
+                    resp = httpx.put(put_url, json={"providerSpecificData": old_psd}, headers=headers, timeout=timeout)
+                    if resp.status_code in (200, 201, 204):
+                        revert_summary["reverted"].append({"id": cid, "provider": conn.get("provider"), "action": "restore_psd"})
+                except Exception as e:
+                    revert_summary["errors"].append({"id": cid, "error": str(e)})
+
+    # 4. Delete newly created models + restore GC'd models
+    snap_models = snapshot_before.get("models", {})
+    curr_models: dict[str, list[dict[str, Any]]] = {}
+    for conn in _fetch_existing_connections(base_url, auth_headers, timeout):
+        provider = conn.get("provider")
+        if provider:
+            curr_models[provider] = fetch_existing_models(base_url, provider, auth_headers, timeout)
+
+    for provider, curr_list in curr_models.items():
+        snap_list = snap_models.get(provider, [])
+        snap_ids = {m.get("modelId"): m for m in snap_list}
+        curr_ids = {m.get("modelId"): m for m in curr_list}
+
+        for mid, model in curr_ids.items():
+            if mid not in snap_ids:
+                model_id = model.get("id") or model.get("_id")
+                if model_id:
+                    del_url = f"{base}/api/provider-models/{model_id}"
+                    try:
+                        resp = httpx.delete(del_url, headers=headers, timeout=timeout)
+                        if resp.status_code in (200, 201, 204):
+                            revert_summary["reverted"].append({"provider": provider, "modelId": mid, "action": "delete_model"})
+                    except Exception as e:
+                        revert_summary["errors"].append({"provider": provider, "modelId": mid, "error": str(e)})
+
+        for mid, model in snap_ids.items():
+            if mid not in curr_ids:
+                post_url = f"{base}/api/provider-models"
+                try:
+                    resp = httpx.post(post_url, json=model, headers=headers, timeout=timeout)
+                    if resp.status_code in (200, 201, 204):
+                        revert_summary["reverted"].append({"provider": provider, "modelId": mid, "action": "restore_model"})
+                except Exception as e:
+                    revert_summary["errors"].append({"provider": provider, "modelId": mid, "error": str(e)})
+
+    # 5. Delete newly created combos
+    snap_combo_names = {c.get("name") for c in snapshot_before.get("combos", [])}
+    try:
+        current_combos = fetch_combos(base_url, auth_headers, timeout)
+        for combo in current_combos:
+            name = combo.get("name")
+            if name and name not in snap_combo_names:
+                cid = combo.get("id") or combo.get("_id")
+                if cid:
+                    del_url = f"{base}/api/combos/{cid}"
+                    try:
+                        resp = httpx.delete(del_url, headers=headers, timeout=timeout)
+                        if resp.status_code in (200, 201, 204):
+                            revert_summary["reverted"].append({"name": name, "action": "delete_combo"})
+                    except Exception as e:
+                        revert_summary["errors"].append({"name": name, "error": str(e)})
+    except Exception as e:
+        revert_summary["errors"].append({"scope": "combos", "error": str(e)})
+
+    revert_summary["total_reverted"] = len(revert_summary["reverted"])
+    revert_summary["total_errors"] = len(revert_summary["errors"])
+    return revert_summary
+
+
+def verify_gateway_unchanged(
+    base_url: str,
+    snapshot: dict[str, Any],
+    auth_headers: dict[str, str] | None = None,
+    timeout: float = 15.0,
+) -> dict[str, Any]:
+    """Ticket 178: verify gateway state matches a pre-apply snapshot."""
+    current = snapshot_gateway_state(base_url, auth_headers, timeout)
+
+    snap_conns = sorted(snapshot.get("connections", []), key=lambda c: c.get("id", ""))
+    curr_conns = sorted(current.get("connections", []), key=lambda c: c.get("id", ""))
+    connections_match = snap_conns == curr_conns
+
+    snap_combos = sorted(snapshot.get("combos", []), key=lambda c: c.get("name", ""))
+    curr_combos = sorted(current.get("combos", []), key=lambda c: c.get("name", ""))
+    combos_match = snap_combos == curr_combos
+
+    models_match = True
+    model_diff: dict[str, Any] = {}
+    all_model_providers = set(snapshot.get("models", {}).keys()) | set(current.get("models", {}).keys())
+    for provider in all_model_providers:
+        snap_list = sorted(snapshot.get("models", {}).get(provider, []), key=lambda m: m.get("modelId", ""))
+        curr_list = sorted(current.get("models", {}).get(provider, []), key=lambda m: m.get("modelId", ""))
+        if snap_list != curr_list:
+            models_match = False
+            model_diff[provider] = {"before": snap_list, "after": curr_list}
+
+    unchanged = connections_match and combos_match and models_match
+    return {
+        "unchanged": unchanged,
+        "connections_match": connections_match,
+        "combos_match": combos_match,
+        "models_match": models_match,
+        "diff": {
+            "connections": {"before": snap_conns, "after": curr_conns} if not connections_match else None,
+            "combos": {"before": snap_combos, "after": curr_combos} if not combos_match else None,
+            "models": model_diff if not models_match else None,
+        },
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="omniroute_export", description="OmniRoute export generator â tickets 166 + 167 + 168 + 176 + 177")
     p.add_argument("--dry-run", action="store_true", help="Write files without network (placeholder apiKey)")

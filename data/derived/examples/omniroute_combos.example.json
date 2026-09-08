@@ -3,8 +3,8 @@
     "config": {},
     "models": [
       {
-        "model": "contributor_special-model",
-        "provider": "cerebras"
+        "model": "auto:free",
+        "provider": "bazaarlink"
       },
       {
         "model": "contributor-model-free",
@@ -18,8 +18,8 @@
     "config": {},
     "models": [
       {
-        "model": "llama-4-maverick",
-        "provider": "cerebras"
+        "model": "llama-3.3-70b-versatile",
+        "provider": "groq"
       }
     ],
     "name": "flash",

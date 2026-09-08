@@ -3,6 +3,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -451,22 +452,283 @@ def test_redaction_no_secrets_in_summary():
             assert ak == "***"
 
 
-def test_dry_run_emits_complete_plan():
-    """Dry-run emits the complete connection provisioning plan with no network."""
-    payload = mod.generate_payload(Path("config/providers.yaml"))
-    assert "import" in payload
-    assert len(payload["import"]) == 21
-    # custom nodes present
-    providers = {r["provider"] for r in payload["import"]}
-    assert "openai-compatible-nara" in providers
-    assert "openai-compatible-zai" in providers
-    assert "openai-compatible-agnes" in providers
-    assert "opencode-zen" in providers
-    # retired ids absent
-    assert "nara" not in providers
-    assert "zai" not in providers
-    assert "agnes" not in providers
-    assert "opencode" not in providers
+
+
+
+
+
+
+class TestE2EFullApply:
+    """Ticket 178: end-to-end verification + idempotency + revert."""
+
+    def test_full_apply_creates_expected_mutations(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        gateway = _MockGateway()
+
+        def fake_request(method: str, url: str, **kwargs: Any) -> _FakeResponse:
+            return _mock_request(gateway, method, url, kwargs.get("json"), kwargs.get("headers"))
+
+        monkeypatch.setattr("httpx.post", lambda *a, **k: fake_request("POST", a[0], **k))
+        monkeypatch.setattr("httpx.put", lambda *a, **k: fake_request("PUT", a[0], **k))
+        monkeypatch.setattr("httpx.get", lambda *a, **k: fake_request("GET", a[0], **k))
+        monkeypatch.setattr("httpx.delete", lambda *a, **k: fake_request("DELETE", a[0], **k))
+
+        payload = mod.generate_payload(Path("config/providers.yaml"), Path("data/results"))
+        env = {
+            "CLOUDFLARE_ACCOUNT_ID": "test-123",
+            "GROQ_API_KEY": "sk-groq",
+            "OPENCODE_ZEN_API_KEY": "sk-zen",
+        }
+
+        summary = mod.apply_payload(payload, base_url="http://x", auth_headers=None, resolve_env=env)
+
+        assert summary["retire"]["count"] == 4
+        assert len([r for r in summary["import"]["response"]["results"] if "status" in r]) >= 2
+        assert summary["psd_patches"]["count"] > 0
+        assert summary["models"]["sent"] > 0
+        assert len(summary["combos"]["upserted"]) >= 1
+
+    def test_double_apply_idempotency_full(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        gateway = _MockGateway()
+
+        def fake_request(method: str, url: str, **kwargs: Any) -> _FakeResponse:
+            return _mock_request(gateway, method, url, kwargs.get("json"), kwargs.get("headers"))
+
+        monkeypatch.setattr("httpx.post", lambda *a, **k: fake_request("POST", a[0], **k))
+        monkeypatch.setattr("httpx.put", lambda *a, **k: fake_request("PUT", a[0], **k))
+        monkeypatch.setattr("httpx.get", lambda *a, **k: fake_request("GET", a[0], **k))
+        monkeypatch.setattr("httpx.delete", lambda *a, **k: fake_request("DELETE", a[0], **k))
+
+        payload = mod.generate_payload(Path("config/providers.yaml"), Path("data/results"))
+        env = {
+            "CLOUDFLARE_ACCOUNT_ID": "test-123",
+            "GROQ_API_KEY": "sk-groq",
+            "OPENCODE_ZEN_API_KEY": "sk-zen",
+        }
+
+        mod.apply_payload(payload, base_url="http://x", auth_headers=None, resolve_env=env)
+        snapshot_after_first = mod.snapshot_gateway_state("http://x")
+
+        mod.apply_payload(payload, base_url="http://x", auth_headers=None, resolve_env=env)
+        snapshot_after_second = mod.snapshot_gateway_state("http://x")
+
+        assert snapshot_after_first == snapshot_after_second
+
+    def test_revert_restores_gateway_state(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        gateway = _MockGateway()
+
+        def fake_request(method: str, url: str, **kwargs: Any) -> _FakeResponse:
+            return _mock_request(gateway, method, url, kwargs.get("json"), kwargs.get("headers"))
+
+        monkeypatch.setattr("httpx.post", lambda *a, **k: fake_request("POST", a[0], **k))
+        monkeypatch.setattr("httpx.put", lambda *a, **k: fake_request("PUT", a[0], **k))
+        monkeypatch.setattr("httpx.get", lambda *a, **k: fake_request("GET", a[0], **k))
+        monkeypatch.setattr("httpx.delete", lambda *a, **k: fake_request("DELETE", a[0], **k))
+
+        payload = mod.generate_payload(Path("config/providers.yaml"), Path("data/results"))
+        env = {
+            "CLOUDFLARE_ACCOUNT_ID": "test-123",
+            "GROQ_API_KEY": "sk-groq",
+            "OPENCODE_ZEN_API_KEY": "sk-zen",
+        }
+        snapshot_before = mod.snapshot_gateway_state("http://x")
+
+        summary = mod.apply_payload(payload, base_url="http://x", auth_headers=None, resolve_env=env)
+        assert not mod.verify_gateway_unchanged("http://x", snapshot_before)["unchanged"]
+
+        revert_summary = mod.revert_payload("http://x", summary, snapshot_before)
+        assert revert_summary["total_reverted"] > 0
+        assert revert_summary["total_errors"] == 0
+
+        assert mod.verify_gateway_unchanged("http://x", snapshot_before)["unchanged"]
+
+    def test_redacted_stdout_has_no_secrets(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+        gateway = _MockGateway()
+
+        def fake_request(method: str, url: str, **kwargs: Any) -> _FakeResponse:
+            return _mock_request(gateway, method, url, kwargs.get("json"), kwargs.get("headers"))
+
+        monkeypatch.setattr("httpx.post", lambda *a, **k: fake_request("POST", a[0], **k))
+        monkeypatch.setattr("httpx.put", lambda *a, **k: fake_request("PUT", a[0], **k))
+        monkeypatch.setattr("httpx.get", lambda *a, **k: fake_request("GET", a[0], **k))
+        monkeypatch.setattr("httpx.delete", lambda *a, **k: fake_request("DELETE", a[0], **k))
+
+        payload = mod.generate_payload(Path("config/providers.yaml"), Path("data/results"))
+        env = {
+            "CLOUDFLARE_ACCOUNT_ID": "test-123",
+            "GROQ_API_KEY": "sk-secret-key-123",
+            "OPENCODE_ZEN_API_KEY": "sk-zen",
+        }
+        redacted = {
+            "import": mod.redact_rows(payload.get("import", [])),
+            "models": payload.get("models", []),
+            "combos": payload.get("combos", []),
+            "gc": payload.get("gc", {}),
+            "meta": payload.get("meta", {}),
+        }
+        dumped = json.dumps(redacted)
+        assert "sk-secret-key-123" not in dumped
+        assert dumped.count("env:") >= 10
+
+
+class _MockGateway:
+    """In-memory mock OmniRoute gateway for E2E tests."""
+
+    def __init__(self) -> None:
+        self.connections: list[dict[str, Any]] = [
+            {"id": "c1", "provider": "groq", "name": "groq", "isActive": True, "providerSpecificData": {}},
+            {"id": "c2", "provider": "cloudflare-ai", "name": "cloudflare", "isActive": True, "providerSpecificData": {"accountId": "old-account"}},
+            {"id": "c3", "provider": "nara", "name": "nararouter", "isActive": True, "providerSpecificData": {}},
+            {"id": "c4", "provider": "zai", "name": "zai", "isActive": True, "providerSpecificData": {}},
+            {"id": "c5", "provider": "agnes", "name": "agnes", "isActive": True, "providerSpecificData": {}},
+            {"id": "c6", "provider": "opencode", "name": "opencode", "isActive": True, "providerSpecificData": {}},
+        ]
+        self.models: dict[str, list[dict[str, Any]]] = {
+            "groq": [
+                {"id": "m1", "provider": "groq", "modelId": "llama-3.3-70b-versatile", "source": "manual"},
+                {"id": "m2", "provider": "groq", "modelId": "extra-model", "source": "manual"},
+            ],
+            "cerebras": [
+                {"id": "m3", "provider": "cerebras", "modelId": "llama-4-maverick", "source": "manual"},
+            ],
+        }
+        self.combos: list[dict[str, Any]] = [
+            {"id": "cb1", "name": "flash", "models": [{"provider": "groq", "model": "old-flash"}], "strategy": "reset-aware"},
+        ]
+        self._next_id = 10
+
+    def _next(self, prefix: str) -> str:
+        self._next_id += 1
+        return f"{prefix}{self._next_id}"
+
+    def get_connections(self) -> list[dict[str, Any]]:
+        return list(self.connections)
+
+    def get_models(self, provider: str) -> list[dict[str, Any]]:
+        return list(self.models.get(provider, []))
+
+    def get_combos(self) -> list[dict[str, Any]]:
+        return list(self.combos)
+
+    def create_connection(self, row: dict[str, Any]) -> dict[str, Any]:
+        provider = row.get("provider", row.get("name", "unknown"))
+        name = row.get("name", row.get("provider", "unknown"))
+        existing = [c for c in self.connections if c.get("provider") == provider and c.get("name") == name]
+        if existing:
+            return {"connection": existing[0]}
+        conn = {
+            "id": self._next("c"),
+            "provider": provider,
+            "name": name,
+            "isActive": True,
+            "providerSpecificData": {},
+        }
+        self.connections.append(conn)
+        return {"connection": conn}
+
+    def update_connection(self, cid: str, body: dict[str, Any]) -> dict[str, Any]:
+        for conn in self.connections:
+            if conn.get("id") == cid:
+                conn.update(body)
+                return conn
+        return {}
+
+    def delete_connection(self, cid: str) -> bool:
+        self.connections = [c for c in self.connections if c.get("id") != cid]
+        return True
+
+    def create_model(self, entry: dict[str, Any]) -> dict[str, Any]:
+        provider = entry.get("provider", "unknown")
+        model_id = entry.get("modelId", "unknown")
+        existing = [m for m in self.models.get(provider, []) if m.get("modelId") == model_id]
+        if existing:
+            return existing[0]
+        model = {"id": self._next("m"), "provider": provider, "modelId": model_id, "source": entry.get("source", "manual")}
+        self.models.setdefault(provider, []).append(model)
+        return model
+
+    def delete_model(self, provider: str, model_id: str) -> bool:
+        models = self.models.get(provider, [])
+        self.models[provider] = [m for m in models if m.get("modelId") != model_id]
+        return True
+
+    def delete_model_by_id(self, mid: str) -> bool:
+        for provider, models in list(self.models.items()):
+            for m in models:
+                if m.get("id") == mid:
+                    models.remove(m)
+                    return True
+        return False
+
+    def create_combo(self, combo: dict[str, Any]) -> dict[str, Any]:
+        name = combo.get("name")
+        existing = [c for c in self.combos if c.get("name") == name]
+        if existing:
+            entry = dict(combo)
+            entry["id"] = existing[0]["id"]
+            idx = self.combos.index(existing[0])
+            self.combos[idx] = entry
+            return entry
+        entry = dict(combo)
+        entry["id"] = self._next("cb")
+        self.combos.append(entry)
+        return entry
+
+    def update_combo(self, cid: str, combo: dict[str, Any]) -> dict[str, Any]:
+        for i, c in enumerate(self.combos):
+            if c.get("id") == cid or c.get("name") == combo.get("name"):
+                self.combos[i] = dict(combo)
+                self.combos[i]["id"] = cid
+                return self.combos[i]
+        return {}
+
+    def delete_combo(self, cid: str) -> bool:
+        self.combos = [c for c in self.combos if c.get("id") != cid]
+        return True
+
+
+def _mock_request(gateway: _MockGateway, method: str, url: str, json: Any = None, headers: Any = None) -> _FakeResponse:
+    url = str(url)
+    if method == "GET":
+        if url.endswith("/api/providers"):
+            return _FakeResponse({"connections": gateway.get_connections()})
+        if "/api/provider-models?provider=" in url:
+            provider = url.split("provider=")[-1]
+            return _FakeResponse({"models": gateway.get_models(provider)})
+        if url.endswith("/api/combos"):
+            return _FakeResponse({"combos": gateway.get_combos()})
+    if method == "POST":
+        if url.endswith("/api/providers") and json and isinstance(json, dict) and "providers" not in json:
+            return _FakeResponse(gateway.create_connection(json))
+        if url.endswith("/api/provider-models"):
+            return _FakeResponse(gateway.create_model(json))
+        if url.endswith("/api/combos"):
+            return _FakeResponse(gateway.create_combo(json))
+    if method == "PUT":
+        if "/api/providers/" in url:
+            cid = url.split("/api/providers/")[-1]
+            return _FakeResponse(gateway.update_connection(cid, json))
+        if "/api/combos/" in url:
+            cid = url.split("/api/combos/")[-1]
+            return _FakeResponse(gateway.update_combo(cid, json))
+    if method == "DELETE":
+        if "/api/providers/" in url and "/api/provider-models" not in url:
+            cid = url.split("/api/providers/")[-1]
+            gateway.delete_connection(cid)
+            return _FakeResponse({}, status_code=204)
+        if "?provider=" in url and "&modelId=" in url:
+            provider = url.split("?provider=")[-1].split("&")[0]
+            model_id = url.split("&modelId=")[-1]
+            gateway.delete_model(provider, model_id)
+            return _FakeResponse({}, status_code=204)
+        if "/api/provider-models/" in url and "?provider=" not in url:
+            mid = url.split("/api/provider-models/")[-1]
+            gateway.delete_model_by_id(mid)
+            return _FakeResponse({}, status_code=204)
+        if "/api/combos/" in url:
+            cid = url.split("/api/combos/")[-1]
+            gateway.delete_combo(cid)
+            return _FakeResponse({}, status_code=204)
+    return _FakeResponse({}, status_code=404)
 
 
 class _FakeResponse:

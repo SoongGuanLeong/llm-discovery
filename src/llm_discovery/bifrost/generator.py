@@ -20,6 +20,10 @@ CLOUDFLARE_PROVIDER = "cloudflare"
 CLOUDFLARE_API_KEY_VAR = "CLOUDFLARE_API_KEY"
 CLOUDFLARE_ACCOUNT_ID_VAR = "CLOUDFLARE_ACCOUNT_ID"
 
+# Bifrost native (standard) providers - must not be created as custom openai
+# Bifrost rejects custom creation with "cannot be created on standard providers"
+BIFROST_STANDARD_PROVIDERS: set[str] = {"cerebras", "groq", "mistral", "openrouter"}
+
 
 def _is_contributor_model(model_id: str) -> bool:
     return "contributor" in model_id.lower()
@@ -200,7 +204,7 @@ def generate_bifrost_config(
                 deduped.append(m)
                 seen.add(m)
 
-        providers_block[prov_name] = {
+        provider_entry: dict[str, Any] = {
             "keys": [
                 {
                     "name": f"{prov_name}-key-1",
@@ -215,10 +219,18 @@ def generate_bifrost_config(
                 "retry_backoff_initial": 500,
                 "retry_backoff_max": 5000,
             },
-            "custom_provider_config": {
-                "base_provider_type": "openai"
-            },
         }
+        # Standard Bifrost providers use their native type, not generic openai
+        # Bifrost rejects custom openai creation for these names
+        if prov_name in BIFROST_STANDARD_PROVIDERS:
+            provider_entry["custom_provider_config"] = {
+                "base_provider_type": prov_name
+            }
+        else:
+            provider_entry["custom_provider_config"] = {
+                "base_provider_type": "openai"
+            }
+        providers_block[prov_name] = provider_entry
 
     # Handle keeps for providers not in catalog (unknown provider) -> cannot emit config; treat as skipped
     for prov in list(provider_to_models.keys()):

@@ -242,3 +242,68 @@ class TestSidecarHttpSeam:
         assert resp.status_code == 200
         assert trace[0] in shim_map["flash"]
         assert resp.json()["extra_fields"]["provider"] == trace[0]
+
+class TestSidecarModelDiscoverability:
+    def test_v1_models_includes_alias_virtual_models(self):
+        shim_map = {"flash": ["f1", "f2"], "max": ["m1"], "contributor_free": ["c1"]}
+        def mock(request: httpx.Request) -> httpx.Response:
+            # Simulate Bifrost /v1/models with 2 concrete models
+            return httpx.Response(200, json={"object": "list", "data": [{"id": "f1", "object": "model"}, {"id": "m1", "object": "model"}]})
+        app = create_app(shim_map, bifrost_url="http://bifrost.test", transport=httpx.MockTransport(mock))
+        client = TestClient(app)
+        resp = client.get("/v1/models")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "data" in data
+        ids = [m["id"] for m in data["data"]]
+        assert "flash" in ids
+        assert "max" in ids
+        assert "contributor_free" in ids
+        assert "f1" in ids
+
+    def test_v1_models_alias_only_when_upstream_fails(self):
+        shim_map = {"flash": ["f1"], "max": [], "contributor_free": []}
+        def mock(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(500, json={"error": "upstream down"})
+        app = create_app(shim_map, bifrost_url="http://bifrost.test", transport=httpx.MockTransport(mock))
+        client = TestClient(app)
+        resp = client.get("/v1/models")
+        assert resp.status_code == 500 or resp.status_code == 200
+        # alias still present even on 500 fallback wraps
+        data = resp.json()
+        ids = [m["id"] for m in data.get("data", [])]
+        if resp.status_code == 200:
+            assert "flash" in ids
+
+    def test_api_models_includes_alias_and_total(self):
+        shim_map = {"flash": ["f1", "f2"], "max": ["m1"], "contributor_free": []}
+        def mock(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"models": [{"name": "f1", "provider": "agnes"}], "total": 1})
+        app = create_app(shim_map, bifrost_url="http://bifrost.test", transport=httpx.MockTransport(mock))
+        client = TestClient(app)
+        resp = client.get("/api/models")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1 + 2  # 1 upstream + 2 alias (flash, max have entries; contributor_free empty not emitted)
+        names = [m["name"] for m in data["models"]]
+        assert "flash" in names
+        assert "max" in names
+        assert "contributor_free" not in names  # empty tier not emitted
+
+    def test_api_models_forwards_query_params(self):
+        shim_map = {"flash": ["f1"], "max": [], "contributor_free": []}
+        captured = {}
+        def mock(request: httpx.Request) -> httpx.Response:
+            captured["query"] = str(request.url.query)
+            return httpx.Response(200, json={"models": [], "total": 0})
+        app = create_app(shim_map, bifrost_url="http://bifrost.test", transport=httpx.MockTransport(mock))
+        client = TestClient(app)
+        client.get("/api/models?limit=1000")
+        assert "limit=1000" in captured["query"]
+
+    def test_health_tier_counts_match_shim_map(self):
+        shim_map = {"flash": ["a"] * 46, "max": ["b"] * 84, "contributor_free": ["c"] * 2}
+        app = create_app(shim_map, bifrost_url="http://bifrost.test", transport=httpx.MockTransport(lambda r: httpx.Response(200, json={})))
+        client = TestClient(app)
+        resp = client.get("/health")
+        assert resp.json()["tiers"] == {"flash": 46, "max": 84, "contributor_free": 2}

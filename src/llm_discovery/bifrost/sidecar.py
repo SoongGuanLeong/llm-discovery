@@ -70,6 +70,93 @@ def create_app(
     async def health():
         return {"status": "ok", "tiers": {k: len(v) for k, v in normalized.items()}}
 
+    def _alias_virtual_models_openai() -> list[dict[str, Any]]:
+        """Virtual Model Group entries for /v1/models discoverability."""
+        return [
+            {"id": tier, "object": "model", "created": 0, "owned_by": "bifrost-shim"}
+            for tier in sorted(ALIAS_TIERS)
+            if normalized.get(tier)
+        ]
+
+    def _alias_virtual_models_bifrost() -> list[dict[str, str]]:
+        return [{"name": tier, "provider": "bifrost-shim"} for tier in sorted(ALIAS_TIERS) if normalized.get(tier)]
+
+    @app.get("/v1/models")
+    async def list_models(request: Request):  # noqa: ARG001
+        alias_models = _alias_virtual_models_openai()
+        bifrost_path = f"{bifrost_url.rstrip('/')}/v1/models"
+        query = str(request.url.query)
+        if query:
+            bifrost_path = f"{bifrost_path}?{query}"
+        is_async_transport = transport is not None and hasattr(transport, "handle_async_request")
+        try:
+            if is_async_transport or transport is None:
+                async with httpx.AsyncClient(transport=transport) if transport else httpx.AsyncClient() as client:  # type: ignore
+                    upstream = await client.get(bifrost_path, headers=_forward_headers(request.headers))
+                    try:
+                        data = upstream.json()
+                    except Exception:
+                        return JSONResponse(content={"object": "list", "data": alias_models})
+                    # OpenAI list format: {object: list, data: [...]}
+                    if isinstance(data, dict) and "data" in data and isinstance(data["data"], list):
+                        merged = list(data["data"]) + alias_models
+                        data["data"] = merged
+                        return JSONResponse(content=data, status_code=upstream.status_code)
+                    # Fallback: wrap whatever we got
+                    return JSONResponse(content={"object": "list", "data": alias_models}, status_code=upstream.status_code)
+            else:
+                with httpx.Client(transport=transport) as client:  # type: ignore
+                    upstream = client.get(bifrost_path, headers=_forward_headers(request.headers))
+                    try:
+                        data = upstream.json()
+                    except Exception:
+                        return JSONResponse(content={"object": "list", "data": alias_models})
+                    if isinstance(data, dict) and "data" in data and isinstance(data["data"], list):
+                        merged = list(data["data"]) + alias_models
+                        data["data"] = merged
+                        return JSONResponse(content=data, status_code=upstream.status_code)
+                    return JSONResponse(content={"object": "list", "data": alias_models}, status_code=upstream.status_code)
+        except Exception:
+            return JSONResponse(content={"object": "list", "data": alias_models})
+
+    @app.get("/api/models")
+    async def api_models(request: Request):  # noqa: ARG001
+        alias_entries = _alias_virtual_models_bifrost()
+        bifrost_path = f"{bifrost_url.rstrip('/')}/api/models"
+        query = str(request.url.query)
+        if query:
+            bifrost_path = f"{bifrost_path}?{query}"
+        is_async_transport = transport is not None and hasattr(transport, "handle_async_request")
+        try:
+            if is_async_transport or transport is None:
+                async with httpx.AsyncClient(transport=transport) if transport else httpx.AsyncClient() as client:  # type: ignore
+                    upstream = await client.get(bifrost_path, headers=_forward_headers(request.headers))
+                    try:
+                        data = upstream.json()
+                    except Exception:
+                        return JSONResponse(content={"models": alias_entries, "total": len(alias_entries)})
+                    if isinstance(data, dict) and "models" in data and isinstance(data["models"], list):
+                        merged_models = list(data["models"]) + alias_entries
+                        data["models"] = merged_models
+                        data["total"] = len(merged_models)
+                        return JSONResponse(content=data, status_code=upstream.status_code)
+                    return JSONResponse(content={"models": alias_entries, "total": len(alias_entries)}, status_code=upstream.status_code)
+            else:
+                with httpx.Client(transport=transport) as client:  # type: ignore
+                    upstream = client.get(bifrost_path, headers=_forward_headers(request.headers))
+                    try:
+                        data = upstream.json()
+                    except Exception:
+                        return JSONResponse(content={"models": alias_entries, "total": len(alias_entries)})
+                    if isinstance(data, dict) and "models" in data and isinstance(data["models"], list):
+                        merged_models = list(data["models"]) + alias_entries
+                        data["models"] = merged_models
+                        data["total"] = len(merged_models)
+                        return JSONResponse(content=data, status_code=upstream.status_code)
+                    return JSONResponse(content={"models": alias_entries, "total": len(alias_entries)}, status_code=upstream.status_code)
+        except Exception:
+            return JSONResponse(content={"models": alias_entries, "total": len(alias_entries)})
+
     @app.post("/v1/chat/completions")
     async def chat_completions(request: Request):
         try:

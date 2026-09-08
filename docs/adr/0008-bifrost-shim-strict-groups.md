@@ -1,7 +1,7 @@
 # 0008 Bifrost + Shim Strict Groups (flash/max/contributor_free)
 
 Date: 2026-09-08
-Status: Proposed (from #151)
+Status: Accepted — Issue #155 (Bifrost UI discoverability)
 
 ## Context
 
@@ -35,3 +35,10 @@ Policy ranking (cost/quality/latency), dynamic per-request routing, observabilit
 ## Verification
 
 curl each alias via :8081 + DSH chat each group streams completion, no fallback. Bifrost /api/models =132, 19 providers.
+
+## Discoverability (added in #155)
+
+- Bifrost gateway UI at `http://localhost:8080` shows 132 concrete models across 19 providers; groups are the tier-derived pools (46/84/2) materialized as those models.
+- Shim sidecar on `:8081` augments `GET /v1/models` (OpenAI) and `GET /api/models` (Bifrost) with virtual entries `flash`/`max`/`contributor_free` (owned_by `bifrost-shim`) so model pickers discover groups via standard API.
+- `GET /health` on `:8081` reports `{tiers: {flash:46, max:84, contributor_free:2}}` matching `shim_map.json`.
+- Browser smoke: open `http://localhost:8080` (gateway UI) and `http://localhost:8081/health` + `/v1/models` show groups; no cross-group fallback verified via 503 `tier_unavailable` + curl per tier.

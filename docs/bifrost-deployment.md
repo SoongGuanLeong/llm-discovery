@@ -146,8 +146,8 @@ would 401 at inference time.
 The gateway exposes three logical model aliases via the shim (Phase 2):
 
 - model: "flash" - routes to any flash-tier keep (46 variants)
-- model: "max" - routes to any max-tier keep (77 variants)
-- model: "contributor_free" - routes to contributor-marked keeps only (3 variants)
+- model: "max" - routes to any max-tier keep (84 variants)
+- model: "contributor_free" - routes to contributor-marked keeps only (2 variants)
 
 **Strict isolation:** No automatic cross-tier fallback. Empty tier returns
 503 Service Unavailable with Retry-After and tier_unavailable error.

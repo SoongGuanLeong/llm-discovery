@@ -1,0 +1,20 @@
+[
+  {
+    "apiKey": "env:CLOUDFLARE_API_KEY",
+    "baseUrl": "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1",
+    "name": "cloudflare",
+    "provider": "cloudflare"
+  },
+  {
+    "apiKey": "env:CUSTOM_API_KEY",
+    "baseUrl": "https://custom.example.com/v1",
+    "name": "custom_openai",
+    "provider": "custom_openai"
+  },
+  {
+    "apiKey": "env:GROQ_API_KEY",
+    "baseUrl": "https://api.groq.com/openai/v1",
+    "name": "groq",
+    "provider": "groq"
+  }
+]

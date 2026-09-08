@@ -1,0 +1,39 @@
+[
+  {
+    "config": {},
+    "models": [
+      {
+        "model": "contributor_special-model",
+        "provider": "cerebras"
+      },
+      {
+        "model": "contributor-model-free",
+        "provider": "groq"
+      }
+    ],
+    "name": "contributor_free",
+    "strategy": "reset-aware"
+  },
+  {
+    "config": {},
+    "models": [
+      {
+        "model": "llama-4-maverick",
+        "provider": "cerebras"
+      }
+    ],
+    "name": "flash",
+    "strategy": "reset-aware"
+  },
+  {
+    "config": {},
+    "models": [
+      {
+        "model": "llama-3.3-70b-versatile",
+        "provider": "groq"
+      }
+    ],
+    "name": "max",
+    "strategy": "reset-aware"
+  }
+]

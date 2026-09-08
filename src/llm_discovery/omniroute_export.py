@@ -927,6 +927,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--results-dir", type=Path, default=DEFAULT_RESULTS_DIR, help="data/results dir")
     p.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR, help="output dir (default data/derived)")
     p.add_argument("--check", action="store_true", help="Alias for --dry-run validation")
+    p.add_argument("--snapshot", type=Path, default=None, help="Capture gateway state to JSON file for later revert/verify")
+    p.add_argument("--revert-summary", type=Path, default=None, help="Revert gateway to pre-apply state using saved summary JSON")
+    p.add_argument("--verify", type=Path, default=None, help="Verify gateway unchanged against saved snapshot JSON")
+    p.add_argument("--revert-snapshot", type=Path, default=None, help="Revert gateway to exact state captured in snapshot JSON")
     return p
 
 
@@ -948,6 +952,63 @@ def main(argv: list[str] | None = None) -> int:
             print(f"apply failed: {msg}", file=sys.stderr)
             return 1
         print(json.dumps({"applied": True, "summary": summary}, indent=2, sort_keys=True), file=sys.stderr)
+        return 0
+    if args.snapshot:
+        snapshot_path = Path(args.snapshot)
+        snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+        auth_headers = get_auth_headers(args.api_key)
+        snapshot = snapshot_gateway_state(args.omniroute_url, auth_headers=auth_headers or None)
+        snapshot_path.write_text(json.dumps(snapshot, indent=2, sort_keys=True) + "\n")
+        print(f"snapshot saved to {snapshot_path}", file=sys.stderr)
+        return 0
+    if args.revert_summary:
+        summary_path = Path(args.revert_summary)
+        if not summary_path.exists():
+            print(f"summary file not found: {summary_path}", file=sys.stderr)
+            return 2
+        summary = json.loads(summary_path.read_text())
+        if isinstance(summary, dict) and "summary" in summary:
+            summary = summary["summary"]
+        snapshot_path = summary_path if isinstance(summary_path, Path) else Path(str(summary_path))
+        # try to find adjacent snapshot file
+        snapshot_file = snapshot_path.with_suffix(".snapshot.json")
+        snapshot_before = {}
+        if snapshot_file.exists():
+            snapshot_before = json.loads(snapshot_file.read_text())
+        auth_headers = get_auth_headers(args.api_key)
+        revert_summary = revert_payload(args.omniroute_url, summary, snapshot_before, auth_headers=auth_headers or None)
+        print(json.dumps(revert_summary, indent=2, sort_keys=True), file=sys.stderr)
+        return 0
+    if args.revert_snapshot:
+        snapshot_path = Path(args.revert_snapshot)
+        if not snapshot_path.exists():
+            print(f"snapshot file not found: {snapshot_path}", file=sys.stderr)
+            return 2
+        snapshot_before = json.loads(snapshot_path.read_text())
+        # Build a synthetic summary from snapshot (revert to exact snapshot)
+        summary = {
+            "retire": {"retired": []},
+            "import": {"response": {"results": []}},
+            "psd_patches": {"patched": []},
+            "models": {"upserted": [], "sent": 0},
+            "gc": {"providers": [], "total_deleted": 0},
+            "combos": {"upserted": []},
+        }
+        auth_headers = get_auth_headers(args.api_key)
+        revert_summary = revert_payload(args.omniroute_url, summary, snapshot_before, auth_headers=auth_headers or None)
+        print(json.dumps(revert_summary, indent=2, sort_keys=True), file=sys.stderr)
+        return 0
+    if args.verify:
+        snapshot_path = Path(args.verify)
+        if not snapshot_path.exists():
+            print(f"snapshot file not found: {snapshot_path}", file=sys.stderr)
+            return 2
+        snapshot = json.loads(snapshot_path.read_text())
+        auth_headers = get_auth_headers(args.api_key)
+        result = verify_gateway_unchanged(args.omniroute_url, snapshot, auth_headers=auth_headers or None)
+        print(json.dumps(result, indent=2, sort_keys=True), file=sys.stderr)
+        if not result.get("unchanged"):
+            return 1
         return 0
     if args.dry_run or args.check:
         payload = generate_payload(Path(args.providers), Path(args.results_dir))

@@ -50,7 +50,7 @@ def catalog_fetched_age_days(path: str | Path) -> float | None:
     return (datetime.now(UTC) - dt).total_seconds() / 86400.0
 
 
-def catalog_stale_days(path: str | Path, max_age_days: int = 14) -> bool:
+def catalog_stale_days(path: str | Path, max_age_days: int = 28) -> bool:
     """True when catalog `fetched_at` is older than max_age_days.
 
     Fail-open per ADR 0007 rank 6: missing/unreadable/absent `fetched_at`

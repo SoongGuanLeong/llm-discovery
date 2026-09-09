@@ -14,6 +14,20 @@ def _stub_provider_env(monkeypatch, raw_models):
     monkeypatch.setenv("DISABLE_WEB_SEARCH", "1")
 
 
+class TestNormalizeModelsTier:
+    def test_preserves_tier(self):
+        raw = [{"id": "DeepSeek-V4-Flash-0731", "name": "DeepSeek-V4-Flash-0731", "tier": "turbo"}]
+        out = _normalize_models(raw)
+        assert out[0]["tier"] == "turbo"
+        assert out[0]["id"] == "DeepSeek-V4-Flash-0731"
+
+    def test_omits_tier_when_missing(self):
+        raw = [{"id": "gpt-4", "name": "gpt-4"}]
+        out = _normalize_models(raw)
+        assert "tier" not in out[0]
+        assert out[0]["id"] == "gpt-4"
+
+
 class TestNormalizeModelsPremium:
     def test_preserves_premium_false(self):
         raw = [{"id": "gpt-4", "name": "gpt-4", "premium": False}]
@@ -183,6 +197,62 @@ class TestSplitByFreeRule:
         # call directly with None should behave same as generic
         # but signature default is "", test via _is_free_model equivalence
         assert keep2 == models
+class TestIsFreeModelLLM7:
+    def test_llm7_turbo_is_free(self):
+        assert _is_free_model({"id": "DeepSeek-V4-Flash-0731", "tier": "turbo"}, provider_name="llm7") is True
+        assert _is_free_model({"id": "gemma4:31b", "tier": "turbo"}, provider_name="llm7") is True
+
+    def test_llm7_pro_is_not_free(self):
+        assert _is_free_model({"id": "claude-opus-5", "tier": "pro"}, provider_name="llm7") is False
+        assert _is_free_model({"id": "gpt-5.5", "tier": "pro"}, provider_name="llm7") is False
+
+    def test_llm7_missing_tier_not_free(self):
+        assert _is_free_model({"id": "unknown-model"}, provider_name="llm7") is False
+
+    def test_llm7_turbo_without_provider_not_free(self):
+        # turbo alone not free without provider_name
+        assert _is_free_model({"id": "DeepSeek-V4-Flash-0731", "tier": "turbo"}) is False
+
+
+class TestSplitByFreeRuleLLM7:
+    def test_llm7_mixed_keeps_only_turbo(self):
+        models = [
+            {"id": "DeepSeek-V4-Flash-0731", "tier": "turbo"},
+            {"id": "claude-opus-5", "tier": "pro"},
+            {"id": "gemma4:31b", "tier": "turbo"},
+        ]
+        keep, dropped = _split_by_free_rule(models, provider_name="llm7")
+        assert [m["id"] for m in keep] == ["DeepSeek-V4-Flash-0731", "gemma4:31b"]
+        assert [m["id"] for m in dropped] == ["claude-opus-5"]
+
+    def test_llm7_all_turbo_returns_all(self):
+        models = [
+            {"id": "codestral-latest", "tier": "turbo"},
+            {"id": "minimax-m2.7", "tier": "turbo"},
+        ]
+        keep, dropped = _split_by_free_rule(models, provider_name="llm7")
+        assert len(keep) == 2
+        assert dropped == []
+
+    def test_llm7_all_pro_returns_all(self):
+        models = [
+            {"id": "claude-opus-5", "tier": "pro"},
+            {"id": "gpt-5.5", "tier": "pro"},
+        ]
+        keep, dropped = _split_by_free_rule(models, provider_name="llm7")
+        assert keep == models
+        assert dropped == []
+
+    def test_llm7_no_tier_field_returns_all(self):
+        models = [
+            {"id": "unknown-model"},
+            {"id": "another-model"},
+        ]
+        keep, dropped = _split_by_free_rule(models, provider_name="llm7")
+        assert keep == models
+        assert dropped == []
+
+
 class TestProviderWiringAndNaraRouter:
     def test_apply_free_rule_delegates(self):
         from llm_discovery.pipeline import _apply_free_model_rule, _split_by_free_rule
@@ -230,6 +300,7 @@ class TestProviderWiringAndNaraRouter:
         monkeypatch.setattr("llm_discovery.benchmarks.BenchmarkDataCache", lambda: type("C", (), {"collect_from_local": lambda s,a,b: None, "_data": {}})())
         monkeypatch.setattr("llm_discovery.llm.LocalLLMEvaluator", lambda **kw: object())
         monkeypatch.setenv("NAVY_AI_API_KEY", "fake-navy")
+        monkeypatch.setenv("KILO_AI_API_KEY", "fake-judge")
         monkeypatch.setenv("AGNES_AI_API_KEY", "fake-judge")
 
         config = load_config()
@@ -255,10 +326,37 @@ class TestProviderWiringAndNaraRouter:
         monkeypatch.setattr("llm_discovery.benchmarks.BenchmarkDataCache", lambda: type("C", (), {"collect_from_local": lambda s,a,b: None, "_data": {}})())
         monkeypatch.setattr("llm_discovery.llm.LocalLLMEvaluator", lambda **kw: object())
         monkeypatch.setenv("GROQ_API_KEY", "fake-groq")
+        monkeypatch.setenv("KILO_AI_API_KEY", "fake-judge")
         monkeypatch.setenv("AGNES_AI_API_KEY", "fake-judge")
 
         config = load_config()
         result = discover_provider("groq", config, aa=[], models_dev=[], max_workers=1)
         # generic: no free marker => keep all, both evaluated, premium ignored
         assert set(called) == {"gpt-4", "other"}
+        assert len(result["keep"]) == 2
+
+    def test_discover_provider_llm7_uses_tier_split(self, monkeypatch):
+        from llm_discovery.pipeline import discover_provider
+        from llm_discovery.config import load_config
+        llm7_raw = [
+            {"id": "DeepSeek-V4-Flash-0731", "tier": "turbo", "name": "DeepSeek-V4-Flash-0731", "object": "model"},
+            {"id": "claude-opus-5", "tier": "pro", "name": "claude-opus-5", "object": "model"},
+            {"id": "gemma4:31b", "tier": "turbo", "name": "gemma4:31b", "object": "model"},
+        ]
+        _stub_provider_env(monkeypatch, llm7_raw)
+        called = []
+        def fake_evaluate(model, provider_name, aa, models_dev, evaluator, min_score, max_score, cache=None):
+            called.append(model["id"])
+            return {"provider_model_id": model["id"], "decision": "keep", "tier": "low"}
+        monkeypatch.setattr("llm_discovery.pipeline.evaluate_model", fake_evaluate)
+        monkeypatch.setattr("llm_discovery.benchmarks.BenchmarkDataCache", lambda: type("C", (), {"collect_from_local": lambda s,a,b: None, "_data": {}})())
+        monkeypatch.setattr("llm_discovery.llm.LocalLLMEvaluator", lambda **kw: object())
+        monkeypatch.setenv("LLM7_API_KEY", "fake-llm7")
+        monkeypatch.setenv("KILO_AI_API_KEY", "fake-judge")
+        monkeypatch.setenv("AGNES_AI_API_KEY", "fake-judge")
+
+        config = load_config()
+        result = discover_provider("llm7", config, aa=[], models_dev=[], max_workers=1)
+        # only turbo models should be evaluated
+        assert set(called) == {"DeepSeek-V4-Flash-0731", "gemma4:31b"}
         assert len(result["keep"]) == 2

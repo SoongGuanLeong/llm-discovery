@@ -31,6 +31,9 @@ def _normalize_models(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
         # Omit when absent to distinguish missing vs explicit false (ADR 0004).
         if "premium" in m:
             entry["premium"] = m["premium"]
+        # Preserve tier when present (llm7: tier==turbo => free-tier filter).
+        if "tier" in m:
+            entry["tier"] = m["tier"]
         normalized.append(entry)
     return normalized
 

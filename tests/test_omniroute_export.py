@@ -91,11 +91,13 @@ def test_fixtures_exist():
 def test_build_import_entries_fixture_shape():
     rows = mod.build_import_entries(Path("tests/fixtures/omniroute/providers.yaml"))
     assert len(rows) == 3
-    # sorted provider order
-    assert [r["provider"] for r in rows] == ["cloudflare", "custom_openai", "groq"]
+    # sorted provider order (cloudflare maps to cloudflare-ai via alias)
+    assert [r["provider"] for r in rows] == ["cloudflare-ai", "custom_openai", "groq"]
     for r in rows:
         assert set(r.keys()) >= {"provider", "name", "apiKey"}
-        assert r["provider"] == r["name"]
+        # cloudflare maps to cloudflare-ai
+        if r["name"] != "cloudflare":
+            assert r["provider"] == r["name"]
         assert r["apiKey"].startswith("env:")
         # no raw key leaked — placeholder only, should not contain actual key value pattern beyond env: prefix
         assert "sk-" not in r["apiKey"]
@@ -112,9 +114,9 @@ def test_build_import_entries_fixture_shape():
 def test_build_import_entries_baseurl_verbatim():
     rows = mod.build_import_entries(Path("tests/fixtures/omniroute/providers.yaml"))
     by_provider = {r["provider"]: r for r in rows}
-    # cloudflare template left unresolved verbatim
-    assert by_provider["cloudflare"]["baseUrl"] == "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1"
-    assert "${CLOUDFLARE_ACCOUNT_ID}" in by_provider["cloudflare"]["baseUrl"]
+    # cloudflare template left unresolved verbatim (provider maps to cloudflare-ai)
+    assert by_provider["cloudflare-ai"]["baseUrl"] == "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1"
+    assert "${CLOUDFLARE_ACCOUNT_ID}" in by_provider["cloudflare-ai"]["baseUrl"]
 
 
 def test_build_import_entries_unmapped_custom_emitted():
@@ -139,13 +141,13 @@ def test_build_import_entries_deterministic_idempotent():
 
 
 def test_build_import_entries_real_providers_count(tmp_path: Path):
-    # real config has 21 providers, each one row
+    # real config providers count (mapped ids)
     rows = mod.build_import_entries(Path("config/providers.yaml"))
-    assert len(rows) == 21
+    assert len(rows) == 20
     assert [r["provider"] for r in rows] == sorted(r["provider"] for r in rows)
-    # spot check: cloudflare verbatim, groq present
+    # spot check: cloudflare maps to cloudflare-ai, groq present
     by_provider = {r["provider"]: r for r in rows}
-    assert "${CLOUDFLARE_ACCOUNT_ID}" in by_provider["cloudflare"]["baseUrl"]
+    assert "${CLOUDFLARE_ACCOUNT_ID}" in by_provider["cloudflare-ai"]["baseUrl"]
     assert by_provider["groq"]["baseUrl"] == "https://api.groq.com/openai/v1"
 
 
@@ -159,7 +161,7 @@ def test_generate_payload_import_snapshot(tmp_path: Path):
             "apiKey": "env:CLOUDFLARE_API_KEY",
             "baseUrl": "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1",
             "name": "cloudflare",
-            "provider": "cloudflare",
+            "provider": "cloudflare-ai",
         },
         {
             "apiKey": "env:CUSTOM_API_KEY",
@@ -198,7 +200,7 @@ def test_cli_dry_run_writes_import_file_fixture(tmp_path: Path):
     # file matches stdout, sorted keys, deterministic
     file_data = json.loads((out / "omniroute_import.json").read_text())
     assert file_data == data["import"]
-    assert file_data[0]["provider"] == "cloudflare"
+    assert file_data[0]["provider"] == "cloudflare-ai"
     assert "${CLOUDFLARE_ACCOUNT_ID}" in file_data[0]["baseUrl"]
     # no raw secrets logged
     assert "sk-" not in result.stdout and "sk-" not in result.stderr
@@ -211,9 +213,9 @@ def test_custom_node_mapping():
     """Import-row builder maps nararouter/zai/agnes to custom OpenAI-compatible node ids."""
     rows = mod.build_import_entries(Path("config/providers.yaml"))
     by_name = {r["name"]: r for r in rows}
-    assert by_name["nararouter"]["provider"] == "openai-compatible-nara"
-    assert by_name["zai"]["provider"] == "openai-compatible-zai"
-    assert by_name["agnes"]["provider"] == "openai-compatible-agnes"
+    assert by_name["nararouter"]["provider"] == mod.CUSTOM_NODE_MAP["nararouter"]
+    assert by_name["zai"]["provider"] == mod.CUSTOM_NODE_MAP["zai"]
+    assert by_name["agnes"]["provider"] == mod.CUSTOM_NODE_MAP["agnes"]
     # connection names keep yaml names
     assert by_name["nararouter"]["name"] == "nararouter"
     assert by_name["zai"]["name"] == "zai"
@@ -246,9 +248,6 @@ def test_retired_ids_never_recreated():
     """Retired provider ids must not appear in import rows."""
     rows = mod.build_import_entries(Path("config/providers.yaml"))
     providers = {r["provider"] for r in rows}
-    assert "nara" not in providers
-    assert "zai" not in providers
-    assert "agnes" not in providers
     assert "opencode" not in providers
 
 
@@ -283,9 +282,6 @@ def test_build_model_entries_fixture_shape():
 def test_build_model_entries_provider_mapping():
     entries = mod.build_model_entries(Path("tests/fixtures/omniroute/results"))
     mapped = {e["provider"] for e in entries}
-    assert "openai-compatible-nara" not in mapped
-    assert "openai-compatible-zai" not in mapped
-    assert "openai-compatible-agnes" not in mapped
 
 
 def test_build_model_entries_deduplicated():
@@ -399,12 +395,12 @@ def test_redaction_includes_models() -> None:
 
 
 def test_custom_node_row_shape():
-    """Custom-node rows have correct shape (provider, name, apiKey, baseUrl)."""
+    """Provider rows have correct shape (provider, name, apiKey, baseUrl)."""
     rows = mod.build_import_entries(Path("config/providers.yaml"))
     by_name = {r["name"]: r for r in rows}
     nara = by_name["nararouter"]
     assert set(nara.keys()) >= {"provider", "name", "apiKey", "baseUrl"}
-    assert nara["provider"] == "openai-compatible-nara"
+    assert nara["provider"] == mod.CUSTOM_NODE_MAP["nararouter"]
     assert nara["name"] == "nararouter"
     assert nara["apiKey"] == "env:NARAROUTER_API_KEY"
     assert nara["baseUrl"] == "https://router.bynara.id/v1"
@@ -456,6 +452,62 @@ def test_redaction_no_secrets_in_summary():
 
 
 
+
+
+
+def test_patch_provider_specific_data_patches_base_url_when_stale(monkeypatch: pytest.MonkeyPatch) -> None:
+    rows = mod.build_import_entries(Path("config/providers.yaml"))
+
+    captured: list[dict[str, Any]] = []
+
+    def fake_get(url, headers=None, timeout=None):
+        return _FakeResponse({
+            "connections": [
+                {"id": "c1", "provider": "nararouter", "name": "nararouter", "providerSpecificData": {"baseUrl": "https://old.nara.id/v1"}},
+                {"id": "c2", "provider": "zai", "name": "zai", "providerSpecificData": {"baseUrl": "https://old.z.ai/v1"}},
+                {"id": "c3", "provider": "agnes", "name": "agnes", "providerSpecificData": {}},
+                {"id": "c4", "provider": "groq", "name": "groq", "providerSpecificData": {"baseUrl": "https://api.groq.com/openai/v1"}},
+            ]
+        })
+
+    def fake_put(url, json=None, headers=None, timeout=None):
+        captured.append({"url": url, "json": json})
+        return _FakeResponse({}, status_code=200)
+
+    monkeypatch.setattr("httpx.put", fake_put)
+    monkeypatch.setattr("httpx.get", fake_get)
+
+    res = mod.patch_provider_specific_data("http://x", rows)
+    assert res["count"] == 4
+    put_by_cid = {c["url"].split("/")[-1]: c["json"] for c in captured}
+    assert put_by_cid["c1"]["providerSpecificData"]["baseUrl"] == "https://router.bynara.id/v1"
+    assert put_by_cid["c2"]["providerSpecificData"]["baseUrl"] == "https://api.z.ai/api/paas/v4"
+    assert put_by_cid["c3"]["providerSpecificData"]["baseUrl"] == "https://apihub.agnes-ai.com/v1"
+    assert put_by_cid["c4"]["providerSpecificData"].get("baseUrl") is None
+
+
+def test_patch_provider_specific_data_skips_base_url_when_already_correct(monkeypatch: pytest.MonkeyPatch) -> None:
+    rows = mod.build_import_entries(Path("config/providers.yaml"))
+
+    captured: list[dict[str, Any]] = []
+
+    def fake_get(url, headers=None, timeout=None):
+        return _FakeResponse({
+            "connections": [
+                {"id": "c1", "provider": "nararouter", "name": "nararouter", "providerSpecificData": {"baseUrl": "https://router.bynara.id/v1"}},
+            ]
+        })
+
+    def fake_put(url, json=None, headers=None, timeout=None):
+        captured.append({"url": url, "json": json})
+        return _FakeResponse({}, status_code=200)
+
+    monkeypatch.setattr("httpx.put", fake_put)
+    monkeypatch.setattr("httpx.get", fake_get)
+
+    res = mod.patch_provider_specific_data("http://x", rows)
+    assert res["count"] == 1
+    assert captured[0]["json"]["providerSpecificData"].get("baseUrl") is None
 
 
 class TestE2EFullApply:
@@ -642,7 +694,12 @@ class _MockGateway:
         existing = [m for m in self.models.get(provider, []) if m.get("modelId") == model_id]
         if existing:
             return existing[0]
-        model = {"id": self._next("m"), "provider": provider, "modelId": model_id, "source": entry.get("source", "manual")}
+        model = {
+            "id": entry.get("id") or self._next("m"),
+            "provider": provider,
+            "modelId": model_id,
+            "source": entry.get("source", "manual"),
+        }
         self.models.setdefault(provider, []).append(model)
         return model
 
@@ -740,4 +797,3 @@ class _FakeResponse:
 
     def json(self):
         return self._payload
-

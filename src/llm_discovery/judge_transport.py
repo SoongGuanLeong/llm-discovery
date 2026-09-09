@@ -57,14 +57,18 @@ class JudgeTransport:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-        payload = {
+        payload: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
             "tools": TOOLS,
             "temperature": 0,
-            "max_tokens": 1200,
+            "max_tokens": 4096,
             "tool_choice": "none" if disable_tools else "auto",
         }
+        # When tools disabled we are demanding final JSON — hint strongly
+        # for models that support response_format (ignored by those that do not).
+        if disable_tools:
+            payload["response_format"] = {"type": "json_object"}
 
         backoff = 10
         for attempt in range(4):

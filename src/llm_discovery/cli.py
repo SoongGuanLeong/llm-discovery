@@ -74,12 +74,12 @@ def build_parser() -> argparse.ArgumentParser:
     refresh_parser.add_argument("--dry-run", action="store_true", help="Fetch and validate but do not write")
     refresh_parser.add_argument("--only", nargs="*", choices=["aa", "models_dev", "benchmarks"], help="Only refresh selected catalogs")
 
-    build_parser = subparsers.add_parser("build-all", help="Build all providers into model_info_store (cache-optional, 14d filter, atomic).")
+    build_parser = subparsers.add_parser("build-all", help="Build all providers into model_info_store (cache-optional, 28d filter, atomic).")
     build_parser.add_argument("--data-dir", type=Path, default=DATA_DIR, help="Data directory (default: data)")
     build_parser.add_argument("--config", type=Path, default=Path("config/providers.yaml"), help="Providers YAML path")
     build_parser.add_argument("--providers", nargs="*", help="Optional subset of provider names")
     build_parser.add_argument("--max-workers", type=int, default=8, help="Workers per provider")
-    build_parser.add_argument("--catalog-max-age-days", type=int, default=14, help="Refresh catalogs when fetched_at older than this (0 disables, default 14)")
+    build_parser.add_argument("--catalog-max-age-days", type=int, default=28, help="Refresh catalogs when fetched_at older than this (0 disables, default 28)")
     build_parser.add_argument("--no-catalog-refresh", action="store_true", help="Skip the catalog freshness gate entirely (offline builds)")
 
     return parser

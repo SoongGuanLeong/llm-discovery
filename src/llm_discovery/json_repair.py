@@ -5,8 +5,17 @@ import re
 from .evaluation import ModelEvaluation
 
 
+def _strip_think_tags(content: str) -> str:
+    # Remove <think>...</think>, <reasoning>...</reasoning> wrappers used by reasoning models
+    content = re.sub(r"<think>[\s\S]*?</think>", "", content, flags=re.IGNORECASE)
+    content = re.sub(r"<reasoning>[\s\S]*?</reasoning>", "", content, flags=re.IGNORECASE)
+    # Also handle unclosed think tag at start (streaming truncation)
+    content = re.sub(r"^\s*<think>\s*", "", content, flags=re.IGNORECASE)
+    return content.strip()
+
+
 def extract_json(content: str) -> str:
-    content = content.strip()
+    content = _strip_think_tags(content.strip())
     if not content:
         return content
     # 1. Fenced block anywhere: ``` + optional json + captured inner + ```
@@ -106,8 +115,32 @@ def _try_single_quote_fix(content: str) -> str | None:
     return None
 
 
+def _find_last_json_object(text: str) -> str | None:
+    """For reasoning models that emit chain-of-thought + final JSON, prefer last object."""
+    decoder = json.JSONDecoder()
+    last: str | None = None
+    idx = 0
+    while True:
+        start = text.find("{", idx)
+        if start == -1:
+            break
+        try:
+            _, end = decoder.raw_decode(text, start)
+            last = text[start:end]
+            idx = end
+        except json.JSONDecodeError:
+            idx = start + 1
+    return last
+
+
 def extract_and_validate(text: str) -> ModelEvaluation:
     """Extract JSON from possibly-fenced text, repair, and validate."""
+    # Reasoning models often put JSON at end of chain-of-thought; try last object first
+    last_obj = _find_last_json_object(_strip_think_tags(text))
+    if last_obj:
+        # Prefer last object if it looks like evaluation (has decision field)
+        if "\"decision\"" in last_obj or "'decision'" in last_obj or "decision" in last_obj:
+            text = last_obj
     extracted = extract_json(text)
     if not extracted:
         raise ValueError("Empty content after JSON extraction")

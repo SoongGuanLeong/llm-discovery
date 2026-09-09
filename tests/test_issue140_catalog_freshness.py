@@ -71,7 +71,7 @@ def _patch_refreshers():
 def test_stale_catalogs_trigger_per_catalog_refresh(tmp_path):
     data_dir = tmp_path / "data"
     data_dir.mkdir()
-    _write_catalogs(data_dir, _stale_ts(20), _stale_ts(30))
+    _write_catalogs(data_dir, _stale_ts(30), _stale_ts(30))
     p_aa, p_md, p_bench = _patch_refreshers()
     with p_aa as mock_aa, p_md as mock_md, p_bench as mock_bench:
         res = _run(tmp_path)
@@ -99,7 +99,7 @@ def test_fresh_catalogs_skip_refresh(tmp_path):
 def test_refresh_failure_is_warn_only(tmp_path):
     data_dir = tmp_path / "data"
     data_dir.mkdir()
-    _write_catalogs(data_dir, _stale_ts(20), None)
+    _write_catalogs(data_dir, _stale_ts(30), None)
     p_aa, p_md, p_bench = _patch_refreshers()
     with p_aa as mock_aa, p_md as mock_md:
         mock_aa.side_effect = RuntimeError("network down")
@@ -112,7 +112,7 @@ def test_aa_failure_does_not_block_models_dev_refresh(tmp_path):
     # the major fix: AA 401 (no key) must not stop the stale models.dev refresh
     data_dir = tmp_path / "data"
     data_dir.mkdir()
-    _write_catalogs(data_dir, _stale_ts(20), _stale_ts(30))
+    _write_catalogs(data_dir, _stale_ts(30), _stale_ts(30))
     p_aa, p_md, p_bench = _patch_refreshers()
     with p_aa as mock_aa, p_md as mock_md:
         mock_aa.side_effect = RuntimeError("HTTP 401 no AA key")
@@ -137,7 +137,7 @@ def test_missing_catalogs_do_not_refresh(tmp_path):
 def test_max_age_zero_disables_gate(tmp_path):
     data_dir = tmp_path / "data"
     data_dir.mkdir()
-    _write_catalogs(data_dir, _stale_ts(20), _stale_ts(30))
+    _write_catalogs(data_dir, _stale_ts(30), _stale_ts(30))
     p_aa, p_md, p_bench = _patch_refreshers()
     with p_aa as mock_aa, p_md as mock_md:
         res = _run(tmp_path, catalog_max_age_days=0)
@@ -154,4 +154,4 @@ def test_cli_build_all_parses_catalog_flags():
     assert ns.catalog_max_age_days == 0
     ns2 = build_parser().parse_args(["build-all"])
     assert ns2.no_catalog_refresh is False
-    assert ns2.catalog_max_age_days == 14
+    assert ns2.catalog_max_age_days == 28

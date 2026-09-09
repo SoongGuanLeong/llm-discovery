@@ -181,9 +181,9 @@ class TestPricingTTLReaverage:
         slim = ModelInfoRecord(
             benchmarks=BenchmarkSnapshot(scores={"aa_intelligence": {"score": 50}}, raw_benchmarks=[]),
             pricing=PricingSnapshot(blended=0.5),
-            _meta=StoreMeta(first_seen=_stale_ts(20), last_updated=_stale_ts(20), version=2),
+            _meta=StoreMeta(first_seen=_stale_ts(30), last_updated=_stale_ts(30), version=2),
         )
-        assert is_stale(_stale_ts(20), 14) is True
+        assert is_stale(_stale_ts(30), 14) is True
         fresh_obs = [{"blended": 0.8, "input": 0.5, "output": 1.1, "provider": "prov"}]
         refreshed = _refresh_pricing_if_stale(slim, fresh_obs)
         # stale -> re-averaged to fresh obs value
@@ -336,7 +336,7 @@ class TestBuildAllSecondRunCompleteness:
         for field in ("tier", "aa_model_id", "coding_score", "evidence_level"):
             assert k2[field] == yaml1["keep"][0][field]
 
-    def test_gc_after_14d_removes_stale_not_live_key(self, tmp_path):
+    def test_gc_after_28d_removes_stale_not_live_key(self, tmp_path):
         config_path = Path("config/providers.yaml")
         data_dir = tmp_path / "data_gc"
         cfg = load_config(config_path)
@@ -350,7 +350,7 @@ class TestBuildAllSecondRunCompleteness:
         stale_rec = ModelInfoRecord(
             benchmarks=BenchmarkSnapshot(scores={"aa_intelligence": {"score": 50}}, raw_benchmarks=[]),
             pricing=PricingSnapshot(blended=0.5),
-            _meta=StoreMeta(first_seen=_stale_ts(20), last_updated=_stale_ts(20), version=2),
+            _meta=StoreMeta(first_seen=_stale_ts(30), last_updated=_stale_ts(30), version=2),
         )
         store.put("stale-gc-model", stale_rec)
         assert store.size() == 1
@@ -358,9 +358,9 @@ class TestBuildAllSecondRunCompleteness:
         def discover_new(name, config=None, aa=None, models_dev=None, max_workers=4, store=None):
             return {"keep": [_keep("fresh-live-model")], "drop": [], "error": []}
         res = build_all(data_dir=data_dir, config_path=config_path, provider_names=names, discover_fn=discover_new)
-        # GC after 14d: stale-gc-model absent from live_keys and stale -> removed
+        # GC after 28d: stale-gc-model absent from live_keys and stale -> removed
         final = ModelInfoStore(store_path)
-        assert final.get("stale-gc-model") is None, "GC should remove stale not-live key after 14d"
+        assert final.get("stale-gc-model") is None, "GC should remove stale not-live key after 28d"
         assert final.get("fresh-live-model") is not None
         assert res["gc"] >= 1
 

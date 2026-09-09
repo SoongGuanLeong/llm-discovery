@@ -43,8 +43,20 @@
       },
       "_meta": {
         "first_seen": "2026-09-04T11:36:26.642137+00:00",
-        "last_updated": "2026-09-08T07:31:46.406145+00:00",
+        "last_updated": "2026-09-09T09:09:56.027196+00:00",
         "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "swe_bench_verified 73.8 via https://huggingface.co/zai-org/GLM-4.7",
+          "terminal_bench_2_1 33.4 via https://huggingface.co/zai-org/GLM-4.7",
+          "AA Intelligence Index 34.5 for 6fc35842-0165-44cf-8570-c484a92b3d8c via https://artificialanalysis.ai/models/glm-4-7"
+        ],
+        "confidence": 0.17,
+        "coding": true,
+        "decision": "keep",
+        "tier": "flash"
       }
     },
     "glm-5": {
@@ -116,8 +128,20 @@
       },
       "_meta": {
         "first_seen": "2026-09-04T11:36:26.642137+00:00",
-        "last_updated": "2026-09-08T07:31:46.406145+00:00",
+        "last_updated": "2026-09-09T09:09:56.027196+00:00",
         "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "swe_bench_verified 72.8 via https://www.swebench.com/",
+          "swe_atlas_codebase_qna 20.5 via https://labs.scale.com/leaderboard/sweatlas-qna",
+          "swe_atlas_refactoring 24.24 via https://labs.scale.com/leaderboard/sweatlas-refactoring"
+        ],
+        "confidence": 0.17,
+        "coding": true,
+        "decision": "keep",
+        "tier": "flash"
       }
     },
     "kimi-k2-thinking": {
@@ -156,8 +180,20 @@
       },
       "_meta": {
         "first_seen": "2026-09-04T11:36:26.642137+00:00",
-        "last_updated": "2026-09-08T07:11:24.811985+00:00",
+        "last_updated": "2026-09-09T02:46:08.823945+00:00",
         "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "swe_bench_verified 71.3 via https://huggingface.co/moonshotai/Kimi-K2-Thinking",
+          "aa_intelligence 33.5 via artificial_analysis (https://www.datalearner.com/benchmarks/aa_intelligence)",
+          "AA Intelligence Index 33.5 for bddebfd3-0a8d-47f5-b722-bc4c2ca5a5dc via https://artificialanalysis.ai/models/kimi-k2-thinking"
+        ],
+        "confidence": 0.17,
+        "coding": true,
+        "decision": "keep",
+        "tier": "flash"
       }
     },
     "minimax-m2.5": {
@@ -224,8 +260,20 @@
       },
       "_meta": {
         "first_seen": "2026-09-04T11:36:26.642137+00:00",
-        "last_updated": "2026-09-08T07:11:24.811985+00:00",
+        "last_updated": "2026-09-09T02:46:08.823945+00:00",
         "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "swe_bench_verified 75.8 via https://www.swebench.com/",
+          "swe_atlas_codebase_qna 10.3 via https://labs.scale.com/leaderboard/sweatlas-qna",
+          "swe_atlas_refactoring 19.52 via https://labs.scale.com/leaderboard/sweatlas-refactoring"
+        ],
+        "confidence": 0.08,
+        "coding": true,
+        "decision": "keep",
+        "tier": "flash"
       }
     },
     "nemotron-3-ultra-550b-a55b": {
@@ -354,8 +402,20 @@
       },
       "_meta": {
         "first_seen": "2026-09-04T12:00:12.444064+00:00",
-        "last_updated": "2026-09-08T07:30:22.950390+00:00",
+        "last_updated": "2026-09-09T13:19:53.055180+00:00",
         "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "swe_bench_verified 70.7 via https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16",
+          "terminal_bench 56.4 via https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16",
+          "gpqa 87 via https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+        ],
+        "confidence": 0.33,
+        "coding": true,
+        "decision": "keep",
+        "tier": "max"
       }
     },
     "step-3.7-flash": {
@@ -474,8 +534,20 @@
       },
       "_meta": {
         "first_seen": "2026-09-04T12:00:12.444064+00:00",
-        "last_updated": "2026-09-08T07:25:48.812568+00:00",
+        "last_updated": "2026-09-09T13:05:56.209269+00:00",
         "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "swe_bench_verified 76.5 via https://static.stepfun.com/blog/step-3.7-flash/",
+          "terminal_bench 59.6 via https://static.stepfun.com/blog/step-3.7-flash/",
+          "humanity_last_exam 47.2 via https://static.stepfun.com/blog/step-3.7-flash/"
+        ],
+        "confidence": 0.25,
+        "coding": true,
+        "decision": "keep",
+        "tier": "flash"
       }
     },
     "claude-opus-5": {
@@ -642,8 +714,20 @@
       },
       "_meta": {
         "first_seen": "2026-09-04T12:04:16.381432+00:00",
-        "last_updated": "2026-09-08T07:14:13.495560+00:00",
+        "last_updated": "2026-09-09T05:05:55.402238+00:00",
         "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "swe_bench_verified 96 via https://www.anthropic.com/claude-opus-5-system-card",
+          "deepswe 68.8 via https://www.anthropic.com/claude-opus-5-system-card",
+          "humanity_last_exam 56.3 via https://www.anthropic.com/claude-opus-5-system-card"
+        ],
+        "confidence": 0.25,
+        "coding": true,
+        "decision": "keep",
+        "tier": "max"
       }
     },
     "gpt-5.6-terra": {
@@ -767,8 +851,20 @@
       },
       "_meta": {
         "first_seen": "2026-09-04T12:04:16.381432+00:00",
-        "last_updated": "2026-09-08T07:14:13.495560+00:00",
+        "last_updated": "2026-09-09T05:05:55.402238+00:00",
         "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "terminal_bench 87.4 via https://openai.com/index/gpt-5-6/",
+          "deepswe 69.6 via https://openai.com/index/gpt-5-6/",
+          "gpqa_diamond 92.9 via https://openai.com/index/gpt-5-6/"
+        ],
+        "confidence": 0.33,
+        "coding": true,
+        "decision": "keep",
+        "tier": "max"
       }
     },
     "mistral-medium-2604": {
@@ -808,8 +904,20 @@
       },
       "_meta": {
         "first_seen": "2026-09-04T12:08:44.408176+00:00",
-        "last_updated": "2026-09-08T07:15:48.288558+00:00",
+        "last_updated": "2026-09-09T13:04:07.761581+00:00",
         "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "swe_bench_verified 77.6 via https://huggingface.co/mistralai/Mistral-Medium-3.5-128B",
+          "AA Intelligence Index 30.4 for dd059b25-d82a-4ead-82a4-4adceaaec48b via https://artificialanalysis.ai/models/mistral-medium-3-5",
+          "Pricing blended $3.00/1M via AA catalog"
+        ],
+        "confidence": 0.08,
+        "coding": true,
+        "decision": "keep",
+        "tier": "max"
       }
     },
     "mistral-medium-latest": {
@@ -843,8 +951,20 @@
       },
       "_meta": {
         "first_seen": "2026-09-04T12:08:44.408176+00:00",
-        "last_updated": "2026-09-08T07:29:55.294856+00:00",
+        "last_updated": "2026-09-09T13:10:37.462350+00:00",
         "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "swe_bench_verified 77.6 via https://huggingface.co/mistralai/Mistral-Medium-3.5-128B",
+          "AA Intelligence Index 30.4 for dd059b25-d82a-4ead-82a4-4adceaaec48b via https://artificialanalysis.ai/models/mistral-medium-3-5",
+          "Pricing blended $3.00/1M via AA catalog"
+        ],
+        "confidence": 0.08,
+        "coding": true,
+        "decision": "keep",
+        "tier": "max"
       }
     },
     "qwen3.5-122b-a10b": {
@@ -878,8 +998,20 @@
       },
       "_meta": {
         "first_seen": "2026-09-04T12:15:08.303311+00:00",
-        "last_updated": "2026-09-08T07:25:48.812568+00:00",
+        "last_updated": "2026-09-09T13:19:53.055180+00:00",
         "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "swe_bench_verified 72 via https://huggingface.co/Qwen/Qwen3.5-122B-A10B",
+          "AA Intelligence Index 32.8 for 2236df45-0699-40d1-b5cc-69ee345d2257 via https://artificialanalysis.ai/models/qwen3-5-122b-a10b",
+          "Pricing blended $1.10/1M via AA catalog"
+        ],
+        "confidence": 0.08,
+        "coding": true,
+        "decision": "keep",
+        "tier": "max"
       }
     },
     "qwen3.5-27b": {
@@ -913,8 +1045,20 @@
       },
       "_meta": {
         "first_seen": "2026-09-04T12:15:08.303311+00:00",
-        "last_updated": "2026-09-08T07:25:48.812568+00:00",
+        "last_updated": "2026-09-09T13:04:18.126865+00:00",
         "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "swe_bench_verified 72.4 via https://huggingface.co/Qwen/Qwen3.5-27B",
+          "AA Intelligence Index 34.6 for 169e47f5-3d4d-4ad4-8f8b-ab46f0c73f67 via https://artificialanalysis.ai/models/qwen3-5-27b",
+          "Pricing blended $0.82/1M via AA catalog"
+        ],
+        "confidence": 0.08,
+        "coding": true,
+        "decision": "keep",
+        "tier": "max"
       }
     },
     "qwen3.5-397b-a17b": {
@@ -948,8 +1092,20 @@
       },
       "_meta": {
         "first_seen": "2026-09-04T12:15:08.303311+00:00",
-        "last_updated": "2026-09-08T07:29:55.294856+00:00",
+        "last_updated": "2026-09-09T13:10:37.462350+00:00",
         "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "swe_bench_verified 76.4 via https://huggingface.co/Qwen/Qwen3.5-397B-A17B",
+          "AA Intelligence Index 34.3 for 0e66bae9-41f1-42fc-9276-ce8cb6f72919 via https://artificialanalysis.ai/models/qwen3-5-397b-a17b",
+          "Pricing blended $1.35/1M via AA catalog"
+        ],
+        "confidence": 0.08,
+        "coding": true,
+        "decision": "keep",
+        "tier": "max"
       }
     },
     "step-3.5-flash": {
@@ -1016,8 +1172,20 @@
       },
       "_meta": {
         "first_seen": "2026-09-04T12:15:08.303311+00:00",
-        "last_updated": "2026-09-08T07:25:48.812568+00:00",
+        "last_updated": "2026-09-09T13:04:18.126865+00:00",
         "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "aa_coding 31.6 via https://openrouter.ai/stepfun/step-3.5-flash/benchmarks",
+          "scicode 40.4 via https://openrouter.ai/stepfun/step-3.5-flash/benchmarks",
+          "terminal_bench_hard 27.3 via https://openrouter.ai/stepfun/step-3.5-flash/benchmarks"
+        ],
+        "confidence": 0.17,
+        "coding": true,
+        "decision": "keep",
+        "tier": "flash"
       }
     },
     "deepseek-v4-flash": {
@@ -1061,8 +1229,20 @@
       },
       "_meta": {
         "first_seen": "2026-09-06T07:23:44.698193+00:00",
-        "last_updated": "2026-09-08T07:31:25.770236+00:00",
+        "last_updated": "2026-09-09T13:27:44.403890+00:00",
         "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "swe_bench_verified 79 via https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash",
+          "aa_intelligence 51.8 via artificial_analysis (https://www.datalearner.com/benchmarks/aa_intelligence)",
+          "aa_coding 69.1 via artificial_analysis (https://www.datalearner.com/benchmarks/aa_coding)"
+        ],
+        "confidence": 0.17,
+        "coding": true,
+        "decision": "keep",
+        "tier": "flash"
       }
     },
     "kimi-k2.5": {
@@ -1129,8 +1309,20 @@
       },
       "_meta": {
         "first_seen": "2026-09-06T07:26:08.741230+00:00",
-        "last_updated": "2026-09-08T07:11:24.811985+00:00",
+        "last_updated": "2026-09-09T02:46:08.823945+00:00",
         "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "swe_bench_verified 70.8 via https://www.swebench.com/",
+          "swe_atlas_codebase_qna 13.1 via https://labs.scale.com/leaderboard/sweatlas-qna",
+          "swe_atlas_refactoring 20.95 via https://labs.scale.com/leaderboard/sweatlas-refactoring"
+        ],
+        "confidence": 0.08,
+        "coding": true,
+        "decision": "keep",
+        "tier": "max"
       }
     },
     "mimo-v2.5-pro": {
@@ -1181,8 +1373,20 @@
       },
       "_meta": {
         "first_seen": "2026-09-06T07:26:10.213370+00:00",
-        "last_updated": "2026-09-08T07:29:55.294856+00:00",
+        "last_updated": "2026-09-09T13:10:37.462350+00:00",
         "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "swe_bench_verified 78.9 via https://huggingface.co/XiaomiMiMo/MiMo-V2.5-Pro",
+          "gpqa_diamond 86.6 via https://mimo.xiaomi.com/mimo-v2-5-pro/",
+          "AA Intelligence Index 42.9 for 00f1248e-78e3-4230-8dc8-5e13ba8645e2 via https://artificialanalysis.ai/models/mimo-v2-5-pro"
+        ],
+        "confidence": 0.17,
+        "coding": true,
+        "decision": "keep",
+        "tier": "flash"
       }
     },
     "minimax-m2.7": {
@@ -1233,8 +1437,20 @@
       },
       "_meta": {
         "first_seen": "2026-09-06T07:44:54.219068+00:00",
-        "last_updated": "2026-09-08T07:29:55.294856+00:00",
+        "last_updated": "2026-09-09T13:10:37.462350+00:00",
         "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "swe_bench_verified 79.9 via https://www.minimax.io/blog/minimax-m3",
+          "terminal_bench 51.1 via https://www.minimax.io/blog/minimax-m3",
+          "AA Intelligence Index 38.9 for 4bbceacb-cf47-464b-b60f-e1d1fe016d67 via https://artificialanalysis.ai/models/minimax-m2-7"
+        ],
+        "confidence": 0.17,
+        "coding": true,
+        "decision": "keep",
+        "tier": "max"
       }
     },
     "minimax-m3": {
@@ -1318,8 +1534,20 @@
       },
       "_meta": {
         "first_seen": "2026-09-06T07:55:23.178019+00:00",
-        "last_updated": "2026-09-08T07:30:17.204105+00:00",
+        "last_updated": "2026-09-09T13:10:37.462350+00:00",
         "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "swe_bench_verified 80.5 via https://www.minimax.io/blog/minimax-m3",
+          "terminal_bench 66 via https://www.minimax.io/blog/minimax-m3",
+          "osworld_verified 70.06 via https://www.minimax.io/blog/minimax-m3"
+        ],
+        "confidence": 0.33,
+        "coding": true,
+        "decision": "keep",
+        "tier": "max"
       }
     },
     "claude-sonnet-5": {
@@ -1409,8 +1637,20 @@
       },
       "_meta": {
         "first_seen": "2026-09-06T08:18:59.405222+00:00",
-        "last_updated": "2026-09-08T07:14:13.495560+00:00",
+        "last_updated": "2026-09-09T05:05:55.402238+00:00",
         "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "swe_bench_verified 85.2 via https://www.anthropic.com/news/claude-sonnet-5",
+          "terminal_bench 80.4 via https://www.anthropic.com/news/claude-sonnet-5",
+          "osworld_verified 81.2 via https://www.anthropic.com/news/claude-sonnet-5"
+        ],
+        "confidence": 0.33,
+        "coding": true,
+        "decision": "keep",
+        "tier": "max"
       }
     },
     "qwen3.7-max": {
@@ -1510,8 +1750,20 @@
       },
       "_meta": {
         "first_seen": "2026-09-06T08:20:14.959187+00:00",
-        "last_updated": "2026-09-06T08:54:38.564109+00:00",
+        "last_updated": "2026-09-09T13:04:18.126865+00:00",
         "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "swe_bench_verified 80.4 via https://qwen.ai/blog?id=qwen3.7",
+          "terminal_bench 69.7 via https://qwen.ai/blog?id=qwen3.7",
+          "gpqa_diamond 92.4 via https://qwen.ai/blog?id=qwen3.7"
+        ],
+        "confidence": 0.25,
+        "coding": true,
+        "decision": "keep",
+        "tier": "max"
       }
     },
     "kimi-k3": {
@@ -1637,8 +1889,20 @@
       },
       "_meta": {
         "first_seen": "2026-09-06T08:32:53.712634+00:00",
-        "last_updated": "2026-09-08T07:30:17.204105+00:00",
+        "last_updated": "2026-09-09T13:10:53.934792+00:00",
         "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "deepswe 67.5 via https://www.kimi.com/blog/kimi-k3",
+          "terminal_bench 88.3 via https://www.kimi.com/blog/kimi-k3",
+          "swe_bench_marathon 42 via https://www.kimi.com/blog/kimi-k3"
+        ],
+        "confidence": 0.25,
+        "coding": true,
+        "decision": "keep",
+        "tier": "max"
       }
     },
     "hy3": {
@@ -1682,8 +1946,20 @@
       },
       "_meta": {
         "first_seen": "2026-09-06T08:40:22.060602+00:00",
-        "last_updated": "2026-09-08T07:25:48.812568+00:00",
+        "last_updated": "2026-09-09T13:27:44.403890+00:00",
         "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "swe_bench_verified 74.4 via https://huggingface.co/tencent/Hy3-preview",
+          "aa_intelligence 42.2 via artificial_analysis (https://www.datalearner.com/benchmarks/aa_intelligence)",
+          "aa_coding 58.8 via artificial_analysis (https://www.datalearner.com/benchmarks/aa_coding)"
+        ],
+        "confidence": 0.17,
+        "coding": true,
+        "decision": "keep",
+        "tier": "flash"
       }
     },
     "gpt-5.6-luna": {
@@ -1807,8 +2083,20 @@
       },
       "_meta": {
         "first_seen": "2026-09-06T08:45:16.336534+00:00",
-        "last_updated": "2026-09-08T07:14:13.495560+00:00",
+        "last_updated": "2026-09-09T05:05:55.402238+00:00",
         "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "terminal_bench 84.7 via https://openai.com/index/gpt-5-6/",
+          "deepswe 67.2 via https://openai.com/index/gpt-5-6/",
+          "gpqa_diamond 92.3 via https://openai.com/index/gpt-5-6/"
+        ],
+        "confidence": 0.33,
+        "coding": true,
+        "decision": "keep",
+        "tier": "flash"
       }
     },
     "o3": {
@@ -1847,8 +2135,20 @@
       },
       "_meta": {
         "first_seen": "2026-09-08T05:31:24.914052+00:00",
-        "last_updated": "2026-09-08T07:11:24.811985+00:00",
+        "last_updated": "2026-09-09T02:46:08.823945+00:00",
         "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "aider_polyglot 81.3 via https://aider.chat/docs/leaderboards/",
+          "aa_intelligence 31.1 via artificial_analysis (https://www.datalearner.com/benchmarks/aa_intelligence)",
+          "AA Intelligence Index 31.1 for 16c5b637-8bce-4252-81f2-1b87a36a4e4c via https://artificialanalysis.ai/models/o3"
+        ],
+        "confidence": 0.17,
+        "coding": true,
+        "decision": "keep",
+        "tier": "flash"
       }
     },
     "laguna-xs-2.1": {
@@ -1953,8 +2253,674 @@
       },
       "_meta": {
         "first_seen": "2026-09-08T07:30:22.934862+00:00",
-        "last_updated": "2026-09-08T07:30:22.950390+00:00",
+        "last_updated": "2026-09-09T13:19:53.055180+00:00",
         "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "swe_bench_verified 70.9 via https://poolside.ai/blog/introducing-laguna-xs-2-1",
+          "terminal_bench 37.5 via https://poolside.ai/blog/introducing-laguna-xs-2-1"
+        ],
+        "confidence": 0.17,
+        "coding": true,
+        "decision": "keep",
+        "tier": "flash"
+      }
+    },
+    "agnes-2.5-pro-beta": {
+      "benchmarks": {
+        "scores": {
+          "aa_intelligence": {
+            "score": 49.1,
+            "metric": "index",
+            "source": "artificial_analysis"
+          },
+          "aa_coding": {
+            "score": 62.3,
+            "metric": "index",
+            "source": "artificial_analysis"
+          }
+        },
+        "raw_benchmarks": [],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.08
+      },
+      "pricing": {
+        "blended": 0.15,
+        "input": 0.1,
+        "output": 0.3,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 0.15,
+        "price_1m_input_tokens": 0.1,
+        "price_1m_output_tokens": 0.3
+      },
+      "_meta": {
+        "first_seen": "2026-09-09T04:19:10.237681+00:00",
+        "last_updated": "2026-09-09T12:58:05.602325+00:00",
+        "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "aa_intelligence 49.1 via artificial_analysis (https://www.datalearner.com/benchmarks/aa_intelligence)",
+          "aa_coding 62.3 via artificial_analysis (https://www.datalearner.com/benchmarks/aa_coding)",
+          "AA Intelligence Index 49.1 for f3a0e101-086f-44b3-a1b2-d23498f9716b via https://artificialanalysis.ai/models/agnes-2-5-pro-beta"
+        ],
+        "confidence": 0.08,
+        "coding": true,
+        "decision": "keep",
+        "tier": "flash"
+      }
+    },
+    "kimi-k2.6": {
+      "benchmarks": {
+        "scores": {
+          "swe_bench_verified": {
+            "score": 80.2,
+            "metric": "resolved",
+            "source": "https://huggingface.co/moonshotai/Kimi-K2.6"
+          },
+          "aa_agentic": {
+            "score": 50.5,
+            "metric": "average pass@1",
+            "source": "https://artificialanalysis.ai/agents/coding-agents"
+          },
+          "swe_atlas_codebase_qna": {
+            "score": 59.8,
+            "metric": "pass@1",
+            "source": "https://artificialanalysis.ai/agents/coding-agents"
+          },
+          "terminal_bench": {
+            "score": 64.3,
+            "metric": "pass@1",
+            "source": "https://artificialanalysis.ai/agents/coding-agents"
+          }
+        },
+        "raw_benchmarks": [
+          {
+            "name": "SWE-Bench Verified",
+            "score": 80.2,
+            "metric": "resolved",
+            "source": "https://huggingface.co/moonshotai/Kimi-K2.6"
+          },
+          {
+            "name": "Artificial Analysis Coding Agent Index",
+            "score": 50.5,
+            "metric": "average pass@1",
+            "source": "https://artificialanalysis.ai/agents/coding-agents"
+          },
+          {
+            "name": "SWE-Atlas Codebase QnA",
+            "score": 59.8,
+            "metric": "pass@1",
+            "source": "https://artificialanalysis.ai/agents/coding-agents"
+          },
+          {
+            "name": "SWE-Bench Pro",
+            "score": 27.3,
+            "metric": "pass@1",
+            "source": "https://artificialanalysis.ai/agents/coding-agents"
+          },
+          {
+            "name": "Terminal-Bench",
+            "score": 64.3,
+            "metric": "pass@1",
+            "source": "https://artificialanalysis.ai/agents/coding-agents"
+          }
+        ],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.17
+      },
+      "pricing": {
+        "blended": 1.712,
+        "input": 0.95,
+        "output": 4,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 1.712,
+        "price_1m_input_tokens": 0.95,
+        "price_1m_output_tokens": 4
+      },
+      "_meta": {
+        "first_seen": "2026-09-09T05:02:07.919506+00:00",
+        "last_updated": "2026-09-09T13:10:53.934792+00:00",
+        "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "SWE-Bench Verified score of 80.2 shows strong coding capability (source: https://huggingface.co/moonshotai/Kimi-K2.6)",
+          "Terminal-Bench score of 64.3 and AA Intelligence Index of 45.1 confirm coding proficiency (source: https://artificialanalysis.ai/agents/coding-agents)",
+          "Pricing blended $1.71/1M, intelligence per dollar 41.8 influenced tier=max"
+        ],
+        "confidence": 0.9,
+        "coding": true,
+        "decision": "keep",
+        "tier": "max"
+      }
+    },
+    "claude-sonnet-4-6": {
+      "benchmarks": {
+        "scores": {
+          "swe_atlas_codebase_qna": {
+            "score": 31.2,
+            "metric": "score",
+            "source": "https://labs.scale.com/leaderboard/sweatlas-qna"
+          },
+          "swe_atlas_refactoring": {
+            "score": 32.21,
+            "metric": "score",
+            "source": "https://labs.scale.com/leaderboard/sweatlas-refactoring"
+          },
+          "swe_atlas_test_writing": {
+            "score": 31.76,
+            "metric": "score",
+            "source": "https://labs.scale.com/leaderboard/sweatlas-tw"
+          },
+          "aa_agentic": {
+            "score": 49.4,
+            "metric": "average pass@1",
+            "source": "https://artificialanalysis.ai/agents/coding-agents"
+          },
+          "terminal_bench": {
+            "score": 63.1,
+            "metric": "pass@1",
+            "source": "https://artificialanalysis.ai/agents/coding-agents"
+          },
+          "humanity_last_exam": {
+            "score": 34.6,
+            "metric": "accuracy",
+            "source": "https://www.anthropic.com/news/claude-sonnet-5"
+          },
+          "osworld_verified": {
+            "score": 78.5,
+            "metric": "success rate",
+            "source": "https://www.anthropic.com/news/claude-sonnet-5"
+          },
+          "aa_intelligence": {
+            "score": 36.8,
+            "metric": "index",
+            "source": "artificial_analysis"
+          }
+        },
+        "raw_benchmarks": [
+          {
+            "name": "SWE-Atlas Codebase QnA",
+            "score": 31.2,
+            "metric": "score",
+            "source": "https://labs.scale.com/leaderboard/sweatlas-qna"
+          },
+          {
+            "name": "SWE-Atlas Refactoring",
+            "score": 32.21,
+            "metric": "score",
+            "source": "https://labs.scale.com/leaderboard/sweatlas-refactoring"
+          },
+          {
+            "name": "SWE-Atlas Test Writing",
+            "score": 31.76,
+            "metric": "score",
+            "source": "https://labs.scale.com/leaderboard/sweatlas-tw"
+          },
+          {
+            "name": "Artificial Analysis Coding Agent Index",
+            "score": 49.4,
+            "metric": "average pass@1",
+            "source": "https://artificialanalysis.ai/agents/coding-agents"
+          },
+          {
+            "name": "SWE-Atlas Codebase QnA",
+            "score": 70.3,
+            "metric": "pass@1",
+            "source": "https://artificialanalysis.ai/agents/coding-agents"
+          },
+          {
+            "name": "SWE-Bench Pro",
+            "score": 14.9,
+            "metric": "pass@1",
+            "source": "https://artificialanalysis.ai/agents/coding-agents"
+          },
+          {
+            "name": "Terminal-Bench",
+            "score": 63.1,
+            "metric": "pass@1",
+            "source": "https://artificialanalysis.ai/agents/coding-agents"
+          },
+          {
+            "name": "Terminal-Bench",
+            "score": 67,
+            "metric": "success rate",
+            "source": "https://www.anthropic.com/news/claude-sonnet-5"
+          },
+          {
+            "name": "Humanity's Last Exam",
+            "score": 34.6,
+            "metric": "accuracy",
+            "source": "https://www.anthropic.com/news/claude-sonnet-5"
+          },
+          {
+            "name": "Humanity's Last Exam",
+            "score": 46.8,
+            "metric": "accuracy",
+            "source": "https://www.anthropic.com/news/claude-sonnet-5"
+          },
+          {
+            "name": "OSWorld-Verified",
+            "score": 78.5,
+            "metric": "success rate",
+            "source": "https://www.anthropic.com/news/claude-sonnet-5"
+          }
+        ],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.25
+      },
+      "pricing": {
+        "blended": 6,
+        "input": 3,
+        "output": 15,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 6,
+        "price_1m_input_tokens": 3,
+        "price_1m_output_tokens": 15
+      },
+      "_meta": {
+        "first_seen": "2026-09-09T05:03:47.746832+00:00",
+        "last_updated": "2026-09-09T05:05:55.402238+00:00",
+        "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "AA Intelligence Index 36.8 (above 24.0 minimum) with Terminal-Bench 63.1% pass@1, both from artificialanalysis.ai (source: https://artificialanalysis.ai/agents/coding-agents)",
+          "Provider claims it is a Claude workhorse for coding agents with careful analysis capabilities (source: provider metadata)",
+          "Pricing blended $6.00/1M, intelligence per dollar 9.1 influenced tier=flash"
+        ],
+        "confidence": 0.85,
+        "coding": true,
+        "decision": "keep",
+        "tier": "flash"
+      }
+    },
+    "gpt-5.6-sol": {
+      "benchmarks": {
+        "scores": {
+          "terminal_bench": {
+            "score": 88.8,
+            "metric": "success rate",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          "deepswe": {
+            "score": 72.7,
+            "metric": "resolve rate",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          "gpqa_diamond": {
+            "score": 94.6,
+            "metric": "accuracy",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          "osworld": {
+            "score": 62.6,
+            "metric": "success rate",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          "aa_intelligence": {
+            "score": 58.9,
+            "metric": "index score",
+            "source": "https://artificialanalysis.ai/articles/gpt-5-6-has-landed"
+          },
+          "aa_agentic": {
+            "score": 80,
+            "metric": "index score",
+            "source": "https://artificialanalysis.ai/articles/gpt-5-6-has-landed"
+          }
+        },
+        "raw_benchmarks": [
+          {
+            "name": "SWE-Bench Pro",
+            "score": 64.6,
+            "metric": "resolve rate",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          {
+            "name": "Terminal-Bench",
+            "score": 88.8,
+            "metric": "success rate",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          {
+            "name": "DeepSWE",
+            "score": 72.7,
+            "metric": "resolve rate",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          {
+            "name": "GPQA Diamond",
+            "score": 94.6,
+            "metric": "accuracy",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          {
+            "name": "FrontierMath",
+            "score": 89,
+            "metric": "accuracy",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          {
+            "name": "BrowseComp",
+            "score": 90.4,
+            "metric": "accuracy",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          {
+            "name": "OSWorld",
+            "score": 62.6,
+            "metric": "success rate",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          {
+            "name": "MMMU Pro",
+            "score": 83,
+            "metric": "accuracy",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          {
+            "name": "Agents' Last Exam",
+            "score": 52.7,
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          {
+            "name": "Toolathlon",
+            "score": 58,
+            "metric": "success rate",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          {
+            "name": "Artificial Analysis Intelligence Index",
+            "score": 58.9,
+            "metric": "index score",
+            "source": "https://artificialanalysis.ai/articles/gpt-5-6-has-landed"
+          },
+          {
+            "name": "Artificial Analysis Coding Agent Index",
+            "score": 80,
+            "metric": "index score",
+            "source": "https://artificialanalysis.ai/articles/gpt-5-6-has-landed"
+          }
+        ],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.33
+      },
+      "pricing": {
+        "blended": 8,
+        "input": 4,
+        "output": 20,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 8,
+        "price_1m_input_tokens": 4,
+        "price_1m_output_tokens": 20
+      },
+      "_meta": {
+        "first_seen": "2026-09-09T05:03:59.275276+00:00",
+        "last_updated": "2026-09-09T05:05:55.402238+00:00",
+        "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "Terminal-Bench 88.8% and SWE-Bench Pro 64.6% demonstrate strong coding performance (source: https://openai.com/index/gpt-5-6/)",
+          "Artificial Analysis Intelligence Index 60.9 with direct model match d93edfe8-bf35-49ad-b56e-b18116142a1c (source: https://artificialanalysis.ai/articles/gpt-5-6-has-landed)",
+          "Pricing blended $8.00/1M, intelligence per dollar 9.5 influenced tier=max"
+        ],
+        "confidence": 0.95,
+        "coding": true,
+        "decision": "keep",
+        "tier": "max"
+      }
+    },
+    "deepseek-v4-pro": {
+      "benchmarks": {
+        "scores": {
+          "swe_bench_verified": {
+            "score": 80.6,
+            "metric": "resolved",
+            "source": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro"
+          },
+          "aa_agentic": {
+            "score": 50.1,
+            "metric": "average pass@1",
+            "source": "https://artificialanalysis.ai/agents/coding-agents"
+          },
+          "swe_atlas_codebase_qna": {
+            "score": 67.8,
+            "metric": "pass@1",
+            "source": "https://artificialanalysis.ai/agents/coding-agents"
+          },
+          "terminal_bench": {
+            "score": 64.7,
+            "metric": "pass@1",
+            "source": "https://artificialanalysis.ai/agents/coding-agents"
+          },
+          "aa_intelligence": {
+            "score": 53.2,
+            "metric": "index",
+            "source": "artificial_analysis"
+          },
+          "aa_coding": {
+            "score": 68.8,
+            "metric": "index",
+            "source": "artificial_analysis"
+          }
+        },
+        "raw_benchmarks": [
+          {
+            "name": "SWE-Bench Verified",
+            "score": 80.6,
+            "metric": "resolved",
+            "source": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro"
+          },
+          {
+            "name": "Artificial Analysis Coding Agent Index",
+            "score": 50.1,
+            "metric": "average pass@1",
+            "source": "https://artificialanalysis.ai/agents/coding-agents"
+          },
+          {
+            "name": "SWE-Atlas Codebase QnA",
+            "score": 67.8,
+            "metric": "pass@1",
+            "source": "https://artificialanalysis.ai/agents/coding-agents"
+          },
+          {
+            "name": "SWE-Bench Pro",
+            "score": 18,
+            "metric": "pass@1",
+            "source": "https://artificialanalysis.ai/agents/coding-agents"
+          },
+          {
+            "name": "Terminal-Bench",
+            "score": 64.7,
+            "metric": "pass@1",
+            "source": "https://artificialanalysis.ai/agents/coding-agents"
+          }
+        ],
+        "benchmark_coverage": 0.5,
+        "coverage_with_supplements": 0.25
+      },
+      "pricing": {
+        "blended": 1.98,
+        "input": 1.32,
+        "output": 3.96,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 1.98,
+        "price_1m_input_tokens": 1.32,
+        "price_1m_output_tokens": 3.96
+      },
+      "_meta": {
+        "first_seen": "2026-09-09T05:04:05.215698+00:00",
+        "last_updated": "2026-09-09T13:10:37.462350+00:00",
+        "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "SWE-Bench Verified 80.6% (source: https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro)",
+          "Terminal-Bench 64.7% (source: https://artificialanalysis.ai/agents/coding-agents)",
+          "Pricing blended $1.98/1M, intelligence per dollar 33.0 influenced tier=max"
+        ],
+        "confidence": 0.95,
+        "coding": true,
+        "decision": "keep",
+        "tier": "max"
+      }
+    },
+    "qwen3.6-27b": {
+      "benchmarks": {
+        "scores": {
+          "swe_bench_verified": {
+            "score": 77.2,
+            "metric": "resolved",
+            "source": "https://huggingface.co/Qwen/Qwen3.6-27B"
+          }
+        },
+        "raw_benchmarks": [
+          {
+            "name": "SWE-Bench Verified",
+            "score": 77.2,
+            "metric": "resolved",
+            "source": "https://huggingface.co/Qwen/Qwen3.6-27B"
+          }
+        ],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.08
+      },
+      "pricing": {
+        "blended": 1.35,
+        "input": 0.6,
+        "output": 3.6,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 1.35,
+        "price_1m_input_tokens": 0.6,
+        "price_1m_output_tokens": 3.6
+      },
+      "_meta": {
+        "first_seen": "2026-09-09T12:04:48.683080+00:00",
+        "last_updated": "2026-09-09T13:19:53.055180+00:00",
+        "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "SWE-Bench Verified score of 77.2 from HuggingFace model card (source: https://huggingface.co/Qwen/Qwen3.6-27B)",
+          "Artificial Analysis Intelligence Index score of 37.7 for matched model Qwen3.6 27B (Reasoning)",
+          "Pricing blended $1.35/1M, intelligence per dollar 55.1 influenced tier=max"
+        ],
+        "confidence": 0.9,
+        "coding": true,
+        "decision": "keep",
+        "tier": "max"
+      }
+    },
+    "muse-glimmer-30b": {
+      "benchmarks": {
+        "scores": {
+          "swe_bench_verified": {
+            "score": 76,
+            "metric": "resolve rate",
+            "source": "https://huggingface.co/meta-models/Muse-Glimmer-30B"
+          },
+          "terminal_bench": {
+            "score": 51.7,
+            "metric": "success rate",
+            "source": "https://huggingface.co/meta-models/Muse-Glimmer-30B"
+          },
+          "osworld_verified": {
+            "score": 65.9,
+            "metric": "success rate",
+            "source": "https://huggingface.co/meta-models/Muse-Glimmer-30B"
+          },
+          "gpqa_diamond": {
+            "score": 83.5,
+            "metric": "accuracy",
+            "source": "https://huggingface.co/meta-models/Muse-Glimmer-30B"
+          }
+        },
+        "raw_benchmarks": [
+          {
+            "name": "MCP Atlas",
+            "score": 75.5,
+            "metric": "success rate",
+            "source": "https://huggingface.co/meta-models/Muse-Glimmer-30B"
+          },
+          {
+            "name": "DeepSearch QA",
+            "score": 74.6,
+            "source": "https://huggingface.co/meta-models/Muse-Glimmer-30B"
+          },
+          {
+            "name": "SWE-Bench Pro",
+            "score": 51.2,
+            "metric": "resolve rate",
+            "source": "https://huggingface.co/meta-models/Muse-Glimmer-30B"
+          },
+          {
+            "name": "SWE-Bench Verified",
+            "score": 76,
+            "metric": "resolve rate",
+            "source": "https://huggingface.co/meta-models/Muse-Glimmer-30B"
+          },
+          {
+            "name": "Terminal-Bench",
+            "score": 51.7,
+            "metric": "success rate",
+            "source": "https://huggingface.co/meta-models/Muse-Glimmer-30B"
+          },
+          {
+            "name": "OSWorld-Verified",
+            "score": 65.9,
+            "metric": "success rate",
+            "source": "https://huggingface.co/meta-models/Muse-Glimmer-30B"
+          },
+          {
+            "name": "AIME 2026",
+            "score": 94.7,
+            "metric": "accuracy",
+            "source": "https://huggingface.co/meta-models/Muse-Glimmer-30B"
+          },
+          {
+            "name": "GPQA Diamond",
+            "score": 83.5,
+            "metric": "accuracy",
+            "source": "https://huggingface.co/meta-models/Muse-Glimmer-30B"
+          },
+          {
+            "name": "CharXiv Reasoning",
+            "score": 78.8,
+            "metric": "accuracy",
+            "source": "https://huggingface.co/meta-models/Muse-Glimmer-30B"
+          }
+        ],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.33
+      },
+      "pricing": {
+        "per_provider_overrides": {}
+      },
+      "_meta": {
+        "first_seen": "2026-09-09T12:04:51.262377+00:00",
+        "last_updated": "2026-09-09T13:19:53.055180+00:00",
+        "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "SWE-Bench Verified 76 and Terminal-Bench 51.7 indicate strong coding and agentic capability (source: https://huggingface.co/meta-models/Muse-Glimmer-30B)",
+          "Provider claims the 30B model supports coding, tool use, and local agents (source: provider metadata)"
+        ],
+        "confidence": 0.6,
+        "coding": true,
+        "decision": "keep",
+        "tier": "max"
       }
     }
   }

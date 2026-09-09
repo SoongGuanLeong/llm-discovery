@@ -8,9 +8,9 @@ infisical:
   discovery_project_id_env: LLM_DISCOVERY_PROJECT_ID
 
 judge_llm:
-  base_url: https://apihub.agnes-ai.com/v1
-  model: agnes-2.0-flash
-  secret: AGNES_AI_API_KEY
+  base_url: https://api.kilo.ai/api/gateway
+  model: kilo-auto/free
+  secret: KILO_AI_API_KEY
 
 providers:
   - name: agnes
@@ -52,7 +52,7 @@ providers:
     secret: MISTRAL_API_KEY
 
   - name: modelscope
-    base_url: https://api-inference.modelscope.cn/v1
+    base_url: https://api-inference.modelscope.ai/v1
     secret: MODELSCOPE_API_KEY
 
   - name: nararouter
@@ -80,21 +80,17 @@ providers:
     base_url: https://openrouter.ai/api/v1
     secret: OPENROUTER_API_KEY
 
+  - name: orcarouter
+    base_url: https://api.orcarouter.ai/v1
+    secret: ORCAROUTER_API_KEY
+
   - name: reka
     base_url: https://api.reka.ai/v1
     secret: REKA_API_KEY
 
-  - name: requesty
-    base_url: https://router.requesty.ai/v1
-    secret: REQUESTY_API_KEY
-
-  - name: sea-lion
-    base_url: https://api.sea-lion.ai/v1
-    secret: SEALION_API_KEY
-
-  - name: cohere
-    base_url: https://api.cohere.com/v1
-    secret: COHERE_API_KEY
+  - name: unorouter
+    base_url: https://api.unorouter.com/v1
+    secret: UNOROUTER_API_KEY
 
   - name: zai
     base_url: https://api.z.ai/api/paas/v4

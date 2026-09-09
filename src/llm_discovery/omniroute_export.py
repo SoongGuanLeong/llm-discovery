@@ -54,17 +54,6 @@ COMBO_CREATE_PATH = "/api/combos"
 
 PROVIDER_MODELS_PATH = "/api/provider-models"
 
-# Ticket 176: providers that map to custom OpenAI-compatible node ids
-# (registry entries lack modelsUrl; baseUrl honored only by compatible nodes)
-CUSTOM_NODE_MAP = {
-    "nararouter": "openai-compatible-nara",
-    "zai": "openai-compatible-zai",
-    "agnes": "openai-compatible-agnes",
-}
-
-# Ticket 176: opencode_zen maps to opencode-zen registry id (not free opencode)
-OPENCOD_ZEN_MAP = {"opencode_zen": "opencode-zen"}
-
 # Registry alias map for apply-time fallback (import file keeps original names for determinism)
 _PROVIDER_ALIAS = {
     "google": "gemini",
@@ -74,7 +63,20 @@ _PROVIDER_ALIAS = {
     "navy_ai": "navy",
     "ollama_cloud": "ollama-cloud",
     "sea-lion": "sealion",
+    "opencode_zen": "opencode-zen",
+    "modelscope": "modelscope-custom",
 }
+
+# Ticket 176: providers that map to custom OpenAI-compatible node ids
+# Stable custom ids — model names after import are provider/model like nararouter-custom/muse-spark-...
+CUSTOM_NODE_MAP = {
+    "nararouter": "nararouter-custom",
+    "zai": "zai-custom",
+    "agnes": "agnes-custom",
+}
+
+# Ticket 176: opencode_zen maps to opencode-zen registry id (not free opencode)
+OPENCOD_ZEN_MAP = {"opencode_zen": "opencode-zen"}
 
 
 # Ticket 177: model provisioning provider mapping (same as T1)
@@ -86,9 +88,9 @@ _MODEL_PROVIDER_MAP = {
 
 # Ticket 176: retired provider ids â frozen registry + free opencode
 RETIRED_PROVIDER_IDS = frozenset({
-    "nara",        # frozen static catalog (3 models, live=47)
-    "zai",         # frozen static catalog (7 models, live=10)
-    "agnes",       # frozen static catalog (3 models, live=12)
+    "nara",        # frozen static catalog (3 models, live=47 via custom node)
+    "zai",         # frozen static catalog (7 models, live=10 via custom node)
+    "agnes",       # frozen static catalog (3 models, live=12 via custom node)
     "opencode",    # free no-auth (70 models, zen=13)
 })
 
@@ -143,8 +145,9 @@ def build_import_entries(providers_path: Path = DEFAULT_PROVIDERS) -> list[dict[
         base = p.get("base_url")
         if base is None:
             base = p.get("baseUrl")
-        # Ticket 176: map to custom node / zen registry id
-        provider_id = CUSTOM_NODE_MAP.get(name, OPENCOD_ZEN_MAP.get(name, name))
+        # Ticket 176 + 177: map via full alias table so import provider ids match combo/model ids
+        # (custom nodes + gemini/cloudflare-ai/kilo-gateway/navy/nvidia/ollama-cloud etc)
+        provider_id = _MODEL_PROVIDER_MAP.get(name, name)
         row: dict[str, Any] = {"provider": provider_id, "name": name, "apiKey": f"env:{secret}" if secret else ""}
         if base is not None and str(base).strip() != "":
             row["baseUrl"] = str(base)
@@ -298,10 +301,11 @@ def build_combo_entries(results_dir: Path = DEFAULT_RESULTS_DIR, *, strict_contr
             print(f"warning: tier {tier} has 0 targets, skipping combo", file=sys.stderr)
             continue
         recs_sorted = sorted(recs, key=lambda r: (str(r.get("provider", "")), str(r.get("model_id", ""))))
-        models = [
-            {"provider": _map_provider_for_model(str(r["provider"])), "model": str(r["model_id"])}
-            for r in recs_sorted
-        ]
+        models = []
+        for r in recs_sorted:
+            provider = _map_provider_for_model(str(r["provider"]))
+            model_id = str(r["model_id"])
+            models.append({"provider": provider, "model": model_id})
         combos.append({"name": tier, "models": models, "strategy": "reset-aware", "config": {}})
     combos.sort(key=lambda c: c.get("name", ""))
     return combos
@@ -564,17 +568,34 @@ def patch_provider_specific_data(base_url: str, import_rows: list[dict[str, Any]
         headers.update(auth_headers)
     base = base_url.rstrip("/")
     existing = _fetch_existing_connections(base_url, auth_headers, timeout)
-    # Build set of live-discoverable provider ids from import rows
-    live_ids = {r["provider"] for r in import_rows}
+    # Build set of live-discoverable provider ids from import rows (mapped via custom + alias)
+    live_ids = {CUSTOM_NODE_MAP.get(str(r["provider"]), OPENCOD_ZEN_MAP.get(str(r["provider"]), _map_provider(str(r["provider"])))) for r in import_rows}
     # Also include cloudflare-ai (mapped from cloudflare)
     live_ids.add("cloudflare-ai")
-    # Filter existing connections to live-discoverable ones
-    to_patch = [c for c in existing if c.get("provider") in live_ids]
+    # Build desired baseUrl map from import rows (match by connection name first, then provider id)
+    desired_base_urls: dict[str, str] = {}
+    desired_base_urls_by_provider: dict[str, str] = {}
+    import_names = {str(r.get("name") or "").strip() for r in import_rows}
+    for r in import_rows:
+        name = str(r.get("name") or "").strip()
+        base_url_val = r.get("baseUrl")
+        if name and base_url_val:
+            desired_base_urls[name] = str(base_url_val)
+        provider_id = str(r.get("provider") or "").strip()
+        if provider_id and base_url_val:
+            desired_base_urls_by_provider[provider_id] = str(base_url_val)
+            # also index by alias/custom mapped ids
+            for m in [_map_provider(provider_id), CUSTOM_NODE_MAP.get(provider_id, ""), OPENCOD_ZEN_MAP.get(provider_id, "")]:
+                if m and m != provider_id:
+                    desired_base_urls_by_provider[m] = str(base_url_val)
+    # Filter existing connections to live-discoverable ones (by provider or by name fallback for aliases like nararouter->nara)
+    to_patch = [c for c in existing if c.get("provider") in live_ids or str(c.get("name") or "").strip() in import_names]
     results: list[dict[str, Any]] = []
     warnings: list[str] = []
     for conn in to_patch:
         cid = conn.get("id")
         provider = conn.get("provider")
+        name = conn.get("name")
         if not cid:
             continue
         psd: dict[str, Any] = {}
@@ -585,6 +606,13 @@ def patch_provider_specific_data(base_url: str, import_rows: list[dict[str, Any]
                 psd["accountId"] = account_id
             else:
                 warnings.append("cloudflare accountId missing: CLOUDFLARE_ACCOUNT_ID not set, skipping")
+        # Ticket 178: patch baseUrl for providers whose registry baseUrl is stale/missing
+        # (UI does not expose baseUrl editing, so we fix it via API)
+        desired_base = desired_base_urls.get(str(name or "")) or desired_base_urls_by_provider.get(str(provider or ""))
+        if desired_base:
+            current_base = (conn.get("providerSpecificData") or {}).get("baseUrl", "")
+            if current_base != desired_base:
+                psd["baseUrl"] = desired_base
         # autoSync + autoFetchModels on every live-discoverable connection
         psd["autoSync"] = True
         psd["autoFetchModels"] = True
@@ -650,7 +678,7 @@ def fetch_existing_models(base_url: str, provider: str, auth_headers: dict[str, 
 def apply_gc(base_url: str, provider: str, keep_model_ids: set[str], auth_headers: dict[str, str] | None = None, timeout: float = 15.0) -> dict[str, Any]:
     """Ticket 177: guarded GC - delete custom rows not in keep set."""
     existing = fetch_existing_models(base_url, provider, auth_headers, timeout)
-    to_delete = [m for m in existing if m.get("modelId") not in keep_model_ids]
+    to_delete = [m for m in existing if (m.get("modelId") or m.get("id")) not in keep_model_ids]
     if not to_delete:
         return {"provider": provider, "deleted": [], "count": 0, "skipped_empty": True}
     httpx = _httpx_client()
@@ -660,8 +688,9 @@ def apply_gc(base_url: str, provider: str, keep_model_ids: set[str], auth_header
     base = base_url.rstrip("/")
     results: list[dict[str, Any]] = []
     for model in to_delete:
-        mid = model.get("modelId")
-        del_url = base + PROVIDER_MODELS_PATH + "?provider=" + str(provider) + "&modelId=" + str(mid)
+        mid = model.get("modelId") or model.get("id")
+        # Gateway requires model= not modelId= (see manual test: model param succeeds)
+        del_url = base + PROVIDER_MODELS_PATH + "?provider=" + str(provider) + "&model=" + str(mid)
         try:
             resp = httpx.delete(del_url, headers=headers, timeout=timeout)
             if resp.status_code in (200, 201, 204):
@@ -875,6 +904,16 @@ def revert_payload(
                         revert_summary["errors"].append({"name": name, "error": str(e)})
     except Exception as e:
         revert_summary["errors"].append({"scope": "combos", "error": str(e)})
+
+    # 5a. Restore snapshot combos that were overwritten or deleted by apply
+    for combo in snapshot_before.get("combos", []):
+        post_url = f"{base}/api/combos"
+        try:
+            resp = httpx.post(post_url, json=combo, headers=headers, timeout=timeout)
+            if resp.status_code in (200, 201, 204):
+                revert_summary["reverted"].append({"name": combo.get("name"), "action": "restore_combo"})
+        except Exception as e:
+            revert_summary["errors"].append({"name": combo.get("name"), "error": str(e)})
 
     revert_summary["total_reverted"] = len(revert_summary["reverted"])
     revert_summary["total_errors"] = len(revert_summary["errors"])

@@ -55,7 +55,9 @@ class TestBackfillSeam:
         assert raw["version"] == 2
         assert "gpt-4o" in raw["models"]
         assert raw["models"]["gpt-4o"]["pricing"]["blended"] == 0.51
-        assert set(raw["models"]["gpt-4o"].keys()) == {"benchmarks", "pricing", "_meta"}
+        assert {"benchmarks", "pricing", "_meta"}.issubset(set(raw["models"]["gpt-4o"].keys()))
+        # judge is optional (strong-only reuse, 28d TTL)
+        assert set(raw["models"]["gpt-4o"].keys()).issubset({"benchmarks", "pricing", "_meta", "judge"})
         assert raw["models"]["gpt-4o"]["_meta"]["version"] == 2
 
     def test_weak_skipped(self, tmp_path):

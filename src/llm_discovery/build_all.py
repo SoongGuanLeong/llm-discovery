@@ -7,7 +7,7 @@ Orchestrates in order:
      - Bounded parallelism (3-4 concurrent) for provider discovery; intra-provider judge still max_workers=8
      - Store fcntl+atomic safe under cross-provider concurrent puts
   4. Backfill de-duplicates Ephemeral Reports by normalized key via benchmarks gap-fill + pricing aggregation
-  5. GC scans live normalized keys from all keep lists; if key absent from live set and stale (>14d) delete, share-aware
+  5. GC scans live normalized keys from all keep lists; if key absent from live set and stale (>28d) delete, share-aware
   6. Atomic pretty store with version header (via ModelInfoStore) + telemetry
 
 Demoable with tmp data-dir and 2 mocked providers, no network/LLM.
@@ -90,7 +90,7 @@ def build_all(
     provider_names: list[str] | None = None,
     discover_fn: Callable[..., dict[str, list[dict[str, Any]]]] | None = None,
     max_workers: int = 8,
-    catalog_max_age_days: int = 14,
+    catalog_max_age_days: int = 28,
     no_catalog_refresh: bool = False,
 ) -> dict[str, Any]:
     """Build store from providers.yaml in one invocation.
@@ -103,7 +103,7 @@ def build_all(
                      If None, uses pipeline.discover_provider with real catalogs when available.
         max_workers: ThreadPool workers for per-provider discovery (passed to discover_fn).
         catalog_max_age_days: staleness threshold for catalog fetched_at (ADR 0007 rank 6).
-            0 or negative disables the gate. Default 14.
+            0 or negative disables the gate. Default 28.
         no_catalog_refresh: skip the staleness gate entirely (offline builds).
 
     Returns:
@@ -300,7 +300,20 @@ def build_all(
                     per_provider_raw[n] = {"keep": len(res.get("keep", [])), "drop": len(res.get("drop", [])), "error": len(res.get("error", []))}
             files_written.sort()
 
-    # 4-5. Backfill with 14d filter + merge into store atomically — sequential tail (no concurrency)
+    # 3b. Config-driven file GC: when building ALL providers, remove stale result files
+    #     whose provider is no longer listed in config/providers.yaml (e.g. cohere, requesty, sea-lion).
+    #     Subset builds (--providers agnes) must NOT delete other providers.
+    if provider_names is None:
+        allowed = set(provider_list)
+        for yf in sorted(results_dir.glob("*.yaml")):
+            if yf.stem not in allowed:
+                try:
+                    yf.unlink()
+                    print(f"[build-all] GC provider file {yf.name} not in config -> removed")
+                except Exception as exc:
+                    print(f"[build-all] WARN gc file {yf.name}: {exc}")
+
+    # 4-5. Backfill with 28d filter + merge into store atomically — sequential tail (no concurrency)
     stats = backfill(results_dir=results_dir, store_path=store_path)
 
     # 6. GC: share-aware, single-threaded, no cross-provider race (sequential after backfill)
@@ -376,14 +389,14 @@ def build_all(
 
 def main() -> None:
     import argparse
-    parser = argparse.ArgumentParser(description="Build all providers into model_info_store (cache-optional, atomic, 14d filter).", prog="llm-discovery build-all")
+    parser = argparse.ArgumentParser(description="Build all providers into model_info_store (cache-optional, atomic, 28d filter).", prog="llm-discovery build-all")
     parser.add_argument("--data-dir", type=Path, default=Path("data"), help="Data directory (default: data)")
     parser.add_argument("--config", type=Path, default=Path("config/providers.yaml"), help="Providers YAML path")
     parser.add_argument("--providers", nargs="*", help="Optional subset of provider names to build")
     parser.add_argument("--all-providers", action="store_true", help="Build all providers (default, parity with discover.py)")
     parser.add_argument("providers_pos", nargs="*", help=argparse.SUPPRESS)
     parser.add_argument("--workers", "--max-workers", dest="max_workers", type=int, default=8, help="Workers per provider (alias --workers for discover.py parity)")
-    parser.add_argument("--catalog-max-age-days", type=int, default=14, help="Refresh catalogs before build when fetched_at is older than this (0 disables, default 14)")
+    parser.add_argument("--catalog-max-age-days", type=int, default=28, help="Refresh catalogs before build when fetched_at is older than this (0 disables, default 28)")
     parser.add_argument("--no-catalog-refresh", action="store_true", help="Skip the catalog freshness gate entirely (offline builds)")
     args = parser.parse_args()
     # Parity with discover.py: allow positional provider names like "kilo_ai" or "kilo_ai --all"

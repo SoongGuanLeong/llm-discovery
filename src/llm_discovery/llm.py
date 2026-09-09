@@ -11,6 +11,35 @@ from .judge_transport import JudgeTransport
 from .json_repair import extract_and_validate
 
 
+def _extract_message_text(message: dict[str, Any]) -> str:
+    """Model-agnostic content extraction.
+
+    Different gateways expose final answer in different fields:
+    - agnes / OpenAI: content
+    - agnes reasoning variant: reasoning_content
+    - kilo gateway (stepfun etc): reasoning + reasoning_details, content may be empty
+    Prefer content, fall back to reasoning fields.
+    """
+    for key in ("content", "reasoning_content", "reasoning"):
+        val = message.get(key)
+        if isinstance(val, str) and val.strip():
+            return val
+    # reasoning_details: list of {type, text}
+    details = message.get("reasoning_details")
+    if isinstance(details, list):
+        parts = []
+        for d in details:
+            if isinstance(d, dict):
+                t = d.get("text")
+                if isinstance(t, str) and t.strip():
+                    parts.append(t)
+        if parts:
+            return "\n".join(parts)
+    # last resort: empty content but reasoning present -> return reasoning
+    # if all above empty, return content even if empty (caller will retry)
+    return message.get("content") or message.get("reasoning") or message.get("reasoning_content") or ""
+
+
 SYSTEM_PROMPT = """\\
 You evaluate LLMs for a model discovery system.
 
@@ -178,7 +207,7 @@ class LocalLLMEvaluator:
             tool_calls = message.get("tool_calls", [])
 
             if not tool_calls:
-                raw_content = message.get("content") or ""
+                raw_content = _extract_message_text(message)
                 try:
                     return extract_and_validate(raw_content)
                 except ValueError:

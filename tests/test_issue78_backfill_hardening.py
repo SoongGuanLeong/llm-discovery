@@ -62,7 +62,7 @@ class TestStaleFileIgnored:
     def test_stale_file_skipped(self, tmp_path):
         results = tmp_path / "results"
         results.mkdir()
-        _write_yaml(results / "stale.yaml", "stale_provider", [_keep("stale-model")], evaluated_at=_stale_ts(20))
+        _write_yaml(results / "stale.yaml", "stale_provider", [_keep("stale-model")], evaluated_at=_stale_ts(30))
         _write_yaml(results / "fresh.yaml", "fresh_provider", [_keep("fresh-model")], evaluated_at=_fresh_ts())
         store_path = tmp_path / "store.json"
         stats = backfill(results_dir=results, store_path=store_path)
@@ -71,7 +71,7 @@ class TestStaleFileIgnored:
         store = ModelInfoStore(store_path)
         assert store.get("stale-model") is not None
         assert store.get("fresh-model") is not None
-        assert is_stale(_stale_ts(20), DEFAULT_TTL_DAYS) is True
+        assert is_stale(_stale_ts(30), DEFAULT_TTL_DAYS) is True
         assert is_stale(_fresh_ts(), DEFAULT_TTL_DAYS) is False
 
     def test_stale_file_ignored_even_with_strong_evidence(self, tmp_path):

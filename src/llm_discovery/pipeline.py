@@ -29,23 +29,33 @@ from .categorize import categorize_model
 from .policy_gate import PolicyGate
 from .secrets import load_all_secrets, load_discovery_secrets, load_shared_secrets  # noqa: keep aliases for patch compat
 
-TTL_DAYS = 14  # Record TTL for pricing reuse per CONTEXT / #91
+TTL_DAYS = 28  # Record TTL for pricing reuse per CONTEXT / #91
 
 
 # ---------------------------------------------------------------------------
-# In-pipeline cache helpers (issue #96) — strong-only, pricing TTL 14d, benchmarks gap-fill
+# In-pipeline cache helpers (issue #96) — strong-only, pricing TTL 28d, benchmarks gap-fill
 # ---------------------------------------------------------------------------
 
 def classify_hit(record: Any | None) -> str:
-    """Strong-only hit classification.
+    """Strong-only hit classification (28d TTL, same JSON).
 
-    Slim v2 store holds only Keepers (benchmarks+pricing+_meta); moderate/weak
+    Slim v2+judge store holds only Keepers (benchmarks+pricing+_meta+judge?); moderate/weak
     never written, so existence without evidence_level implies Keeper.  When
-    evidence_level present (legacy/mock), enforce strong-only.
-    Returns "strong_hit" or "miss".
+    judge snapshot present enforce strong-only via judge.evidence_level; legacy top-level
+    evidence_level also checked. Returns "strong_hit" or "miss".
     """
     if record is None:
         return "miss"
+    # Prefer judge snapshot (new) over legacy top-level
+    judge = getattr(record, "judge", None)
+    if judge is not None:
+        lvl = getattr(judge, "evidence_level", None)
+        if lvl is None and isinstance(judge, dict):
+            lvl = judge.get("evidence_level")
+        if lvl is not None and str(lvl).strip() != "":
+            return "strong_hit" if str(lvl).strip().lower() == "strong" else "miss"
+        # judge present but no level -> treat as strong (legacy strong store)
+        return "strong_hit"
     lvl = getattr(record, "evidence_level", None)
     if lvl is None:
         lvl = record.get("evidence_level") if isinstance(record, dict) else None
@@ -57,7 +67,7 @@ def classify_hit(record: Any | None) -> str:
 
 
 def _pricing_is_stale(record: Any) -> bool:
-    """Pricing TTL 14d via _meta.last_updated (is_stale)."""
+    """Pricing TTL 28d via _meta.last_updated (is_stale)."""
     try:
         last = getattr(record._meta, "last_updated", None) if hasattr(record, "_meta") else None
         if last is None and isinstance(record, dict):
@@ -242,8 +252,38 @@ def build_cached_keep_record(
     else:
         aa_model_id = aa_name = aa_slug = verified_score = None
 
-    # Deterministic coding bool (mirrors PolicyGate deterministic_coding)
-    deterministic_coding = True  # cache holds only Keepers => coding True by gate
+    # Judge reuse: if stored strong judge snapshot exists, reuse its evidence/confidence/coding/canonical_name verbatim
+    # Pricing/benchmarks still gap-filled above; judge evidence preserved as-audited (http URLs already gated)
+    cached_judge = getattr(cached, "judge", None) if not isinstance(cached, dict) else cached.get("judge")
+    use_judge = False
+    judge_evidence: list[str] | None = None
+    judge_conf: float | None = None
+    judge_coding: bool | None = None
+    judge_canonical: str | None = None
+    judge_tier: str | None = None
+    if cached_judge is not None:
+        if isinstance(cached_judge, dict):
+            jl = str(cached_judge.get("evidence_level", "strong")).strip().lower()
+            judge_evidence = list(cached_judge.get("evidence", []))
+            judge_conf = cached_judge.get("confidence")
+            judge_coding = cached_judge.get("coding")
+            judge_canonical = cached_judge.get("canonical_name")
+            judge_tier = cached_judge.get("tier")
+        else:
+            jl = str(getattr(cached_judge, "evidence_level", "strong")).strip().lower()
+            judge_evidence = list(getattr(cached_judge, "evidence", []) or [])
+            judge_conf = getattr(cached_judge, "confidence", None)
+            judge_coding = getattr(cached_judge, "coding", None)
+            judge_canonical = getattr(cached_judge, "canonical_name", None)
+            judge_tier = getattr(cached_judge, "tier", None)
+        if jl == "strong" and judge_evidence:
+            use_judge = True
+
+    # Deterministic coding bool: prefer stored judge coding when reused, else True (Keeper)
+    if use_judge and judge_coding is not None:
+        deterministic_coding = bool(judge_coding)
+    else:
+        deterministic_coding = True  # cache holds only Keepers => coding True by gate
     # Still respect critical weakness -> drop not applied on hit; hit only for Keeps
     # But compute true coding signal for tier fallback
     # deterministic coding already True; keep as is. If no benchmarks and no AA, still True (Keeper).
@@ -269,49 +309,96 @@ def build_cached_keep_record(
         has_weakness, weakness_reason = has_critical_weakness(profile) if profile.scores else (False, None)
     except Exception:
         pass
-    tier = categorize_model(
-        coding=deterministic_coding,
-        aa_score=verified_score,
-        min_score=min_score,
-        max_score=max_score,
-        judge_decision="keep",
-        model_id=raw_model_id,
-        coding_score=coding_score,
-        has_critical_weakness=has_weakness,
-        pricing_blended=pricing_blended,
-    )
+    # Tier: reuse judge tier when present and pricing unchanged, else recompute (pricing-aware)
+    if use_judge and judge_tier:
+        tier = judge_tier  # type: ignore
+        # If pricing drifted, recompute tier deterministically (pricing influences flash vs max)
+        try:
+            recomputed = categorize_model(
+                coding=deterministic_coding,
+                aa_score=verified_score,
+                min_score=min_score,
+                max_score=max_score,
+                judge_decision="keep",
+                model_id=raw_model_id,
+                coding_score=coding_score,
+                has_critical_weakness=has_weakness,
+                pricing_blended=pricing_blended,
+            )
+            # Only override if pricing influence changes tier; keep judge tier otherwise
+            if recomputed != judge_tier and pricing_blended is not None:
+                tier = recomputed
+        except Exception:
+            pass
+    else:
+        tier = categorize_model(
+            coding=deterministic_coding,
+            aa_score=verified_score,
+            min_score=min_score,
+            max_score=max_score,
+            judge_decision="keep",
+            model_id=raw_model_id,
+            coding_score=coding_score,
+            has_critical_weakness=has_weakness,
+            pricing_blended=pricing_blended,
+        )
 
-    # Evidence synthesis: benchmark sources + AA URL placeholder + pricing influence
-    evidence: list[str] = []
-    for key, bm in (bm_dict.get("scores") or {}).items():
-        if isinstance(bm, dict):
-            src = bm.get("source", "")
-            score = bm.get("score")
-            if src and "http" in str(src):
-                evidence.append(f"{key} {score} via {src}")
-            elif src:
-                evidence.append(f"{key} {score} via {src} (https://www.datalearner.com/benchmarks/{key})")
-    if aa_model_id and verified_score is not None:
-        evidence.append(f"AA Intelligence Index {verified_score} for {aa_model_id} via https://artificialanalysis.ai/models/{aa_slug or aa_model_id}")
-    if pricing_blended is not None:
-        evidence.append(f"Pricing blended ${pricing_blended:.2f}/1M via AA catalog")
-    # Ensure at least one http URL (gate floor) when we have any benchmark
-    if not any("http" in e for e in evidence) and bm_dict.get("scores"):
-        evidence.append("https://www.datalearner.com/benchmarks/artificial-analysis-coding-index (benchmark coverage)")
-    if not evidence:
-        evidence = ["Cache hit: deterministic re-derive from slim store + live catalogs (no LLM)"]
 
-    # Confidence: coding_score coverage or 0.9 keeper fallback (but not masking)
-    confidence = score_conf if score_conf and score_conf > 0 else 0.9
 
-    # coding_assessment stub (deterministic)
-    coding_assessment = {
-        "is_coding": deterministic_coding,
-        "confidence": confidence,
-        "reason": "; ".join(score_reasons) if score_reasons else "deterministic derive at cache hit",
-        "coding_score": coding_score,
-        "aa_score": verified_score,
-    }
+    # Evidence synthesis: benchmark sources + AA URL placeholder + pricing influence (fallback when no judge)
+    if use_judge:
+        evidence = judge_evidence  # type: ignore
+        # Ensure pricing freshness reflected: append pricing line if not already present and pricing changed
+        if pricing_blended is not None and not any("Pricing blended" in str(e) for e in evidence):
+            evidence = list(evidence) + [f"Pricing blended ${pricing_blended:.2f}/1M via AA catalog (reused judge, pricing refreshed)"]
+    else:
+        evidence = []
+        for key, bm in (bm_dict.get("scores") or {}).items():
+            if isinstance(bm, dict):
+                src = bm.get("source", "")
+                score = bm.get("score")
+                if src and "http" in str(src):
+                    evidence.append(f"{key} {score} via {src}")
+                elif src:
+                    evidence.append(f"{key} {score} via {src} (https://www.datalearner.com/benchmarks/{key})")
+        if aa_model_id and verified_score is not None:
+            evidence.append(f"AA Intelligence Index {verified_score} for {aa_model_id} via https://artificialanalysis.ai/models/{aa_slug or aa_model_id}")
+        if pricing_blended is not None:
+            evidence.append(f"Pricing blended ${pricing_blended:.2f}/1M via AA catalog")
+        if not any("http" in e for e in evidence) and bm_dict.get("scores"):
+            evidence.append("https://www.datalearner.com/benchmarks/artificial-analysis-coding-index (benchmark coverage)")
+        if not evidence:
+            evidence = ["Cache hit: deterministic re-derive from slim store + live catalogs (no LLM)"]
+
+    # Confidence: judge confidence when reused else coding_score coverage
+    if use_judge and judge_conf is not None:
+        confidence = float(judge_conf)
+    else:
+        confidence = score_conf if score_conf and score_conf > 0 else 0.9
+
+    # coding_assessment: judge sourced when reused, else deterministic stub
+    if use_judge:
+        coding_assessment = {
+            "is_coding": deterministic_coding,
+            "confidence": confidence,
+            "reason": "reused strong judge snapshot (no LLM)",
+            "coding_score": coding_score,
+            "aa_score": verified_score,
+        }
+    else:
+        coding_assessment = {
+            "is_coding": deterministic_coding,
+            "confidence": confidence,
+            "reason": "; ".join(score_reasons) if score_reasons else "deterministic derive at cache hit",
+            "coding_score": coding_score,
+            "aa_score": verified_score,
+        }
+
+    # Canonical name: prefer judge canonical when reused
+    if use_judge and judge_canonical:
+        canonical_out = judge_canonical
+    else:
+        canonical_out = aa_name
 
     stale = _pricing_is_stale(cached)
     return {
@@ -331,11 +418,11 @@ def build_cached_keep_record(
         "evidence_level": evidence_level,
         "evidence": evidence,
         "coding_assessment": coding_assessment,
-        "canonical_name": aa_name,
+        "canonical_name": canonical_out,
         "coding": deterministic_coding,
         "cached": True,
         "cache_hit_level": "strong",
-        "reason": "cache_hit:strong:pricing_ttl_14d" if stale else "cache_hit:strong",
+        "reason": "cache_hit:strong:pricing_ttl_28d" if stale else "cache_hit:strong",
         "provider": provider_name,
         "source": "cache",
     }
@@ -436,7 +523,7 @@ def evaluate_model(
 
     Early return right after resolve_model and before EvidenceCollector when
     store holds strong Keeper (slim v2). Hit = strong-only; moderate/weak = miss.
-    Pricing stale (>14d) re-averaged via aggregate_pricing, benchmarks gap-fill only,
+    Pricing stale (>28d) re-averaged via aggregate_pricing, benchmarks gap-fill only,
     raw provider_model_id preserved verbatim for Ephemeral Report.
     """
     model_id = model["id"]  # raw verbatim per #90
@@ -480,7 +567,10 @@ def evaluate_model(
                         except Exception:
                             obs = fresh_pricing_obs
                     print(f"  [cache] HIT strong {model_id} key={cache_key}")
-                    return build_cached_keep_record(model_id, provider_name, cached, obs, fresh_bm, resolution=resolution, cache=cache, min_score=min_score, max_score=max_score)
+                    result = build_cached_keep_record(model_id, provider_name, cached, obs, fresh_bm, resolution=resolution, cache=cache, min_score=min_score, max_score=max_score)
+                    if provider_name == "llm7" and model.get("tier") == "turbo":
+                        result["tier"] = "flash"
+                    return result
                 else:
                     if cached is not None:
                         print(f"  [cache] MISS moderate/weak {model_id} key={cache_key} -> full pipeline")
@@ -534,6 +624,10 @@ def evaluate_model(
                     print(f"  [gate] store put failed {model_id}: {exc2}")
         except Exception as exc:
             print(f"  [gate] check failed {model_id}: {exc}")
+    # llm7 turbo = free-tier keep; normal judge still runs, but turbo never drops
+    if provider_name == "llm7" and model.get("tier") == "turbo":
+        result["decision"] = "keep"
+        result["tier"] = "flash"
     return result
 
 
@@ -768,7 +862,7 @@ def discover_provider(
 ) -> dict[str, list[dict[str, Any]]]:
     """T3 path: evaluate every model for a provider in parallel.
 
-    store optional for in-pipeline cache reuse per #96 (strong-only, TTL 14d).
+    store optional for in-pipeline cache reuse per #96 (strong-only, TTL 28d).
     When provided, evaluate_model early-returns on hit before LLM.
     """
     print(f"[{provider_name}] Starting discovery...")
@@ -1018,6 +1112,8 @@ def _is_free_model(model: dict[str, Any] | str, provider_name: str | None = None
             return True
         if provider_name == "navy_ai" and model.get("premium") is False:
             return True
+        if provider_name == "llm7" and model.get("tier") == "turbo":
+            return True
         return False
     model_id = str(model)
     return any(marker in model_id for marker in FREE_MARKERS)
@@ -1037,6 +1133,7 @@ def _split_by_free_rule(
     Generic (default): if any id contains a free marker (``:free``, ``-free``, ``_free``),
     only free models kept.
     Navy_ai (provider_name=="navy_ai"): marker OR premium is False.
+    LLM7 (provider_name=="llm7"): tier==turbo is treated as free.
     Default provider_name="" => generic marker-only, zero regression for others.
     Dropped models must NOT be sent to LLM nor written to YAML.
     """

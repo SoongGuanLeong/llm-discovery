@@ -4,7 +4,7 @@ Reusable cross-provider model-info store — slim v2.
 
 Slim Source of Truth holds only benchmarks, pricing, freshness.
 Keys normalized via normalize_store_key.
-File: data/model_info_store.json  {version: 2, models: {key: {benchmarks, pricing, _meta}}}
+File: data/model_info_store.json  {version: 2, models: {key: {benchmarks, pricing, _meta, judge?}}} TTL 28d, strong-only reuse
 Atomic tmp+rename, version header 2, compat read for v1 (ignore dropped keys).
 """
 
@@ -23,7 +23,7 @@ from typing import Any
 RECOMMENDED_STORE_PATH = "data/model_info_store.json"
 RECOMMENDED_STORE_PATH_OBJ: Path = Path(RECOMMENDED_STORE_PATH)
 STORE_FILE_VERSION: int = 2
-DEFAULT_TTL_DAYS: int = 14
+DEFAULT_TTL_DAYS: int = 28
 
 # ---------------------------------------------------------------------------
 # Key normalization
@@ -250,17 +250,66 @@ class PricingSnapshot:
 
 
 @dataclass
+class JudgeSnapshot:
+    evidence_level: str = "strong"
+    evidence: list[str] = field(default_factory=list)
+    confidence: float = 0.0
+    coding: bool = True
+    canonical_name: str | None = None
+    tier: str | None = None
+    decision: str = "keep"
+    judge_model: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {
+            "evidence_level": self.evidence_level,
+            "evidence": list(self.evidence),
+            "confidence": self.confidence,
+            "coding": self.coding,
+            "decision": self.decision,
+        }
+        if self.canonical_name is not None:
+            d["canonical_name"] = self.canonical_name
+        if self.tier is not None:
+            d["tier"] = self.tier
+        if self.judge_model is not None:
+            d["judge_model"] = self.judge_model
+        return d
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None):
+        if not data or not isinstance(data, dict):
+            return None
+        lvl = str(data.get("evidence_level", "strong")).strip().lower()
+        return cls(
+            evidence_level=lvl,
+            evidence=list(data.get("evidence", [])),
+            confidence=float(data.get("confidence", 0.0)) if data.get("confidence") is not None else 0.0,
+            coding=bool(data.get("coding", True)),
+            canonical_name=data.get("canonical_name"),
+            tier=data.get("tier"),
+            decision=str(data.get("decision", "keep")),
+            judge_model=data.get("judge_model"),
+        )
+
+
+
+@dataclass
 class ModelInfoRecord:
     benchmarks: BenchmarkSnapshot | None = None
     pricing: PricingSnapshot | None = None
     _meta: StoreMeta = field(default_factory=StoreMeta)
+    judge: JudgeSnapshot | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "benchmarks": self.benchmarks.to_dict() if self.benchmarks else {"scores": {}, "raw_benchmarks": []},
             "pricing": self.pricing.to_dict() if self.pricing else {"per_provider_overrides": {}},
             "_meta": self._meta.to_dict(),
         }
+        if self.judge is not None:
+            d["judge"] = self.judge.to_dict()
+        return d
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ModelInfoRecord":
@@ -271,6 +320,7 @@ class ModelInfoRecord:
             benchmarks=BenchmarkSnapshot.from_dict(data.get("benchmarks")),
             pricing=PricingSnapshot.from_dict(data.get("pricing")),
             _meta=StoreMeta.from_dict(data.get("_meta")),
+            judge=JudgeSnapshot.from_dict(data.get("judge")) if data.get("judge") else None,
         )
 
     @classmethod
@@ -301,7 +351,24 @@ class ModelInfoRecord:
                 pricing_snap = None
         now = evaluated_at or datetime.now(UTC).isoformat()
         meta = StoreMeta(first_seen=now, last_updated=now, version=2)
-        return cls(benchmarks=bench, pricing=pricing_snap, _meta=meta)
+        judge_snap = None
+        # Persist judge_llm result only for strong evidence (28d TTL reuse)
+        lvl = str(rec.get("evidence_level", "")).strip().lower()
+        if lvl == "strong":
+            try:
+                judge_snap = JudgeSnapshot(
+                    evidence_level="strong",
+                    evidence=list(rec.get("evidence", []))[:3],
+                    confidence=float(rec.get("confidence", 0.0)) if rec.get("confidence") is not None else 0.0,
+                    coding=bool(rec.get("coding", rec.get("is_coding", True))),
+                    canonical_name=rec.get("canonical_name"),
+                    tier=rec.get("tier"),
+                    decision=str(rec.get("decision", "keep")),
+                    judge_model=rec.get("judge_model") or rec.get("_judge_model"),
+                )
+            except Exception:
+                judge_snap = None
+        return cls(benchmarks=bench, pricing=pricing_snap, _meta=meta, judge=judge_snap)
 
 def _benchmark_union_max(existing: BenchmarkSnapshot | None, incoming: BenchmarkSnapshot | None) -> BenchmarkSnapshot:
     if not existing:
@@ -367,10 +434,20 @@ def merge_records(existing: ModelInfoRecord | None, incoming: ModelInfoRecord) -
         last_updated=max(last_vals) if last_vals else (incoming._meta.last_updated or existing._meta.last_updated),
         version=2,
     )
+    # Judge: keep most recent strong (incoming wins if present, else keep existing)
+    merged_judge = incoming.judge if incoming.judge is not None else existing.judge
+    # If both have judge, prefer fresher last_updated
+    if existing.judge is not None and incoming.judge is not None:
+        try:
+            if (existing._meta.last_updated or "") > (incoming._meta.last_updated or ""):
+                merged_judge = existing.judge
+        except Exception:
+            merged_judge = incoming.judge
     return ModelInfoRecord(
         benchmarks=_benchmark_union_max(existing.benchmarks, incoming.benchmarks),
         pricing=merged_pricing,
         _meta=merged_meta,
+        judge=merged_judge,
     )
 
 STORE_SCHEMA_DOC = """
@@ -397,7 +474,7 @@ __all__ = [
 ]
 
 STORE_FILE_VERSION: int = 2
-DEFAULT_TTL_DAYS: int = 14
+DEFAULT_TTL_DAYS: int = 28
 RECOMMENDED_STORE_PATH_OBJ: Path = Path(RECOMMENDED_STORE_PATH)
 
 def is_stale(last_updated: str | None, ttl_days: int | None = None) -> bool:

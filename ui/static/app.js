@@ -29,11 +29,35 @@
   const applyModalBackdrop = document.getElementById("apply-modal-backdrop");
   const applyCancelBtn = document.getElementById("apply-cancel-btn");
   const applyConfirmBtn = document.getElementById("apply-confirm-btn");
+  // --- 189: build-all ---
+  const allProv = document.getElementById("allProv");
+  const allBadge = document.getElementById("allBadge");
+  const toggleProvList = document.getElementById("toggleProvList");
+  const provWrap = document.getElementById("provWrap");
+  const provSearch = document.getElementById("provSearch");
+  const provList = document.getElementById("provList");
+  const buildChips = document.getElementById("buildChips");
+  const workersEl = document.getElementById("workers");
+  const catalogAgeEl = document.getElementById("catalogAge");
+  const noRefreshEl = document.getElementById("noRefresh");
+  const buildBtn = document.getElementById("buildBtn");
+  const cancelBuildBtn = document.getElementById("cancelBuildBtn");
+  const buildBadgeEl = document.getElementById("buildBadge");
+  const buildDot = document.getElementById("buildDot");
+  const buildState = document.getElementById("buildState");
+  const buildLog = document.getElementById("buildLog");
+  const buildAutoScroll = document.getElementById("buildAutoScroll");
+  const buildClear = document.getElementById("buildClear");
+  const buildError = document.getElementById("build-error");
 
   let providersAll = [];
   let toastTimer = null;
   let currentJobId = null;
   let es = null;
+  let buildEs = null;
+  let buildCurrentJobId = null;
+  let buildSelected = new Set();
+
 
   function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
 
@@ -167,6 +191,10 @@
       const j = await r.json();
       providersAll = Array.isArray(j.providers) ? j.providers.slice().sort() : [];
       renderProviders(filterEl ? filterEl.value : "");
+      updateAllBadge();
+      renderBuildProvList();
+      renderBuildChips();
+      validateBuild();
     } catch (e) {
       if (countEl) countEl.textContent = "error";
     }
@@ -310,6 +338,120 @@
     }
   }
 
+  // --- 189: build-all helpers ---
+  function showBuildError(msg) {
+    if (!buildError) return;
+    if (msg) { buildError.textContent = msg; buildError.style.display = "block"; }
+    else { buildError.textContent = ""; buildError.style.display = "none"; }
+  }
+  function updateAllBadge() {
+    if (allBadge) allBadge.textContent = String(providersAll.length) + " providers";
+  }
+  function renderBuildChips() {
+    if (!buildChips) return;
+    buildChips.innerHTML = "";
+    if (allProv && allProv.checked) { buildChips.innerHTML = '<span class="hint">All — no filter</span>'; return; }
+    var count = buildSelected.size;
+    var hint = document.createElement("span");
+    hint.className = "hint";
+    hint.textContent = count + " selected";
+    buildChips.appendChild(hint);
+    buildSelected.forEach(function(name){
+      var chip = document.createElement("span");
+      chip.className = "tag chip";
+      chip.style.cssText = "font:600 11px ui-monospace,monospace;border:1px solid #BFDBFE;border-radius:999px;padding:3px 8px;background:#EFF6FF;color:#1E40AF;cursor:pointer;display:inline-flex;gap:4px;align-items:center";
+      chip.textContent = name + " ×";
+      chip.title = "remove " + name;
+      chip.addEventListener("click", function(){ buildSelected.delete(name); renderBuildProvList(); renderBuildChips(); validateBuild(); });
+      buildChips.appendChild(chip);
+    });
+  }
+  function renderBuildProvList() {
+    if (!provList) return;
+    var q = provSearch ? (provSearch.value || "").toLowerCase() : "";
+    var list = q ? providersAll.filter(function(n){ return n.toLowerCase().indexOf(q) !== -1; }) : providersAll.slice();
+    provList.innerHTML = "";
+    var allChecked = allProv && allProv.checked;
+    list.forEach(function(name){
+      var label = document.createElement("label");
+      label.style.cssText = "display:flex;gap:8px;align-items:center;padding:4px 6px;border-radius:6px;cursor:" + (allChecked ? "not-allowed" : "pointer") + ";opacity:" + (allChecked ? "0.45" : "1") + ";font-size:13px";
+      var cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.value = name;
+      cb.checked = buildSelected.has(name);
+      cb.disabled = !!allChecked;
+      cb.className = "pchk";
+      cb.addEventListener("change", function(){ if(cb.checked) buildSelected.add(name); else buildSelected.delete(name); renderBuildChips(); validateBuild(); });
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(" " + name));
+      provList.appendChild(label);
+    });
+    if (allChecked) provList.style.opacity = "0.5"; else provList.style.opacity = "1";
+  }
+  function validateBuild() {
+    var allChecked = allProv && allProv.checked;
+    if (noRefreshEl && catalogAgeEl) {
+      if (noRefreshEl.checked) { catalogAgeEl.disabled = true; catalogAgeEl.style.background = "#f1f5f9"; catalogAgeEl.style.opacity = "0.6"; }
+      else { catalogAgeEl.disabled = false; catalogAgeEl.style.background = ""; catalogAgeEl.style.opacity = ""; }
+    }
+    if (allChecked) { showBuildError(""); if (buildBtn && buildDot) { var isRunning = buildDot.classList.contains("running"); if (!isRunning) buildBtn.disabled = false; } return true; }
+    if (buildSelected.size === 0) { showBuildError("Select at least one or All"); if (buildBtn) buildBtn.disabled = true; return false; }
+    showBuildError("");
+    if (buildBtn && buildDot) { var isRunning2 = buildDot.classList.contains("running"); if (!isRunning2) buildBtn.disabled = false; }
+    return true;
+  }
+  function setBuildState(state, extra) {
+    if (!buildDot || !buildState || !buildLog) return;
+    if (state === "idle") { buildDot.className = "dot"; buildState.textContent = "idle — no logs yet"; buildLog.className = "log empty"; buildLog.textContent = "No logs yet. Build streams per-provider discovery + backfill benchmarks gap-fill + pricing aggregate + GC share-aware + Derived Cache telemetry. Long run (minutes) — cancel kills subprocess."; if (buildBadgeEl) { buildBadgeEl.textContent = "idle"; buildBadgeEl.className = "badge muted"; } if (buildBtn) buildBtn.disabled = !validateBuild(); if (cancelBuildBtn) cancelBuildBtn.disabled = true; }
+    else if (state === "running") { buildDot.className = "dot running"; buildState.textContent = "running — discovering " + providersAll.length + " providers (4 concurrent)…"; buildLog.className = "log"; if (buildBadgeEl) { buildBadgeEl.textContent = "running"; buildBadgeEl.className = "badge muted"; } if (buildBtn) buildBtn.disabled = true; if (cancelBuildBtn) cancelBuildBtn.disabled = false; }
+    else if (state === "done") { buildDot.className = "dot ok"; buildState.textContent = "done — exit 0"; if (buildBadgeEl) { buildBadgeEl.textContent = "done"; buildBadgeEl.className = "badge ok"; } if (buildBtn) buildBtn.disabled = !validateBuild(); if (cancelBuildBtn) cancelBuildBtn.disabled = true; }
+    else if (state === "error") { buildDot.className = "dot err"; buildState.textContent = "error — exit " + (extra && extra.exitCode != null ? extra.exitCode : "1"); if (buildBadgeEl) { buildBadgeEl.textContent = "error"; buildBadgeEl.className = "badge err"; } if (buildBtn) buildBtn.disabled = !validateBuild(); if (cancelBuildBtn) cancelBuildBtn.disabled = true; toast("Build failed (exit " + (extra && extra.exitCode != null ? extra.exitCode : 1) + ")", true); }
+    else if (state === "killed") { buildDot.className = "dot err"; buildState.textContent = "killed — canceled"; if (buildBadgeEl) { buildBadgeEl.textContent = "killed"; buildBadgeEl.className = "badge err"; } if (buildBtn) buildBtn.disabled = !validateBuild(); if (cancelBuildBtn) cancelBuildBtn.disabled = true; toast("Canceled build (killed)", true); }
+  }
+  function appendBuildLine(entry) {
+    if (!buildLog) return;
+    var html = "";
+    if (entry.type === "stdout") html = "<span>" + esc(entry.line) + "</span>";
+    else if (entry.type === "stderr") html = '<span class="stderr">' + esc(entry.line) + "</span>";
+    var line = document.createElement("div");
+    line.innerHTML = html;
+    if (buildLog.classList.contains("empty")) { buildLog.textContent = ""; buildLog.className = "log"; }
+    buildLog.appendChild(line);
+    while (buildLog.children.length > 500) { buildLog.removeChild(buildLog.firstChild); }
+    if (buildAutoScroll && buildAutoScroll.checked) { buildLog.scrollTop = buildLog.scrollHeight; }
+  }
+  function appendBuildTerminal(entry) {
+    if (!buildLog) return;
+    var d = document.createElement("div");
+    if (entry.type === "done") { if (entry.exitCode === 0) { d.innerHTML = '<span class="ok">✓ done exitCode:0 — keep/drop/backfill/pricing/GC/telemetry</span>'; setBuildState("done"); } else { d.innerHTML = '<span class="stderr">exit ' + esc(String(entry.exitCode)) + "</span>"; setBuildState("error", entry); } }
+    else if (entry.type === "killed") { d.innerHTML = '<span class="killed">killed</span>'; setBuildState("killed"); }
+    buildLog.appendChild(d);
+    if (buildAutoScroll && buildAutoScroll.checked) { buildLog.scrollTop = buildLog.scrollHeight; }
+    if (buildEs) { buildEs.close(); buildEs = null; }
+    buildCurrentJobId = null;
+  }
+  async function runBuild() {
+    if (!validateBuild()) return;
+    if (buildEs) { buildEs.close(); buildEs = null; }
+    if (buildLog) { buildLog.textContent = ""; buildLog.className = "log"; }
+    setBuildState("running");
+    var providers = "all";
+    if (allProv && !allProv.checked) { if (buildSelected.size === 0) { showBuildError("Select at least one or All"); setBuildState("idle"); return; } providers = Array.from(buildSelected); }
+    var workers = 8; if (workersEl) { var w = parseInt(workersEl.value, 10); if (!isNaN(w)) workers = w; }
+    var catalogMaxAgeDays = 28; if (catalogAgeEl) { var c = parseInt(catalogAgeEl.value, 10); if (!isNaN(c)) catalogMaxAgeDays = c; }
+    var noCatalogRefresh = !!(noRefreshEl && noRefreshEl.checked);
+    try {
+      var r = await fetch("/api/build", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ providers: providers, workers: workers, catalogMaxAgeDays: catalogMaxAgeDays, noCatalogRefresh: noCatalogRefresh }) });
+      if (!r.ok) { var detail = ""; try { var j = await r.json(); detail = j.detail || ""; } catch (_) {} if (r.status === 409) { toast("job already running", true); showBuildError("job already running"); } else { toast(detail || "build failed", true); showBuildError(detail || "build failed"); } setBuildState(r.status === 409 ? "idle" : "error", { exitCode: 1 }); var d2 = document.createElement("div"); d2.innerHTML = '<span class="stderr">' + esc(detail || String(r.status)) + "</span>"; if (buildLog) buildLog.appendChild(d2); return; }
+      var j2 = await r.json();
+      var jobId = j2.jobId;
+      buildCurrentJobId = jobId;
+      buildEs = new EventSource("/api/jobs/" + jobId + "/logs");
+      buildEs.onmessage = function(e){ try{ var data = JSON.parse(e.data); if(data.type === "stdout" || data.type === "stderr") appendBuildLine(data); else if(data.type === "done" || data.type === "killed") appendBuildTerminal(data); }catch(err){} };
+      buildEs.onerror = function(){};
+    } catch(e){ setBuildState("error", {exitCode:1}); var d = document.createElement("div"); d.innerHTML = '<span class="stderr">' + esc(String(e)) + "</span>"; if(buildLog) buildLog.appendChild(d); }
+  }
+
   if (eyeBtn && keyInput) {
     eyeBtn.addEventListener("click", function () {
       keyInput.type = keyInput.type === "password" ? "text" : "password";
@@ -382,7 +524,18 @@
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape" && applyModal && applyModal.style.display !== "none") closeApplyModal();
   });
-  // --- 190: file icon open + guide persist ---
+  // --- 189 wiring ---
+  if (allProv) allProv.addEventListener("change", function(){ if(allProv.checked) { buildSelected.clear(); } renderBuildProvList(); renderBuildChips(); validateBuild(); });
+  if (toggleProvList && provWrap) toggleProvList.addEventListener("click", function(){ var hidden = provWrap.style.display === "none" || !provWrap.style.display; provWrap.style.display = hidden ? "block" : "none"; toggleProvList.textContent = hidden ? "Providers ▴" : "Providers ▾"; });
+  if (provSearch) provSearch.addEventListener("input", function(){ renderBuildProvList(); });
+  if (workersEl) workersEl.addEventListener("input", validateBuild);
+  if (catalogAgeEl) catalogAgeEl.addEventListener("input", validateBuild);
+  if (noRefreshEl) noRefreshEl.addEventListener("change", validateBuild);
+  if (buildBtn) buildBtn.addEventListener("click", runBuild);
+  if (cancelBuildBtn) cancelBuildBtn.addEventListener("click", async function(){ if(!buildCurrentJobId) return; try{ await fetch("/api/jobs/" + buildCurrentJobId + "/cancel", {method:"POST"}); }catch(e){} });
+  if (buildClear) buildClear.addEventListener("click", function(e){ e.preventDefault(); if(buildEs){ buildEs.close(); buildEs=null; } buildCurrentJobId=null; setBuildState("idle"); });
+
+    // --- 190: file icon open + guide persist ---
   const openConfigBtn = document.getElementById("open-config-btn");
   const openConfigLink = document.getElementById("open-config-link");
   const guideDetails = document.getElementById("guide-details");
@@ -449,5 +602,6 @@
     await refreshStatus();
     await loadProviders();
     if (dotEl && stateEl && logEl) setState("idle");
+    if (buildDot && buildState && buildLog) setBuildState("idle");
   })();
 })();

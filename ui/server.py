@@ -263,6 +263,12 @@ def _validate_gateway_url(url: str | None) -> str:
         raise HTTPException(status_code=400, detail="gatewayUrl must be http(s)://")
     return raw
 
+class BuildBody(BaseModel):
+    providers: str | list[str] | None = None
+    workers: int = 8
+    catalogMaxAgeDays: int = 28
+    noCatalogRefresh: bool = False
+
 class ApplyBody(BaseModel):
     gatewayUrl: str | None = None
 
@@ -290,6 +296,78 @@ async def export_apply(body: ApplyBody | None = None):
     env = dict(os.environ)
     env["PYTHONUNBUFFERED"] = "1"
     cmd = [sys.executable, "-m", "llm_discovery.omniroute_export", "--apply", "--omniroute-url", gateway]
+    threading.Thread(target=_run_job_thread, args=(cmd, REPO_ROOT, env, job_id), daemon=True).start()
+    return JSONResponse(content={"jobId": job_id}, status_code=201)
+
+def _any_job_running() -> bool:
+    for j in jobs.values():
+        if j.get("status") in ("idle", "running"):
+            return True
+    return False
+
+@app.post("/api/build", status_code=201)
+async def build_all_route(body: BuildBody | None = None):
+    # defaults when no body
+    providers = "all"
+    workers = 8
+    catalog_max_age = 28
+    no_refresh = False
+    if body is not None:
+        providers = body.providers if body.providers is not None else "all"
+        workers = body.workers
+        catalog_max_age = body.catalogMaxAgeDays
+        no_refresh = body.noCatalogRefresh
+    # validation: workers 1-32
+    try:
+        w = int(workers)
+    except Exception:
+        raise HTTPException(status_code=400, detail="workers must be 1-32")
+    if w < 1 or w > 32:
+        raise HTTPException(status_code=400, detail="workers must be 1-32")
+    # catalogMaxAgeDays >=0
+    try:
+        c = int(catalog_max_age)
+    except Exception:
+        raise HTTPException(status_code=400, detail="catalogMaxAgeDays must be >=0")
+    if c < 0:
+        raise HTTPException(status_code=400, detail="catalogMaxAgeDays must be >=0")
+    # providers validation
+    if isinstance(providers, str):
+        if providers != "all":
+            raise HTTPException(status_code=400, detail="providers must be \"all\" or string[]")
+    elif isinstance(providers, list):
+        if len(providers) == 0:
+            raise HTTPException(status_code=400, detail="Select at least one or All")
+        for p in providers:
+            if not isinstance(p, str) or not p.strip():
+                raise HTTPException(status_code=400, detail="providers must be string[]")
+    elif providers is None:
+        providers = "all"
+    else:
+        raise HTTPException(status_code=400, detail="providers must be \"all\" or string[]")
+    # 409 single global job guard
+    if _any_job_running():
+        raise HTTPException(status_code=409, detail="job already running")
+    job_id = _make_job_id()
+    jobs[job_id] = {
+        "id": job_id,
+        "proc": None,
+        "deque": deque(maxlen=500),
+        "status": "idle",
+        "exitCode": None,
+        "createdAt": time.time(),
+        "_queue": queue.Queue(),
+    }
+    env = dict(os.environ)
+    env["PYTHONUNBUFFERED"] = "1"
+    cmd = [sys.executable, "-m", "llm_discovery.build_all", "--workers", str(w)]
+    if isinstance(providers, list):
+        cmd += ["--providers"] + [str(p) for p in providers]
+    # catalog age: only pass if not default 28 to keep minimal, but pass if explicitly set !=28 or test expects it
+    if c != 28:
+        cmd += ["--catalog-max-age-days", str(c)]
+    if no_refresh:
+        cmd += ["--no-catalog-refresh"]
     threading.Thread(target=_run_job_thread, args=(cmd, REPO_ROOT, env, job_id), daemon=True).start()
     return JSONResponse(content={"jobId": job_id}, status_code=201)
 

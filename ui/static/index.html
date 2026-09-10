@@ -110,6 +110,39 @@ infisical export --projectId "$LLM_SHARED_PROJECT_ID" --env dev --format json | 
     <div id="exportLog" class="log empty">No logs yet. Run Dry run (safe) to see streaming output. Placeholder apiKey = env:SECRET on dry-run; resolved only on apply.</div>
   </div>
 
+  <!-- Build card (189): All/multi + advanced flags + 409 guard -->
+  <div class="card accent-slate" id="card-build">
+    <div class="card-head"><span class="eyebrow">03</span><h3>Build all <span>→ data/results/*.yaml + Source of Truth + cache.db</span></h3><span class="badge muted" style="margin-left:auto">long run</span></div>
+    <div class="row" style="margin-top:8px">
+      <label style="display:flex;gap:8px;align-items:center;font-size:13px;font-weight:600"><input type="checkbox" id="allProv" checked> All providers <span class="badge muted" id="allBadge">22 providers</span></label>
+      <span class="hint" style="margin:0">Uncheck to pick subset — live from <code>config/providers.yaml</code></span>
+      <button class="btn ghost" id="toggleProvList" type="button" style="margin-left:auto">Providers ▾</button>
+    </div>
+    <div id="provWrap" style="display:none;margin-top:10px">
+      <input id="provSearch" class="input" placeholder="Filter providers… (e.g. groq)" style="margin-bottom:8px" />
+      <div id="provList" class="select" style="border:1px solid #e2e8f0;border-radius:8px;max-height:180px;overflow:auto;padding:6px;background:#fff"></div>
+      <div id="buildChips" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px"></div>
+      <div class="hint" id="provHint" style="margin-top:6px">All checked = no filter (all 22). Subset = <code>--providers groq kilo_ai ...</code> <span class="chip" style="display:none">chip</span></div>
+    </div>
+    <details style="margin-top:12px">
+      <summary style="cursor:pointer;font:600 12px ui-monospace,monospace;color:#475569">Advanced — workers &amp; catalog refresh</summary>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px">
+        <label style="font-size:13px">Workers per provider <input id="workers" type="number" min="1" max="32" value="8" class="input" style="min-width:0" /> <span class="hint">default 8</span></label>
+        <label style="font-size:13px">Catalog max age (days) <input id="catalogAge" type="number" min="0" value="28" class="input" style="min-width:0" /> <span class="hint">0 disables</span></label>
+      </div>
+      <label style="font-size:13px;display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="noRefresh" /> <code>--no-catalog-refresh</code> <span class="hint">offline builds</span></label>
+    </details>
+    <div id="build-error" class="error" style="display:none" role="alert"></div>
+    <div class="row" style="margin-top:12px">
+      <button class="btn ok" id="buildBtn">▶ Run build-all</button>
+      <button class="btn ghost" id="cancelBuildBtn" disabled>Cancel</button>
+      <span id="buildBadge" class="badge muted">idle</span>
+      <span class="hint" style="margin-left:auto"><span class="mono">python -m llm_discovery.build_all</span></span>
+    </div>
+    <div class="statebar"><span id="buildDot" class="dot"></span><span id="buildState" class="hint" style="margin:0">idle — no logs yet</span><span style="margin-left:auto" class="hint"><label><input type="checkbox" id="buildAutoScroll" checked> auto-scroll</label> · <a href="#" id="buildClear">clear</a></span></div>
+    <div id="buildLog" class="log empty">No logs yet. Build streams per-provider discovery + backfill benchmarks gap-fill + pricing aggregate + GC share-aware + Derived Cache telemetry. Long run (minutes) — cancel kills subprocess.</div>
+  </div>
+
   <!-- Apply confirm modal (188) -->
   <div id="apply-modal" role="dialog" aria-modal="true" aria-labelledby="apply-modal-title" style="display:none; position:fixed; inset:0; z-index:200; align-items:center; justify-content:center">
     <div id="apply-modal-backdrop" style="position:absolute; inset:0; background:rgba(15,23,42,0.5)"></div>

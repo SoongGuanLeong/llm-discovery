@@ -9,12 +9,14 @@
 <body>
 <header class="bar">
   <span class="brand">llm-discovery Control</span>
-  <span class="sub">local \u00b7 python -m ui</span>
-  <span class="right" id="health">\u2026</span>
+  <span class="sub">local · python -m ui</span>
+  <span class="right" id="health">…</span>
 </header>
 <main>
   <h1>llm-discovery Control</h1>
-  <!-- OMNIROUTE_API_KEY card (issue 186) -->
+  <p class="muted">Local UI for omniroute_export + build-all. Dry-run writes data/derived files via SSE jobs.</p>
+  <div id="status" class="hint" style="margin-bottom:12px">loading…</div>
+  <!-- OMNIROUTE_API_KEY card (186) -->
   <section class="card" id="key-card" aria-labelledby="key-title">
     <div class="card-head">
       <h3 id="key-title">OMNIROUTE_API_KEY</h3>
@@ -23,8 +25,8 @@
     </div>
     <div class="row" style="margin-top:10px">
       <div class="input-wrap" style="flex:1;min-width:220px">
-        <input id="key-input" type="password" autocomplete="off" spellcheck="false" placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022***" aria-label="OMNIROUTE_API_KEY" />
-        <button id="eye-btn" class="icon-btn" type="button" aria-label="Toggle visibility" title="Show/hide">\u25C9</button>
+        <input id="key-input" type="password" autocomplete="off" spellcheck="false" placeholder="••••••••***" aria-label="OMNIROUTE_API_KEY" />
+        <button id="eye-btn" class="icon-btn" type="button" aria-label="Toggle visibility" title="Show/hide">◉</button>
       </div>
       <button id="save-btn" class="btn ok" type="button">Save</button>
       <button id="clear-btn" class="btn ghost" type="button">Clear</button>
@@ -33,17 +35,29 @@
     <div class="hint" style="margin-top:6px">Paste key masked locally. Save persists to <code>.env</code> (chmod 600 if created) and live env. Never in localStorage.</div>
   </section>
 
-  <!-- Live providers dropdown (issue 186) -->
+  <!-- Live providers dropdown (186) -->
   <section class="card" id="providers-card" aria-labelledby="providers-title">
     <div class="card-head">
       <h3 id="providers-title">Providers</h3>
-      <span id="providers-count" class="badge muted">\u2026</span>
+      <span id="providers-count" class="badge muted">…</span>
     </div>
-    <input id="provider-filter" type="text" placeholder="Filter providers\u2026" aria-label="Filter providers" style="margin-top:10px" />
+    <input id="provider-filter" type="text" placeholder="Filter providers…" aria-label="Filter providers" style="margin-top:10px" />
     <select id="provider-select" size="8" style="margin-top:8px;width:100%" aria-label="Providers"></select>
     <div class="hint" style="margin-top:6px">Live from <code>config/providers.yaml</code> (sorted, no restart).</div>
   </section>
 
+  <!-- Export dry-run card (187) -->
+  <div class="card accent-amber" id="card-export">
+    <div class="card-head"><span class="eyebrow">02</span><h3>OmniRoute export <span>reads config/providers.yaml + data/results/*.yaml</span></h3></div>
+    <div class="hint">Dry run writes <code>data/derived/omniroute_import.json</code> with apiKey env:SECRET + <code>omniroute_combos.json</code>. Streaming via <code>SSE GET /api/jobs/{id}/logs</code>.</div>
+    <div class="row" style="margin-top:8px">
+      <button class="btn ok" id="dryBtn">▶ Dry run</button>
+      <button class="btn ghost" id="cancelExportBtn" disabled>Cancel</button>
+      <span class="badge muted">writes <span class="mono">omniroute_{import,combos}.json</span></span>
+    </div>
+    <div class="statebar"><span id="exportDot" class="dot"></span><span id="exportState" class="hint" style="margin:0">idle — no logs yet</span><span style="margin-left:auto" class="hint"><label><input type="checkbox" id="exportAutoScroll" checked> auto-scroll</label> · <a href="#" id="exportClear">clear</a></span></div>
+    <div id="exportLog" class="log empty">No logs yet. Run Dry run (safe) to see streaming output. Placeholder apiKey = env:SECRET on dry-run; resolved only on apply.</div>
+  </div>
   <div id="toast" style="position:fixed;bottom:18px;left:50%;transform:translateX(-50%);display:none;z-index:99"></div>
 </main>
 <script src="/static/app.js"></script>

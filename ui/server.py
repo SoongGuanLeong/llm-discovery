@@ -40,7 +40,9 @@ def _redact(text: str) -> str:
     out = text
     for k in _SECRET_ENV_KEYS:
         v = os.environ.get(k)
-        if v and len(v) >= 4 and v in out:
+        # Any real API key is >= 2 chars; single-char values would over-redact
+        # every occurrence of that letter (e.g. "a" inside "leaked").
+        if v and len(v) >= 2 and v in out:
             out = out.replace(v, "***")
     return out
 
@@ -195,10 +197,13 @@ def config_status():
     return _config_status()
 
 class OmniKeyBody(BaseModel):
-    key: str = ""
+    key: str | None = None
 
 @app.post("/api/config/omniroute-key")
 def set_omniroute_key(body: OmniKeyBody):
+    # Distinguish: missing key (None) -> 400, "" -> clear, whitespace -> 400
+    if body.key is None:
+        raise HTTPException(status_code=400, detail="key required")
     raw_in: str = body.key if isinstance(body.key, str) else ""
     if raw_in == "":
         try:

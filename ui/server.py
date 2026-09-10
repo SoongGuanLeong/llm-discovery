@@ -458,6 +458,35 @@ async def cancel_job(job_id: str):
             pass
     return {"status": "killed"}
 
+@app.post("/api/open-config")
+async def open_config():
+    """Copy path + try editor open: code --goto -> xdg-open -> open fallback.
+    Returns {opened, path, fileUrl}. Secrets never leak.
+    """
+    abs_path = str(PROVIDERS_YAML.resolve())
+    file_url = Path(abs_path).as_uri()  # file:// + encoded path
+    opened = False
+    # try fallback chain
+    cmds = [
+        ["code", "--goto", abs_path],
+        ["xdg-open", abs_path],
+        ["open", abs_path],
+    ]
+    for cmd in cmds:
+        try:
+            # timeout short, no secrets in cmd
+            subprocess.run(cmd, timeout=3, check=False)
+            opened = True
+            break
+        except FileNotFoundError:
+            continue
+        except subprocess.TimeoutExpired:
+            opened = True
+            break
+        except Exception:
+            continue
+    return {"opened": opened, "path": abs_path, "fileUrl": file_url}
+
 @app.get("/", include_in_schema=False)
 def index():
     idx = STATIC_DIR / "index.html"

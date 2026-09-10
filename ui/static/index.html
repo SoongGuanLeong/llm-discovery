@@ -16,6 +16,49 @@
   <h1>llm-discovery Control</h1>
   <p class="muted">Local UI for omniroute_export + build-all. Dry-run writes data/derived files via SSE jobs.</p>
   <div id="status" class="hint" style="margin-bottom:12px">loading…</div>
+
+  <!-- File icon: config/providers.yaml (190) -->
+  <div class="row" style="margin:8px 0 12px; align-items:center">
+    <button class="btn ghost" id="open-config-btn" type="button" title="Copy path + open in editor (code --goto → xdg-open → open)"><span style="font:600 13px ui-monospace,monospace">📄</span> <span class="mono">config/providers.yaml</span></button>
+    <span class="hint">click to copy path + try <code class="mono">code --goto</code> → <code class="mono">xdg-open</code> → <code class="mono">open</code></span>
+    <a id="open-config-link" class="hint" href="#" style="display:none; margin-left:8px" target="_blank" rel="noopener">open file://</a>
+  </div>
+
+  <!-- Prerequisites guide (190) — verbatim from docs/research/issue-181-omni-infi-guide.md -->
+  <details id="guide-details" open class="card" style="padding:12px 16px">
+    <summary style="cursor:pointer; font-weight:700; font-size:13px; display:flex; gap:8px; align-items:center">Prerequisites: OmniRoute + Infisical + Offline <span class="badge muted" style="margin-left:auto">click to collapse</span></summary>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:12px">
+      <div>
+        <h4 style="margin:0 0 6px; font-size:13px">OmniRoute — local AI gateway</h4>
+        <div class="hint" style="margin:0 0 6px"><b>Install (npm, any OS):</b></div>
+        <pre style="font:12px ui-monospace,monospace; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:8px 10px; overflow:auto; margin:0 0 8px">npm install -g omniroute        # or: pnpm add -g omniroute@latest --allow-build=better-sqlite3
+omniroute                        # boots gateway + dashboard on http://localhost:20128</pre>
+        <div class="hint" style="margin:0 0 6px"><b>Verify:</b></div>
+        <pre style="font:12px ui-monospace,monospace; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:8px 10px; overflow:auto; margin:0 0 8px">curl -s http://localhost:20128/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"auto","messages":[{"role":"user","content":"Hello!"}]}' | jq</pre>
+        <div class="hint" style="margin:0 0 6px"><b>Docker alternative:</b></div>
+        <pre style="font:12px ui-monospace,monospace; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:8px 10px; overflow:auto; margin:0 0 8px">docker run -d --name omniroute --restart unless-stopped --stop-timeout 40 \
+  -p 127.0.0.1:20128:20128 -v omniroute-data:/app/data diegosouzapw/omniroute:latest</pre>
+        <div class="hint" style="margin:0 0 4px">Source: <a href="https://github.com/diegosouzapw/OmniRoute" target="_blank" rel="noopener">github.com/diegosouzapw/OmniRoute</a> · <a href="https://www.npmjs.com/package/omniroute" target="_blank" rel="noopener">npmjs.com/package/omniroute</a> · <a href="https://hub.docker.com/r/diegosouzapw/omniroute" target="_blank" rel="noopener">hub.docker.com/r/diegosouzapw/omniroute</a></div>
+      </div>
+      <div>
+        <h4 style="margin:0 0 6px; font-size:13px">Infisical — secrets</h4>
+        <div class="hint" style="margin:0 0 6px"><b>Install:</b></div>
+        <pre style="font:12px ui-monospace,monospace; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:8px 10px; overflow:auto; margin:0 0 8px">brew install infisical/get-cli/infisical</pre>
+        <div class="hint" style="margin:0 0 6px"><b>Auth &amp; run:</b></div>
+        <pre style="font:12px ui-monospace,monospace; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:8px 10px; overflow:auto; margin:0 0 8px">infisical login
+infisical run -- .venv/bin/python scripts/discover.py groq --all
+infisical export --projectId "$LLM_SHARED_PROJECT_ID" --env dev --format json | jq length</pre>
+        <div class="hint" style="margin:0 0 6px"><b>Cloud:</b> <a href="https://app.infisical.com" target="_blank" rel="noopener">app.infisical.com</a> · <b>Self-hosted:</b> set <code class="mono">INFISICAL_DOMAIN</code></div>
+        <div class="hint" style="margin:0 0 4px">Docs: <a href="https://infisical.com/docs/cli/overview" target="_blank" rel="noopener">infisical.com/docs/cli/overview</a> · <a href="https://infisical.com/docs/cli/usage" target="_blank" rel="noopener">infisical.com/docs/cli/usage</a> · <a href="https://infisical.com/docs/self-hosting/overview" target="_blank" rel="noopener">infisical.com/docs/self-hosting/overview</a></div>
+      </div>
+    </div>
+    <div style="margin-top:12px; padding-top:10px; border-top:1px solid #e2e8f0">
+      <div class="hint" style="margin:0"><b>Offline:</b> <code class="mono">BRAVE_API_KEY</code> optional -&gt; DuckDuckGo used. <code class="mono">DISABLE_WEB_SEARCH=1</code> = offline (no web calls). Discovery + --dry-run work offline.</div>
+      <div class="hint" style="margin:4px 0 0">Links: <a href="https://github.com/diegosouzapw/OmniRoute" target="_blank" rel="noopener">github.com/diegosouzapw/OmniRoute</a> · <a href="https://www.npmjs.com/package/omniroute" target="_blank" rel="noopener">npmjs.com/package/omniroute</a> · <a href="https://infisical.com/docs/cli/overview" target="_blank" rel="noopener">infisical.com/docs/cli/overview</a> · <a href="https://infisical.com/docs/cli/usage" target="_blank" rel="noopener">infisical.com/docs/cli/usage</a> · <a href="https://infisical.com/docs/self-hosting/overview" target="_blank" rel="noopener">infisical.com/docs/self-hosting/overview</a></div>
+    </div>
+  </details>
   <!-- OMNIROUTE_API_KEY card (186) -->
   <section class="card" id="key-card" aria-labelledby="key-title">
     <div class="card-head">

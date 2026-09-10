@@ -382,6 +382,56 @@
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape" && applyModal && applyModal.style.display !== "none") closeApplyModal();
   });
+  // --- 190: file icon open + guide persist ---
+  const openConfigBtn = document.getElementById("open-config-btn");
+  const openConfigLink = document.getElementById("open-config-link");
+  const guideDetails = document.getElementById("guide-details");
+  // guide collapse persisted in localStorage ui.guideOpen (open by default on first load)
+  function initGuidePersist() {
+    if (!guideDetails) return;
+    try {
+      const saved = localStorage.getItem("ui.guideOpen");
+      if (saved !== null) guideDetails.open = saved === "true";
+      else guideDetails.open = true;
+      guideDetails.addEventListener("toggle", function () {
+        try { localStorage.setItem("ui.guideOpen", String(guideDetails.open)); } catch (_) {}
+      });
+    } catch (_) {}
+  }
+  initGuidePersist();
+  async function handleOpenConfig() {
+    let absPath = "";
+    let fileUrl = "";
+    let opened = false;
+    try {
+      const r = await fetch("/api/open-config", { method: "POST" });
+      const j = await r.json();
+      absPath = j.path || "";
+      fileUrl = j.fileUrl || (absPath ? "file://" + absPath : "");
+      opened = !!j.opened;
+      // clipboard
+      if (absPath) {
+        try { await navigator.clipboard.writeText(absPath); toast("Copied path"); } catch (_) { toast(absPath); }
+      }
+      if (opened) toast("Opened in editor");
+      else {
+        toast("Copy succeeded — editor not found, use file:// link", true);
+        if (openConfigLink && fileUrl) {
+          openConfigLink.href = fileUrl;
+          openConfigLink.textContent = fileUrl;
+          openConfigLink.style.display = "inline";
+        }
+      }
+      // ensure fallback link visible when needed
+      if (openConfigLink && fileUrl) {
+        openConfigLink.href = fileUrl;
+        if (!opened) { openConfigLink.style.display = "inline"; openConfigLink.textContent = fileUrl; }
+      }
+    } catch (e) {
+      toast(String(e), true);
+    }
+  }
+  if (openConfigBtn) openConfigBtn.addEventListener("click", handleOpenConfig);
 
   // Init
   (async function () {

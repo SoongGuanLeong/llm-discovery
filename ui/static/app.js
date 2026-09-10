@@ -14,12 +14,21 @@
   const countEl = document.getElementById("providers-count");
   // --- 187: export ---
   const dryBtn = document.getElementById("dryBtn");
+  const applyBtn = document.getElementById("applyBtn");
   const cancelBtn = document.getElementById("cancelExportBtn");
   const logEl = document.getElementById("exportLog");
   const dotEl = document.getElementById("exportDot");
   const stateEl = document.getElementById("exportState");
   const autoScroll = document.getElementById("exportAutoScroll");
   const clearLink = document.getElementById("exportClear");
+  // --- 188: gateway + apply confirm ---
+  const gatewayInput = document.getElementById("gateway-input");
+  const gatewayError = document.getElementById("gateway-error");
+  const applyModal = document.getElementById("apply-modal");
+  const applyModalUrl = document.getElementById("apply-modal-url");
+  const applyModalBackdrop = document.getElementById("apply-modal-backdrop");
+  const applyCancelBtn = document.getElementById("apply-cancel-btn");
+  const applyConfirmBtn = document.getElementById("apply-confirm-btn");
 
   let providersAll = [];
   let toastTimer = null;
@@ -172,28 +181,33 @@
       logEl.className = "log empty";
       logEl.textContent = "No logs yet. Run Dry run (safe) to see streaming output. Placeholder apiKey = env:SECRET on dry-run; resolved only on apply.";
       if (dryBtn) dryBtn.disabled = false;
+      if (applyBtn) applyBtn.disabled = !isGatewayValid(gatewayInput ? gatewayInput.value : "http://localhost:20128");
       if (cancelBtn) cancelBtn.disabled = true;
     } else if (state === "running") {
       dotEl.className = "dot running";
       stateEl.textContent = "running \u2014 streaming logs\u2026";
       logEl.className = "log";
       if (dryBtn) dryBtn.disabled = true;
+      if (applyBtn) applyBtn.disabled = true;
       if (cancelBtn) cancelBtn.disabled = false;
     } else if (state === "done") {
       dotEl.className = "dot ok";
       stateEl.textContent = "done \u2014 exit 0";
       if (dryBtn) dryBtn.disabled = false;
+      if (applyBtn) applyBtn.disabled = !isGatewayValid(gatewayInput ? gatewayInput.value : "http://localhost:20128");
       if (cancelBtn) cancelBtn.disabled = true;
     } else if (state === "error") {
       dotEl.className = "dot err";
       stateEl.textContent = "error \u2014 exit " + (extra && extra.exitCode != null ? extra.exitCode : "1");
       if (dryBtn) dryBtn.disabled = false;
+      if (applyBtn) applyBtn.disabled = !isGatewayValid(gatewayInput ? gatewayInput.value : "http://localhost:20128");
       if (cancelBtn) cancelBtn.disabled = true;
       toast("Export failed (exit " + (extra && extra.exitCode != null ? extra.exitCode : 1) + ")", true);
     } else if (state === "killed") {
       dotEl.className = "dot err";
       stateEl.textContent = "killed \u2014 canceled";
       if (dryBtn) dryBtn.disabled = false;
+      if (applyBtn) applyBtn.disabled = !isGatewayValid(gatewayInput ? gatewayInput.value : "http://localhost:20128");
       if (cancelBtn) cancelBtn.disabled = true;
       toast("Canceled export (killed)", true);
     }
@@ -223,6 +237,77 @@
     if (autoScroll && autoScroll.checked) { logEl.scrollTop = logEl.scrollHeight; }
     if (es) { es.close(); es = null; }
     currentJobId = null;
+  }
+
+  // --- 188 helpers ---
+  function isGatewayValid(v) {
+    return /^https?:\/\//.test(String(v || "").trim());
+  }
+  function showGatewayError(msg) {
+    if (!gatewayError) return;
+    if (msg) { gatewayError.textContent = msg; gatewayError.style.display = "block"; }
+    else { gatewayError.textContent = ""; gatewayError.style.display = "none"; }
+  }
+  function validateGateway() {
+    if (!gatewayInput) return true;
+    const v = gatewayInput.value.trim();
+    if (!v) { showGatewayError(""); if (applyBtn) applyBtn.disabled = true; return false; }
+    if (!isGatewayValid(v)) {
+      showGatewayError("gatewayUrl must be http(s)://");
+      if (applyBtn) applyBtn.disabled = true;
+      return false;
+    }
+    showGatewayError("");
+    // re-enable only if not running
+    if (applyBtn && dotEl && !dotEl.classList.contains("running")) applyBtn.disabled = false;
+    return true;
+  }
+  function openApplyModal() {
+    if (!applyModal) return;
+    const v = gatewayInput ? gatewayInput.value.trim() : "http://localhost:20128";
+    if (applyModalUrl) applyModalUrl.textContent = v || "http://localhost:20128";
+    applyModal.style.display = "flex";
+  }
+  function closeApplyModal() {
+    if (!applyModal) return;
+    applyModal.style.display = "none";
+  }
+  async function runApply(gatewayUrl) {
+    if (es) { es.close(); es = null; }
+    if (logEl) { logEl.textContent = ""; logEl.className = "log"; }
+    setState("running");
+    // dry-run needs no URL: this path always posts to /api/export/apply
+    try {
+      const r = await fetch("/api/export/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gatewayUrl: gatewayUrl })
+      });
+      if (!r.ok) {
+        let detail = "gatewayUrl must be http(s)://";
+        try { const j = await r.json(); detail = j.detail || detail; } catch (_) {}
+        showGatewayError(detail);
+        toast(detail, true);
+        setState("error", { exitCode: 1 });
+        var d2 = document.createElement("div"); d2.innerHTML = '<span class="stderr">' + esc(detail) + "</span>"; if (logEl) logEl.appendChild(d2);
+        return;
+      }
+      const j = await r.json();
+      const jobId = j.jobId;
+      currentJobId = jobId;
+      es = new EventSource("/api/jobs/" + jobId + "/logs");
+      es.onmessage = function (e) {
+        try {
+          var data = JSON.parse(e.data);
+          if (data.type === "stdout" || data.type === "stderr") appendLine(data);
+          else if (data.type === "done" || data.type === "killed") appendTerminal(data);
+        } catch (err) {}
+      };
+      es.onerror = function () {};
+    } catch (e) {
+      setState("error", { exitCode: 1 });
+      var d = document.createElement("div"); d.innerHTML = '<span class="stderr">' + esc(String(e)) + "</span>"; if (logEl) logEl.appendChild(d);
+    }
   }
 
   if (eyeBtn && keyInput) {
@@ -273,9 +358,34 @@
       setState("idle");
     });
   }
+  // --- 188 wiring ---
+  if (gatewayInput) {
+    gatewayInput.addEventListener("input", validateGateway);
+    gatewayInput.addEventListener("change", validateGateway);
+  }
+  if (applyBtn) {
+    applyBtn.addEventListener("click", function () {
+      if (!validateGateway()) return;
+      openApplyModal();
+    });
+  }
+  if (applyCancelBtn) applyCancelBtn.addEventListener("click", closeApplyModal);
+  if (applyModalBackdrop) applyModalBackdrop.addEventListener("click", closeApplyModal);
+  if (applyConfirmBtn) {
+    applyConfirmBtn.addEventListener("click", function () {
+      closeApplyModal();
+      const v = gatewayInput ? gatewayInput.value.trim() : "http://localhost:20128";
+      runApply(v);
+    });
+  }
+  // ESC closes modal
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && applyModal && applyModal.style.display !== "none") closeApplyModal();
+  });
 
   // Init
   (async function () {
+    validateGateway();
     try {
       const r = await fetch("/api/health");
       const j = await r.json();

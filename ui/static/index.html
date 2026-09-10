@@ -46,17 +46,40 @@
     <div class="hint" style="margin-top:6px">Live from <code>config/providers.yaml</code> (sorted, no restart).</div>
   </section>
 
-  <!-- Export dry-run card (187) -->
+  <!-- Export card (187+188): dry-run + apply with gateway confirm -->
   <div class="card accent-amber" id="card-export">
     <div class="card-head"><span class="eyebrow">02</span><h3>OmniRoute export <span>reads config/providers.yaml + data/results/*.yaml</span></h3></div>
-    <div class="hint">Dry run writes <code>data/derived/omniroute_import.json</code> with apiKey env:SECRET + <code>omniroute_combos.json</code>. Streaming via <code>SSE GET /api/jobs/{id}/logs</code>.</div>
-    <div class="row" style="margin-top:8px">
+    <div class="hint">Dry run writes <code>data/derived/omniroute_import.json</code> with apiKey env:SECRET + <code>omniroute_combos.json</code>. Apply POSTs bulk import + combos to gateway. Streaming via <code>SSE GET /api/jobs/{id}/logs</code>.</div>
+    <div class="row" style="margin-top:10px; align-items:end">
+      <label style="flex:1; min-width:260px; display:flex; flex-direction:column; gap:6px">
+        <span class="hint" style="margin:0">Gateway URL <span class="mono">gatewayUrl</span> — default <code class="mono">http://localhost:20128</code></span>
+        <input id="gateway-input" type="text" placeholder="http://localhost:20128" value="http://localhost:20128" spellcheck="false" autocomplete="off" aria-label="Gateway URL" />
+        <span id="gateway-error" class="error" style="display:none" role="alert"></span>
+      </label>
+    </div>
+    <div class="row" style="margin-top:10px">
       <button class="btn ok" id="dryBtn">▶ Dry run</button>
+      <button class="btn ok" id="applyBtn" style="border-color:#fbbf24">▶ Apply</button>
       <button class="btn ghost" id="cancelExportBtn" disabled>Cancel</button>
       <span class="badge muted">writes <span class="mono">omniroute_{import,combos}.json</span></span>
     </div>
     <div class="statebar"><span id="exportDot" class="dot"></span><span id="exportState" class="hint" style="margin:0">idle — no logs yet</span><span style="margin-left:auto" class="hint"><label><input type="checkbox" id="exportAutoScroll" checked> auto-scroll</label> · <a href="#" id="exportClear">clear</a></span></div>
     <div id="exportLog" class="log empty">No logs yet. Run Dry run (safe) to see streaming output. Placeholder apiKey = env:SECRET on dry-run; resolved only on apply.</div>
+  </div>
+
+  <!-- Apply confirm modal (188) -->
+  <div id="apply-modal" role="dialog" aria-modal="true" aria-labelledby="apply-modal-title" style="display:none; position:fixed; inset:0; z-index:200; align-items:center; justify-content:center">
+    <div id="apply-modal-backdrop" style="position:absolute; inset:0; background:rgba(15,23,42,0.5)"></div>
+    <div style="position:relative; background:#fff; border:1px solid #e2e8f0; border-radius:16px; padding:20px; max-width:520px; width:calc(100% - 32px); box-shadow:0 16px 48px rgba(15,23,42,0.2)">
+      <h3 id="apply-modal-title" style="margin:0 0 8px; font-size:16px; font-weight:700">Confirm Apply</h3>
+      <p class="hint" style="margin:0 0 8px">Yes, apply — POST bulk import + combos to URL, idempotent</p>
+      <p style="margin:0 0 12px; font:13px ui-monospace, monospace; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:8px 10px; word-break:break-all" id="apply-modal-url">http://localhost:20128</p>
+      <p class="hint" style="margin:0 0 14px">This will POST to <code class="mono">/api/export/apply</code> and stream logs. Dry-run needs no URL.</p>
+      <div class="row" style="justify-content:flex-end">
+        <button class="btn ghost" id="apply-cancel-btn" type="button">Cancel</button>
+        <button class="btn ok" id="apply-confirm-btn" type="button">Yes, apply — POST bulk import + combos to URL, idempotent</button>
+      </div>
+    </div>
   </div>
   <div id="toast" style="position:fixed;bottom:18px;left:50%;transform:translateX(-50%);display:none;z-index:99"></div>
 </main>

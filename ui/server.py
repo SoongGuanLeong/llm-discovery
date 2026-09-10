@@ -15,6 +15,8 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 
+import re
+
 import yaml
 from dotenv import set_key, unset_key
 from fastapi import FastAPI, HTTPException
@@ -30,6 +32,7 @@ STATIC_DIR.mkdir(parents=True, exist_ok=True)
 REPO_ROOT = Path(__file__).parents[1]
 ENV_PATH = REPO_ROOT / ".env"
 PROVIDERS_YAML = REPO_ROOT / "config" / "providers.yaml"
+DEFAULT_GATEWAY_URL = "http://localhost:20128"
 
 # --- in-memory jobs (187) ---
 jobs: dict[str, dict[str, Any]] = {}
@@ -38,12 +41,28 @@ _SECRET_ENV_KEYS = ["OMNIROUTE_API_KEY", "OMNIROUTE_MANAGE_KEY", "OMNIROUTE_TOKE
 
 def _redact(text: str) -> str:
     out = text
+    # 1) exact env secret values (length >=2 to avoid single-char over-redact)
     for k in _SECRET_ENV_KEYS:
         v = os.environ.get(k)
-        # Any real API key is >= 2 chars; single-char values would over-redact
-        # every occurrence of that letter (e.g. "a" inside "leaked").
         if v and len(v) >= 2 and v in out:
             out = out.replace(v, "***")
+    # 2) generic Bearer token redaction (even if env not set / token differs)
+    #    Keep env:SECRET placeholder intact: only redact when not env: prefix
+    #    Pattern: Authorization: Bearer <token>  or  Bearer <token>
+    #    Replace token part with *** but keep scheme
+    out = re.sub(r"(Bearer\s+)[A-Za-z0-9_\-\.\~\+\/\=\:]+", r"\1***", out)
+    # 3) generic apiKey field redaction for raw values (not env: placeholder)
+    #    e.g. {"apiKey": "sk-xxx"}  -> {"apiKey": "***"}
+    #    Skip when value starts with env:
+    def _api_key_repl(m):
+        val = m.group(2)
+        if val.startswith("env:"):
+            return m.group(0)
+        return m.group(1) + "***" + m.group(3)
+    out = re.sub(r'("apiKey"\s*:\s*")([^"]+)(")', _api_key_repl, out)
+    out = re.sub(r"('apiKey'\s*:\s*')([^']+)(')", _api_key_repl, out)
+    # also apiKey: Bearer style without JSON quotes? cover plain
+    out = re.sub(r"(apiKey\s*[:=]\s*)[^\s,\}\"]+", lambda m: m.group(1) + "***" if "env:" not in m.group(0) else m.group(0), out)
     return out
 
 def _make_job_id() -> str:
@@ -232,6 +251,47 @@ def set_omniroute_key(body: OmniKeyBody):
         pass
     hint = _hint_for_key(trimmed)
     return {"hasKey": True, "hint": hint}
+
+def _validate_gateway_url(url: str | None) -> str:
+    """Validate http(s):// gateway URL. Empty/None -> default. Raises 400 on bad scheme."""
+    if url is None or (isinstance(url, str) and url.strip() == ""):
+        return DEFAULT_GATEWAY_URL
+    raw = url.strip() if isinstance(url, str) else str(url).strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="gatewayUrl must be http(s)://")
+    if not re.match(r"^https?://", raw):
+        raise HTTPException(status_code=400, detail="gatewayUrl must be http(s)://")
+    return raw
+
+class ApplyBody(BaseModel):
+    gatewayUrl: str | None = None
+
+@app.post("/api/export/apply", status_code=201)
+async def export_apply(body: ApplyBody | None = None):
+    # Allow no body at all (POST without JSON) -> default URL
+    gateway = DEFAULT_GATEWAY_URL
+    if body is not None and body.gatewayUrl is not None:
+        gateway = _validate_gateway_url(body.gatewayUrl)
+    elif body is not None and body.gatewayUrl is None:
+        gateway = DEFAULT_GATEWAY_URL
+    # Empty string explicitly sent should 400 (distinguish None vs "")
+    if body is not None and isinstance(body.gatewayUrl, str) and body.gatewayUrl == "":
+        raise HTTPException(status_code=400, detail="gatewayUrl must be http(s)://")
+    job_id = _make_job_id()
+    jobs[job_id] = {
+        "id": job_id,
+        "proc": None,
+        "deque": deque(maxlen=500),
+        "status": "idle",
+        "exitCode": None,
+        "createdAt": time.time(),
+        "_queue": queue.Queue(),
+    }
+    env = dict(os.environ)
+    env["PYTHONUNBUFFERED"] = "1"
+    cmd = [sys.executable, "-m", "llm_discovery.omniroute_export", "--apply", "--omniroute-url", gateway]
+    threading.Thread(target=_run_job_thread, args=(cmd, REPO_ROOT, env, job_id), daemon=True).start()
+    return JSONResponse(content={"jobId": job_id}, status_code=201)
 
 @app.post("/api/export/dry-run", status_code=201)
 async def export_dry_run():

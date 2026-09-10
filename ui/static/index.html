@@ -9,13 +9,42 @@
 <body>
 <header class="bar">
   <span class="brand">llm-discovery Control</span>
-  <span class="sub">local · python -m ui</span>
-  <span class="right" id="health">…</span>
+  <span class="sub">local \u00b7 python -m ui</span>
+  <span class="right" id="health">\u2026</span>
 </header>
 <main>
   <h1>llm-discovery Control</h1>
-  <p class="muted">Scaffold — API + static shell. Full cards land in #186-#190.</p>
-  <div id="status">loading…</div>
+  <!-- OMNIROUTE_API_KEY card (issue 186) -->
+  <section class="card" id="key-card" aria-labelledby="key-title">
+    <div class="card-head">
+      <h3 id="key-title">OMNIROUTE_API_KEY</h3>
+      <span id="key-badge" class="badge badge-gray">Not set</span>
+      <span class="hint" style="margin-left:auto">stored in <code class="mono">.env</code> + live env</span>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div class="input-wrap" style="flex:1;min-width:220px">
+        <input id="key-input" type="password" autocomplete="off" spellcheck="false" placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022***" aria-label="OMNIROUTE_API_KEY" />
+        <button id="eye-btn" class="icon-btn" type="button" aria-label="Toggle visibility" title="Show/hide">\u25C9</button>
+      </div>
+      <button id="save-btn" class="btn ok" type="button">Save</button>
+      <button id="clear-btn" class="btn ghost" type="button">Clear</button>
+    </div>
+    <div id="key-error" class="error" style="display:none" role="alert"></div>
+    <div class="hint" style="margin-top:6px">Paste key masked locally. Save persists to <code>.env</code> (chmod 600 if created) and live env. Never in localStorage.</div>
+  </section>
+
+  <!-- Live providers dropdown (issue 186) -->
+  <section class="card" id="providers-card" aria-labelledby="providers-title">
+    <div class="card-head">
+      <h3 id="providers-title">Providers</h3>
+      <span id="providers-count" class="badge muted">\u2026</span>
+    </div>
+    <input id="provider-filter" type="text" placeholder="Filter providers\u2026" aria-label="Filter providers" style="margin-top:10px" />
+    <select id="provider-select" size="8" style="margin-top:8px;width:100%" aria-label="Providers"></select>
+    <div class="hint" style="margin-top:6px">Live from <code>config/providers.yaml</code> (sorted, no restart).</div>
+  </section>
+
+  <div id="toast" style="position:fixed;bottom:18px;left:50%;transform:translateX(-50%);display:none;z-index:99"></div>
 </main>
 <script src="/static/app.js"></script>
 </body>

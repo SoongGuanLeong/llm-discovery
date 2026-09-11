@@ -2201,8 +2201,20 @@
       },
       "_meta": {
         "first_seen": "2026-09-08T07:07:51.986083+00:00",
-        "last_updated": "2026-09-08T07:30:22.950390+00:00",
+        "last_updated": "2026-09-10T15:32:08.592756+00:00",
         "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "SWE-Bench Verified score 70.9% (source: https://poolside.ai/blog/introducing-laguna-xs-2-1)",
+          "Terminal-Bench success rate 37.5% (source: https://poolside.ai/blog/introducing-laguna-xs-2-1)"
+        ],
+        "confidence": 0.9,
+        "coding": true,
+        "decision": "keep",
+        "canonical_name": "Poolside Laguna XS 2.1",
+        "tier": "flash"
       }
     },
     "laguna-s-2.1": {

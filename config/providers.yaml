@@ -21,6 +21,14 @@ providers:
     base_url: https://api.ainative.studio/api/v1
     secret: AINATIVE_API_KEY
 
+  - name: apinex
+    base_url: https://api.apinex.bond/v1
+    secret: APINEX_API_KEY
+
+  - name: bai
+    base_url: https://api.b.ai/v1
+    secret: BAI_API_KEY
+
   - name: bazaarlink
     base_url: https://api.bazaarlink.ai/v1
     secret: BAZAARLINK_API_KEY
@@ -88,10 +96,18 @@ providers:
     base_url: https://api.reka.ai/v1
     secret: REKA_API_KEY
 
+  - name: tokenharbor
+    base_url: https://tokenharbor.ai/v1
+    secret: TOKENHARBOR_API_KEY
+
+  - name: tokenrouter
+    base_url: https://api.tokenrouter.com/v1
+    secret: TOKENROUTER_API_KEY
+
   - name: unorouter
     base_url: https://api.unorouter.com/v1
     secret: UNOROUTER_API_KEY
 
-  - name: zai
-    base_url: https://api.z.ai/api/paas/v4
-    secret: ZAI_API_KEY
+  - name: xkiro
+    base_url: https://api.xkiro.com/v1
+    secret: XKIRO_API_KEY

@@ -1,8 +1,9 @@
 """Backfill seeding from data/results/*.yaml — slim v2.
 
-Seeds slim store {benchmarks, pricing, _meta} by deduping normalized keys.
-No gate on legacy fields (store slim already filtered); all keep[] entries merged.
-Pricing aggregated via aggregate_pricing, benchmarks union-max via merge_records.
+Seeds slim store {benchmarks, pricing, _meta, judge} by deduping normalized keys.
+Keep strong gated via is_accurate_enough; drop strong persisted without gate
+(strong == cache for both decisions). Pricing aggregated via aggregate_pricing,
+benchmarks union-max via merge_records.
 """
 
 from __future__ import annotations
@@ -25,25 +26,42 @@ from .model_info_store import (
 )
 
 
-def _parse_results_file(path: Path) -> tuple[str | None, str | None, list[dict[str, Any]]]:
+def _parse_results_file(path: Path) -> tuple[str | None, str | None, list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return (provider, evaluated_at, keep, drop_cacheable).
+
+    keep = data["keep"] list (all candidates for keeper gate).
+    drop_cacheable = records from drop/drop_llm where evidence_level in (strong, moderate) and decision==drop.
+    """
     try:
         data = yaml.safe_load(path.read_text())
     except Exception:
-        return None, None, []
+        return None, None, [], []
     if not isinstance(data, dict):
-        return None, None, []
+        return None, None, [], []
+    provider = data.get("provider")
+    evaluated_at = data.get("evaluated_at")
+    keep: list[dict[str, Any]] = []
+    drop_cacheable: list[dict[str, Any]] = []
     if "keep" in data:
-        provider = data.get("provider")
-        evaluated_at = data.get("evaluated_at")
-        keep = data.get("keep") or []
-        if not isinstance(keep, list):
-            keep = []
-        return provider, evaluated_at, keep
-    if data.get("decision") == "keep" and "model_id" in data:
-        provider = data.get("provider")
-        evaluated_at = data.get("evaluated_at")
-        return provider, evaluated_at, [data]
-    return data.get("provider"), data.get("evaluated_at"), []
+        raw_keep = data.get("keep") or []
+        if isinstance(raw_keep, list):
+            keep = raw_keep
+    elif data.get("decision") == "keep" and "model_id" in data:
+        keep = [data]
+    # Collect drop candidates: drop + drop_llm (actual key is drop_llm)
+    candidates: list[dict[str, Any]] = []
+    for key in ("drop", "drop_llm"):
+        raw = data.get(key)
+        if isinstance(raw, list):
+            candidates.extend(raw)
+    for rec in candidates:
+        if not isinstance(rec, dict):
+            continue
+        lvl = str(rec.get("evidence_level", "")).strip().lower()
+        dec = str(rec.get("decision", "drop")).strip().lower()
+        if lvl in ("strong", "moderate") and dec == "drop":
+            drop_cacheable.append(rec)
+    return provider, evaluated_at, keep, drop_cacheable
 
 
 def backfill(
@@ -58,12 +76,14 @@ def backfill(
     pricing_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
     record_groups: dict[str, list[ModelInfoRecord]] = defaultdict(list)
     total_keep = 0
+    total_drop_cacheable = 0
     weak_skipped = 0
     all_evaluated_at: list[str] = []
     stale_skipped = 0
     gate_skipped = 0
+    drop_cacheable_written = 0
     for yf in yaml_files:
-        provider, evaluated_at, keep = _parse_results_file(yf)
+        provider, evaluated_at, keep, drop_cacheable = _parse_results_file(yf)
         if evaluated_at:
             all_evaluated_at.append(str(evaluated_at))
         for rec in keep:
@@ -84,6 +104,33 @@ def backfill(
             except Exception:
                 mir = ModelInfoRecord.from_provider_record({"benchmarks": rec.get("benchmarks"), "pricing": rec.get("pricing")}, provider=provider, evaluated_at=evaluated_at)
             record_groups[key].append(mir)
+            pricing = rec.get("pricing")
+            if pricing and isinstance(pricing, dict):
+                obs = dict(pricing)
+                obs["provider"] = provider
+                pricing_groups[key].append(obs)
+            elif pricing is not None:
+                pricing_groups[key].append({"blended": pricing, "provider": provider})
+            else:
+                if mir.pricing and mir.pricing.blended is not None:
+                    pricing_groups[key].append({"blended": mir.pricing.blended, "input": mir.pricing.input, "output": mir.pricing.output, "provider": provider})
+        # Persist drop cacheable without gate (cacheable == strong or moderate)
+        for rec in drop_cacheable:
+            total_drop_cacheable += 1
+            model_id = rec.get("model_id") or rec.get("provider_model_id") or ""
+            key = normalize_store_key(str(model_id))
+            if not key:
+                weak_skipped += 1
+                continue
+            try:
+                mir = ModelInfoRecord.from_provider_record(rec, provider=provider, evaluated_at=evaluated_at)
+            except Exception:
+                mir = ModelInfoRecord.from_provider_record({"benchmarks": rec.get("benchmarks"), "pricing": rec.get("pricing"), "evidence_level": rec.get("evidence_level"), "evidence": rec.get("evidence"), "confidence": rec.get("confidence"), "coding": rec.get("coding"), "canonical_name": rec.get("canonical_name"), "tier": rec.get("tier"), "decision": rec.get("decision")}, provider=provider, evaluated_at=evaluated_at)
+            # Ensure decision drop survives even if from_provider_record defaulted
+            if mir.judge is not None and mir.judge.decision != "drop":
+                mir.judge.decision = "drop"
+            record_groups[key].append(mir)
+            drop_cacheable_written += 1
             pricing = rec.get("pricing")
             if pricing and isinstance(pricing, dict):
                 obs = dict(pricing)
@@ -120,6 +167,8 @@ def backfill(
     stats = {
         "files_processed": files_processed,
         "total_keep_records": total_keep,
+        "total_drop_cacheable_records": total_drop_cacheable,
+        "drop_cacheable_written": drop_cacheable_written,
         "unique_models": unique_models,
         "merged_conflicts": merged_conflicts,
         "pricing_avgs": pricing_avgs,
@@ -139,11 +188,12 @@ def main() -> None:
     import argparse
     parser = argparse.ArgumentParser(description="Backfill model_info_store from data/results/*.yaml")
     parser.add_argument("--results-dir", default="data/results", help="Results yaml directory")
-    parser.add_argument("--store-path", default="data/model_info_store.json", help="Store JSON path")
+    parser.add_argument("--store-path", default="data/model_info_store.json", help="Store json path")
     args = parser.parse_args()
-    stats = backfill(results_dir=args.results_dir, store_path=args.store_path)
+    stats = backfill(args.results_dir, args.store_path)
     print(json.dumps(stats, indent=2))
 
 
 if __name__ == "__main__":
     main()
+

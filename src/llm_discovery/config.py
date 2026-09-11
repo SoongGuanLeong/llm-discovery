@@ -47,7 +47,22 @@ class InfisicalConfig(BaseModel):
 class JudgeLLMConfig(BaseModel):
     base_url: str
     model: str
-    secret: str
+    # Optional: local models (Ollama, vLLM, LM Studio) do not need an API key.
+    # Omit, null, or empty string to run without Authorization header.
+    secret: str | None = None
+    # Per-request timeout (seconds) for judge chat completions. Applies to all
+    # judges (local and remote); transport retries transient timeouts with
+    # exponential backoff before surfacing as error.
+    timeout: int = 120
+
+    @field_validator("secret", mode="before")
+    @classmethod
+    def _empty_secret_to_none(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if isinstance(v, str) and v.strip() == "":
+            return None
+        return v
 
 
 class AppConfig(BaseModel):

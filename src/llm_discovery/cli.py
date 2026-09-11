@@ -81,6 +81,9 @@ def build_parser() -> argparse.ArgumentParser:
     build_parser.add_argument("--max-workers", type=int, default=8, help="Workers per provider")
     build_parser.add_argument("--catalog-max-age-days", type=int, default=28, help="Refresh catalogs when fetched_at older than this (0 disables, default 28)")
     build_parser.add_argument("--no-catalog-refresh", action="store_true", help="Skip the catalog freshness gate entirely (offline builds)")
+    build_parser.add_argument("--retry-failed", action="store_true", help="Only retry providers with errors or empty keep+drop (missing file, error>0, or keep==0 and drop==0); can be combined with --providers to narrow within subset")
+    build_parser.add_argument("--provider-concurrency", type=int, default=None, help="Max providers in parallel (default 4; use 1-2 for local judges like LM Studio)")
+    build_parser.add_argument("--judge-timeout", type=int, default=None, help="Override judge LLM timeout in seconds (default from providers.yaml, typically 120)")
 
     return parser
 
@@ -99,6 +102,9 @@ def main() -> None:
                 max_workers=args.max_workers,
                 catalog_max_age_days=args.catalog_max_age_days,
                 no_catalog_refresh=args.no_catalog_refresh,
+                retry_failed=args.retry_failed,
+                provider_concurrency=args.provider_concurrency,
+                judge_timeout=args.judge_timeout,
             )
             sp = res['store_path']
             sz = res['store_size']

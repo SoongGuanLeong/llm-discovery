@@ -352,12 +352,12 @@ class ModelInfoRecord:
         now = evaluated_at or datetime.now(UTC).isoformat()
         meta = StoreMeta(first_seen=now, last_updated=now, version=2)
         judge_snap = None
-        # Persist judge_llm result only for strong evidence (28d TTL reuse)
+        # Persist judge_llm result for strong+moderate (28d TTL reuse) — weak/none dropped
         lvl = str(rec.get("evidence_level", "")).strip().lower()
-        if lvl == "strong":
+        if lvl in ("strong", "moderate"):
             try:
                 judge_snap = JudgeSnapshot(
-                    evidence_level="strong",
+                    evidence_level=lvl,
                     evidence=list(rec.get("evidence", []))[:3],
                     confidence=float(rec.get("confidence", 0.0)) if rec.get("confidence") is not None else 0.0,
                     coding=bool(rec.get("coding", rec.get("is_coding", True))),

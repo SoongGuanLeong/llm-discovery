@@ -33,16 +33,17 @@ TTL_DAYS = 28  # Record TTL for pricing reuse per CONTEXT / #91
 
 
 # ---------------------------------------------------------------------------
-# In-pipeline cache helpers (issue #96) — strong-only, pricing TTL 28d, benchmarks gap-fill
+# In-pipeline cache helpers (issue #96) — strong+moderate, pricing TTL 28d, benchmarks gap-fill
 # ---------------------------------------------------------------------------
 
 def classify_hit(record: Any | None) -> str:
-    """Strong-only hit classification (28d TTL, same JSON).
+    """Strong+moderate hit classification (28d TTL, same JSON).
 
-    Slim v2+judge store holds only Keepers (benchmarks+pricing+_meta+judge?); moderate/weak
-    never written, so existence without evidence_level implies Keeper.  When
-    judge snapshot present enforce strong-only via judge.evidence_level; legacy top-level
-    evidence_level also checked. Returns "strong_hit" or "miss".
+    Slim v2+judge store holds strong+moderate (benchmarks+pricing+_meta+judge?); weak
+    never written, so existence without evidence_level implies Keeper. When
+    judge snapshot present enforce strong+moderate via judge.evidence_level; legacy
+    top-level evidence_level also checked. Returns "strong_hit" or "miss"
+    (kept name for compat — means cacheable hit).
     """
     if record is None:
         return "miss"
@@ -53,7 +54,8 @@ def classify_hit(record: Any | None) -> str:
         if lvl is None and isinstance(judge, dict):
             lvl = judge.get("evidence_level")
         if lvl is not None and str(lvl).strip() != "":
-            return "strong_hit" if str(lvl).strip().lower() == "strong" else "miss"
+            lvl_norm = str(lvl).strip().lower()
+            return "strong_hit" if lvl_norm in ("strong", "moderate") else "miss"
         # judge present but no level -> treat as strong (legacy strong store)
         return "strong_hit"
     lvl = getattr(record, "evidence_level", None)
@@ -63,7 +65,7 @@ def classify_hit(record: Any | None) -> str:
         # Slim Keeper — no evidence_level persisted, existence == strong
         return "strong_hit"
     lvl_norm = str(lvl).strip().lower()
-    return "strong_hit" if lvl_norm == "strong" else "miss"
+    return "strong_hit" if lvl_norm in ("strong", "moderate") else "miss"
 
 
 def _pricing_is_stale(record: Any) -> bool:
@@ -162,7 +164,7 @@ def _derive_fresh_pricing_obs(
     return None
 
 
-def build_cached_keep_record(
+def build_cached_strong_record(
     raw_model_id: str,
     provider_name: str,
     cached: Any,
@@ -173,10 +175,12 @@ def build_cached_keep_record(
     min_score: float = 24.0,
     max_score: float = 45.0,
 ) -> dict[str, Any]:
-    """Full keep record from slim store + live deterministic sources. No LLM.
+    """Full record from slim store + live deterministic sources. No LLM.
 
-    Mirrors PolicyGate.apply outputs but derives from cached benchmarks/pricing
-    plus resolution + BenchmarkDataCache.
+    Symmetric for keep and drop when evidence_level in (strong, moderate). Mirrors
+    PolicyGate.apply outputs but derives from cached benchmarks/pricing
+    plus resolution + BenchmarkDataCache. Decision comes from cached
+    judge snapshot (keep or drop); drop never recomputed as keep.
     """
     cache_key = normalize_store_key(raw_model_id)
 
@@ -252,7 +256,7 @@ def build_cached_keep_record(
     else:
         aa_model_id = aa_name = aa_slug = verified_score = None
 
-    # Judge reuse: if stored strong judge snapshot exists, reuse its evidence/confidence/coding/canonical_name verbatim
+    # Judge reuse: if stored strong/moderate judge snapshot exists, reuse its evidence/confidence/coding/canonical_name verbatim
     # Pricing/benchmarks still gap-filled above; judge evidence preserved as-audited (http URLs already gated)
     cached_judge = getattr(cached, "judge", None) if not isinstance(cached, dict) else cached.get("judge")
     use_judge = False
@@ -276,7 +280,7 @@ def build_cached_keep_record(
             judge_coding = getattr(cached_judge, "coding", None)
             judge_canonical = getattr(cached_judge, "canonical_name", None)
             judge_tier = getattr(cached_judge, "tier", None)
-        if jl == "strong" and judge_evidence:
+        if jl in ("strong", "moderate") and judge_evidence:
             use_judge = True
 
     # Deterministic coding bool: prefer stored judge coding when reused, else True (Keeper)
@@ -289,17 +293,25 @@ def build_cached_keep_record(
     # deterministic coding already True; keep as is. If no benchmarks and no AA, still True (Keeper).
 
     # Evidence level promotion
+    # Determine base evidence level from cached record/judge snapshot
+    base_evidence_level = "strong"  # default
+    if cached_judge is not None:
+        if isinstance(cached_judge, dict):
+            base_evidence_level = str(cached_judge.get("evidence_level", "strong")).strip().lower()
+        else:
+            base_evidence_level = str(getattr(cached_judge, "evidence_level", "strong")).strip().lower()
+    else:
+        lvl = getattr(cached, "evidence_level", None)
+        if lvl is None:
+            lvl = cached.get("evidence_level") if isinstance(cached, dict) else None
+        if lvl is not None and str(lvl).strip() != "":
+            base_evidence_level = str(lvl).strip().lower()
+    # Clamp to strong/moderate; only strong+moderate are cacheable
+    if base_evidence_level not in ("strong", "moderate"):
+        base_evidence_level = "strong"
+    # Promote with deterministic level, but never demote the base level (strong > moderate > weak)
     det_level = PolicyGate._deterministic_evidence_level(verified_score, coding_score, profile)
-    # Slim Keeper implies strong, but re-derive to verify; never demote strong
-    evidence_level = PolicyGate._max_evidence_level("strong", det_level)  # strong wins
-    # If we synthesize fresh evidence, strong holds when det strong else moderate
-    # Actual gate would promote LLM moderate -> strong. Here we have no LLM level,
-    # so use det_level but floor at strong for hit parity. For incomplete flash gap,
-    # det weak would still return strong due to _max -> keeps hit strong. Comment:
-    # caller should gate reuse on coverage/pricing before calling builder.
-    if det_level == "weak":
-        # Degraded signal: keep strong for cache-hit provenance but flag evidence
-        evidence_level = "strong"  # preserve hit semantics; gap visible via coding_score null
+    evidence_level = PolicyGate._max_evidence_level(base_evidence_level, det_level)  # strong wins if base strong, otherwise moderate may be promoted or stay
 
     # Tier via categorize_model (pricing-aware)
     has_weakness = False
@@ -381,7 +393,7 @@ def build_cached_keep_record(
         coding_assessment = {
             "is_coding": deterministic_coding,
             "confidence": confidence,
-            "reason": "reused strong judge snapshot (no LLM)",
+            "reason": "reused strong/moderate judge snapshot (no LLM)",
             "coding_score": coding_score,
             "aa_score": verified_score,
         }
@@ -400,12 +412,25 @@ def build_cached_keep_record(
     else:
         canonical_out = aa_name
 
+    # Decision comes from cached judge snapshot (strong==cache symmetric)
+    cached_decision = "keep"
+    try:
+        _cj = getattr(cached, "judge", None) if not isinstance(cached, dict) else cached.get("judge")
+        if _cj is not None:
+            _dec = _cj.get("decision") if isinstance(_cj, dict) else getattr(_cj, "decision", "keep")
+            if str(_dec).strip().lower() == "drop":
+                cached_decision = "drop"
+    except Exception:
+        pass
+    # For drop strong, tier is always drop regardless of pricing
+    if cached_decision == "drop":
+        tier = "drop"
     stale = _pricing_is_stale(cached)
     return {
         "provider_model_id": raw_model_id,
         "cache_key": cache_key,
         "model_id": raw_model_id,  # for _to_record compatibility
-        "decision": "keep",
+        "decision": cached_decision,
         "tier": tier,
         "aa_model_id": aa_model_id,
         "aa_name": aa_name,
@@ -426,6 +451,12 @@ def build_cached_keep_record(
         "provider": provider_name,
         "source": "cache",
     }
+
+
+def build_cached_keep_record(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    """Backward compat alias for keep-only callers."""
+    return build_cached_strong_record(*args, **kwargs)
+
 
 VISION_CHEAP_THRESHOLD = 1.2
 VISION_CODING_SCORE_MIN = 35.0
@@ -567,8 +598,8 @@ def evaluate_model(
                         except Exception:
                             obs = fresh_pricing_obs
                     print(f"  [cache] HIT strong {model_id} key={cache_key}")
-                    result = build_cached_keep_record(model_id, provider_name, cached, obs, fresh_bm, resolution=resolution, cache=cache, min_score=min_score, max_score=max_score)
-                    if provider_name == "llm7" and model.get("tier") == "turbo":
+                    result = build_cached_strong_record(model_id, provider_name, cached, obs, fresh_bm, resolution=resolution, cache=cache, min_score=min_score, max_score=max_score)
+                    if provider_name == "llm7" and model.get("tier") == "turbo" and result.get("decision") != "drop":
                         result["tier"] = "flash"
                     return result
                 else:
@@ -602,6 +633,7 @@ def evaluate_model(
     # Accurate-Enough Gate before store write (issue #107)
     # Candidates never cached: fail => not Keeper even if decision keep
     # Store write is gated; YAML remains ephemeral via backfill filter
+    # Strong == cache symmetric: drop strong persisted without gate (no LLM re-judge)
     if store is not None and result.get("decision") == "keep":
         try:
             ok, reason = is_accurate_enough(result)
@@ -624,6 +656,18 @@ def evaluate_model(
                     print(f"  [gate] store put failed {model_id}: {exc2}")
         except Exception as exc:
             print(f"  [gate] check failed {model_id}: {exc}")
+    elif store is not None and str(result.get("decision", "")).strip().lower() == "drop" and str(result.get("evidence_level", "")).strip().lower() in ("strong", "moderate"): 
+        try:
+            from .model_info_store import ModelInfoRecord
+            from .model_info_store import normalize_store_key as _nsk2
+
+            rec = ModelInfoRecord.from_provider_record(result, provider=provider_name, evaluated_at=datetime.now(UTC).isoformat())
+            key = _nsk2(model_id)
+            if key:
+                store.put(key, rec)
+                print(f"  [gate] STORE DropStrong {model_id} key={key}")
+        except Exception as exc2:
+            print(f"  [gate] store put drop failed {model_id}: {exc2}")
     # llm7 turbo = free-tier keep; normal judge still runs, but turbo never drops
     if provider_name == "llm7" and model.get("tier") == "turbo":
         result["decision"] = "keep"
@@ -789,9 +833,12 @@ def discover_single(
     if provider.discovery_strategy == "bazaarlink":
         return _auto_free_record(provider_name)
     load_all_secrets(config.infisical)
-    llm_api_key = os.environ.get(config.judge_llm.secret)
-    if not llm_api_key:
-        raise RuntimeError(f"Missing API key environment variable: {config.judge_llm.secret}")
+    judge_secret_name = getattr(config.judge_llm, "secret", None)
+    llm_api_key: str | None = None
+    if judge_secret_name:
+        llm_api_key = os.environ.get(judge_secret_name)  # type: ignore[arg-type]
+        if not llm_api_key:
+            raise RuntimeError(f"Missing API key environment variable: {judge_secret_name}")
     api_key = os.environ.get(provider.secret)
     if not api_key:
         raise RuntimeError(f"Missing API key environment variable: {provider.secret}")
@@ -837,6 +884,7 @@ def discover_single(
         api_key=llm_api_key,
         min_score=config.artificial_analysis.min_score,
         search_web=searcher.search,
+        timeout=getattr(config.judge_llm, "timeout", 120) or 120,
     )
     cache = BenchmarkDataCache()
     cache.collect_from_local(aa, models_dev)
@@ -881,9 +929,12 @@ def discover_provider(
             "error": [],
         }
     load_all_secrets(config.infisical)
-    llm_api_key = os.environ.get(config.judge_llm.secret)
-    if not llm_api_key:
-        raise RuntimeError(f"Missing API key environment variable: {config.judge_llm.secret}")
+    judge_secret_name = getattr(config.judge_llm, "secret", None)
+    llm_api_key: str | None = None
+    if judge_secret_name:
+        llm_api_key = os.environ.get(judge_secret_name)  # type: ignore[arg-type]
+        if not llm_api_key:
+            raise RuntimeError(f"Missing API key environment variable: {judge_secret_name}")
     api_key = os.environ.get(provider.secret)
     if not api_key:
         raise RuntimeError(f"Missing API key environment variable: {provider.secret}")
@@ -934,6 +985,7 @@ def discover_provider(
         api_key=llm_api_key,
         min_score=config.artificial_analysis.min_score,
         search_web=searcher.search,
+        timeout=getattr(config.judge_llm, "timeout", 120) or 120,
     )
     cache = BenchmarkDataCache()
     cache.collect_from_local(aa, models_dev)

@@ -8,9 +8,9 @@ infisical:
   discovery_project_id_env: LLM_DISCOVERY_PROJECT_ID
 
 judge_llm:
-  base_url: https://api.kilo.ai/api/gateway
-  model: kilo-auto/free
-  secret: KILO_AI_API_KEY
+  base_url: https://apihub.agnes-ai.com/v1
+  model: agnes-2.5-flash
+  secret: AGNES_AI_API_KEY
 
 providers:
   - name: agnes

@@ -83,6 +83,15 @@ CUSTOM_NODE_MAP = {
 # Ticket 176: opencode_zen maps to opencode-zen registry id (not free opencode)
 OPENCOD_ZEN_MAP = {"opencode_zen": "opencode-zen"}
 
+# Providers listed in the OmniRoute registry (canonical source of truth)
+# Entries from _PROVIDER_ALIAS that map to registry IDs (not custom node IDs)
+# plus OPENCOD_ZEN_MAP entries
+# Explicitly excluded: providers in CUSTOM_NODE_MAP (they are API Key Compatible Providers)
+_OMNIROUTE_REGISTRY = {
+    k: v for k, v in {**_PROVIDER_ALIAS, **OPENCOD_ZEN_MAP}.items()
+    if k not in CUSTOM_NODE_MAP
+}
+
 
 # Ticket 177: model provisioning provider mapping (same as T1)
 _MODEL_PROVIDER_MAP = {
@@ -158,14 +167,18 @@ def _resolve_provider_id(name: str, raw: dict[str, Any] | None = None) -> str:
     """Resolve provider id for export/combo/model mapping.
 
     - Explicit `custom: true` in YAML forces `{name}-custom` (or CUSTOM_NODE_MAP value)
-    - Hardcoded CUSTOM_NODE_MAP entries map to their custom id
-    - Otherwise use full alias table (_MODEL_PROVIDER_MAP)
+    - Providers listed in the OmniRoute registry use their registry id
+    - Providers not in the registry are automatically mapped to `{name}-custom`
+    - agnes/nararouter and other CUSTOM_NODE_MAP providers require explicit `custom: true`
     """
     if raw is not None and _is_explicit_custom(raw):
         return CUSTOM_NODE_MAP.get(name, f"{name}-custom")
+    if name in _OMNIROUTE_REGISTRY:
+        return _OMNIROUTE_REGISTRY[name]
     if name in CUSTOM_NODE_MAP:
+        # agnes/nararouter and other custom-only providers require explicit custom: true
         return CUSTOM_NODE_MAP[name]
-    return _MODEL_PROVIDER_MAP.get(name, name)
+    return f"{name}-custom"
 
 
 def build_import_entries(providers_path: Path = DEFAULT_PROVIDERS) -> list[dict[str, Any]]:
@@ -1068,75 +1081,3 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.revert_summary:
         summary_path = Path(args.revert_summary)
-        if not summary_path.exists():
-            print(f"summary file not found: {summary_path}", file=sys.stderr)
-            return 2
-        summary = json.loads(summary_path.read_text())
-        if isinstance(summary, dict) and "summary" in summary:
-            summary = summary["summary"]
-        snapshot_path = summary_path if isinstance(summary_path, Path) else Path(str(summary_path))
-        # try to find adjacent snapshot file
-        snapshot_file = snapshot_path.with_suffix(".snapshot.json")
-        snapshot_before = {}
-        if snapshot_file.exists():
-            snapshot_before = json.loads(snapshot_file.read_text())
-        auth_headers = get_auth_headers(args.api_key)
-        revert_summary = revert_payload(args.omniroute_url, summary, snapshot_before, auth_headers=auth_headers or None)
-        print(json.dumps(revert_summary, indent=2, sort_keys=True), file=sys.stderr)
-        return 0
-    if args.revert_snapshot:
-        snapshot_path = Path(args.revert_snapshot)
-        if not snapshot_path.exists():
-            print(f"snapshot file not found: {snapshot_path}", file=sys.stderr)
-            return 2
-        snapshot_before = json.loads(snapshot_path.read_text())
-        # Build a synthetic summary from snapshot (revert to exact snapshot)
-        summary = {
-            "retire": {"retired": []},
-            "import": {"response": {"results": []}},
-            "psd_patches": {"patched": []},
-            "models": {"upserted": [], "sent": 0},
-            "gc": {"providers": [], "total_deleted": 0},
-            "combos": {"upserted": []},
-        }
-        auth_headers = get_auth_headers(args.api_key)
-        revert_summary = revert_payload(args.omniroute_url, summary, snapshot_before, auth_headers=auth_headers or None)
-        print(json.dumps(revert_summary, indent=2, sort_keys=True), file=sys.stderr)
-        return 0
-    if args.verify:
-        snapshot_path = Path(args.verify)
-        if not snapshot_path.exists():
-            print(f"snapshot file not found: {snapshot_path}", file=sys.stderr)
-            return 2
-        snapshot = json.loads(snapshot_path.read_text())
-        auth_headers = get_auth_headers(args.api_key)
-        result = verify_gateway_unchanged(args.omniroute_url, snapshot, auth_headers=auth_headers or None)
-        print(json.dumps(result, indent=2, sort_keys=True), file=sys.stderr)
-        if not result.get("unchanged"):
-            return 1
-        return 0
-    if args.dry_run or args.check:
-        payload = generate_payload(Path(args.providers), Path(args.results_dir))
-        sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
-        write_payload_files(payload, Path(args.output_dir))
-        return 0
-    providers_path = Path(args.providers)
-    results_dir = Path(args.results_dir)
-    missing: list[str] = []
-    if not providers_path.exists():
-        missing.append(f"providers not found: {providers_path}")
-    if not results_dir.exists():
-        missing.append(f"results dir not found: {results_dir}")
-    if missing:
-        for m in missing:
-            print(m, file=sys.stderr)
-        print("hint: use --dry-run for scaffold without inputs or --apply to push to gateway", file=sys.stderr)
-        return 2
-    payload = generate_payload(providers_path, results_dir)
-    sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
-    write_payload_files(payload, Path(args.output_dir))
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

@@ -33,7 +33,7 @@ class JudgeTransport:
         self,
         base_url: str,
         model: str,
-        api_key: str,
+        api_key: str | None = None,
         timeout: int = 120,
     ):
         self.base_url = base_url.rstrip("/")
@@ -46,17 +46,18 @@ class JudgeTransport:
         messages: list[dict[str, Any]],
         disable_tools: bool = False,
     ) -> httpx.Response:
-        """POST chat completion with retry for transient 429/503.
+        """POST chat completion with retry for transient failures.
 
-        Honors Retry-After header when present, otherwise exponential backoff
-        (10 -> 20 -> 40s, capped at 60s). After exhausting retries the final
-        429/503 response is returned.
+        Retries 429/503/502/529 plus httpx timeout/transport errors with
+        exponential backoff (10 -> 20 -> 40s, capped at 60s, honors
+        Retry-After). After exhausting retries the final response is
+        returned; transport errors are re-raised as the last exception.
+        Applies to all judges — local (LM Studio/Ollama/vLLM) and remote.
         """
         url = f"{self.base_url}/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
@@ -70,14 +71,39 @@ class JudgeTransport:
         if disable_tools:
             payload["response_format"] = {"type": "json_object"}
 
+        # Retryable HTTP statuses (rate-limit / overloaded / gateway)
+        retry_statuses = (429, 503, 502, 529, 408)
         backoff = 10
+        last_exc: Exception | None = None
         for attempt in range(4):
-            response = httpx.post(url, headers=headers, json=payload, timeout=self.timeout)
-            if response.status_code not in (429, 503):
+            try:
+                response = httpx.post(url, headers=headers, json=payload, timeout=self.timeout)
+            except (httpx.TimeoutException, httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout, httpx.PoolTimeout, httpx.NetworkError, httpx.TransportError) as exc:
+                last_exc = exc
+                # Timeout / transport error — retry with backoff
+                if attempt < 3:
+                    wait = backoff
+                    # small jitter so concurrent workers don't thundering-herd
+                    try:
+                        print(f"[judge] transient transport error attempt {attempt+1}/4: {type(exc).__name__}: {exc} -> retry in {wait}s")
+                    except Exception:
+                        pass
+                    time.sleep(min(wait, 60))
+                    backoff = min(backoff * 2, 60)
+                    continue
+                raise
+            # HTTP-level retry
+            if response.status_code not in retry_statuses:
                 return response
             retry_after = response.headers.get("retry-after")
             wait = int(retry_after) if retry_after and retry_after.isdigit() else backoff
             if attempt < 3:
+                try:
+                    print(f"[judge] HTTP {response.status_code} attempt {attempt+1}/4 -> retry in {min(wait,60)}s")
+                except Exception:
+                    pass
                 time.sleep(min(wait, 60))
             backoff = min(backoff * 2, 60)
+        # Exhausted HTTP retries — return last response (caller handles 429/503)
+        # If we exhausted transport retries, last_exc would have been raised.
         return response

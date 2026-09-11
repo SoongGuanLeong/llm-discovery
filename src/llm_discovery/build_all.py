@@ -84,6 +84,25 @@ def _collect_per_provider_stats(results_dir: Path) -> dict[str, dict[str, int]]:
     return stats
 
 
+def _select_retry_providers(results_dir: Path, provider_names: list[str]) -> list[str]:
+    """Filter to providers that need retry: missing file, error>0, or keep+drop empty.
+
+    Keep+drop empty covers:
+      - never-discovered provider (no keep/drop yet)
+      - provider whose discovery returned only error / provider_error_result
+    """
+    stats = _collect_per_provider_stats(results_dir)
+    retry: list[str] = []
+    for name in provider_names:
+        s = stats.get(name)
+        if s is None:
+            # No result file at all -> needs discovery
+            retry.append(name)
+        elif s["error"] > 0 or (s["keep"] == 0 and s["drop"] == 0):
+            retry.append(name)
+    return retry
+
+
 def build_all(
     data_dir: str | Path = "data",
     config_path: str | Path = "config/providers.yaml",
@@ -92,6 +111,9 @@ def build_all(
     max_workers: int = 8,
     catalog_max_age_days: int = 28,
     no_catalog_refresh: bool = False,
+    retry_failed: bool = False,
+    provider_concurrency: int | None = None,
+    judge_timeout: int | None = None,
 ) -> dict[str, Any]:
     """Build store from providers.yaml in one invocation.
 
@@ -106,6 +128,16 @@ def build_all(
             0 or negative disables the gate. Default 28.
         no_catalog_refresh: skip the staleness gate entirely (offline builds).
 
+        retry_failed: when True, only discover providers that failed last run:
+            - missing result file (`data/results/<name>.yaml` absent)
+            - `error` non-empty
+            - keep and drop both empty (e.g. transient provider error wrote empty keep/drop)
+            Useful for CI retries without --providers listing. Ignored when provider_names is empty.
+        provider_concurrency: max concurrently executing providers (1-8). None
+            means use default PROVIDER_CONCURRENCY (4).
+        judge_timeout: override judge LLM timeout in seconds for this build.
+            When set, overrides config.providers.yaml judge_llm.timeout.
+
     Returns:
         dict with keys: providers_discovered, files_written, backfill stats, store_path, store_size, catalogs
     """
@@ -119,10 +151,32 @@ def build_all(
 
     # 1. Parse providers.yaml
     config = load_config(config_path)
+    # Allow build-time judge timeout override (applies to all judges)
+    if judge_timeout is not None:
+        try:
+            config.judge_llm.timeout = int(judge_timeout)
+        except Exception:
+            pass
     all_provider_cfgs = [p for p in config.providers if provider_names is None or p.name in provider_names]
     provider_list = [p.name for p in all_provider_cfgs]
     if not provider_list:
         raise ValueError("No providers matched filter: " + str(provider_names))
+
+    # 1b. Retry scope: --retry-failed narrows to providers that errored or have no keep/drop
+    if retry_failed:
+        if not provider_list:
+            raise ValueError("--retry-failed requires at least one provider in config")
+        narrowed = _select_retry_providers(results_dir, provider_list)
+        if not narrowed:
+            print("[build-all] --retry-failed: no providers need retry (all have keep or drop and no errors)")
+        else:
+            skipped = [n for n in provider_list if n not in narrowed]
+            provider_list = narrowed
+            all_provider_cfgs = [p for p in all_provider_cfgs if p.name in provider_list]
+            if skipped:
+                print(f"[build-all] --retry-failed: retrying {len(provider_list)}/{len(provider_list)+len(skipped)}: {', '.join(provider_list)} (skipping {', '.join(skipped)})")
+            else:
+                print(f"[build-all] --retry-failed: retrying {len(provider_list)} providers: {', '.join(provider_list)}")
 
     store_for_discovery = ModelInfoStore(store_path)
     store_for_discovery.load()
@@ -201,7 +255,8 @@ def build_all(
     files_written: list[str] = []
     # per-provider raw results for telemetry (keep/drop/error counts before backfill)
     per_provider_raw: dict[str, dict[str, int]] = {}
-    provider_concurrency = min(PROVIDER_CONCURRENCY, len(provider_list))
+    _conc = PROVIDER_CONCURRENCY if provider_concurrency is None else int(provider_concurrency)
+    provider_concurrency = max(1, min(_conc, len(provider_list)))
 
     if discover_fn is not None:
         # Mocked/injected discovery for tests — bounded parallelism (3-4 concurrent)

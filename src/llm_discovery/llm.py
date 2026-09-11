@@ -150,10 +150,11 @@ class LocalLLMEvaluator:
         self,
         base_url: str,
         model: str,
-        api_key: str,
-        min_score: float,
-        search_web: Callable[[str], list[dict[str, Any]]],
+        api_key: str | None = None,
+        min_score: float = 0,
+        search_web: Callable[[str], list[dict[str, Any]]] | None = None,
         max_searches: int = 2,
+        timeout: int = 120,
     ):
         self.base_url = base_url.rstrip("/")
         self.model = model
@@ -161,10 +162,12 @@ class LocalLLMEvaluator:
         self.min_score = min_score
         self.search_web = search_web
         self.max_searches = max_searches
+        self.timeout = timeout
         self.transport = JudgeTransport(
             base_url=self.base_url,
             model=self.model,
             api_key=self.api_key,
+            timeout=self.timeout,
         )
 
     def evaluate(
@@ -296,6 +299,10 @@ class LocalLLMEvaluator:
 
         arguments = json.loads(function["arguments"])
 
+        if self.search_web is None:
+            # No search backend configured — return empty results so the
+            # judge can fall back to deterministic evidence.
+            return []
         return self.search_web(arguments["query"])
 
     def _build_prompt(

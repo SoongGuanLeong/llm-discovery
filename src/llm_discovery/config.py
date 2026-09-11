@@ -17,6 +17,11 @@ class ProviderConfig(BaseModel):
     # Optional variant for NaraRouter: if true, paid-gated-free ids are
     # returned as dropped with reason "paid_gated_free" instead of excluded.
     include_paid_gated_as_dropped: bool = False
+    # If true, provider is provisioned as an API Key Compatible Provider
+    # (custom OpenAI-compatible node `{name}-custom`) in OmniRoute
+    # instead of a registry provider. Also auto-applied for providers in
+    # CUSTOM_NODE_MAP or unknown to the OmniRoute registry.
+    custom: bool = False
 
     @field_validator("discovery_strategy")
     @classmethod
@@ -42,7 +47,22 @@ class InfisicalConfig(BaseModel):
 class JudgeLLMConfig(BaseModel):
     base_url: str
     model: str
-    secret: str
+    # Optional: local models (Ollama, vLLM, LM Studio) do not need an API key.
+    # Omit, null, or empty string to run without Authorization header.
+    secret: str | None = None
+    # Per-request timeout (seconds) for judge chat completions. Applies to all
+    # judges (local and remote); transport retries transient timeouts with
+    # exponential backoff before surfacing as error.
+    timeout: int = 120
+
+    @field_validator("secret", mode="before")
+    @classmethod
+    def _empty_secret_to_none(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if isinstance(v, str) and v.strip() == "":
+            return None
+        return v
 
 
 class AppConfig(BaseModel):

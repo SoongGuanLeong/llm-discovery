@@ -2,10 +2,10 @@
 
 All 7 floors must pass for Keeper; fail => Candidate (re-evaluated every build).
 Router keeps tagged separately per ADR 0006 (always keep but not coding Keeper).
-Strong-only via should_cache; moderate/weak never cached.
+Strong+moderate via should_cache; weak/none never cached.
 
 Floors:
-- evidence_level == strong
+- evidence_level in (strong, moderate)
 - coding_score != null
 - pricing present OR free-marker (:free/-free/_free//free or blended==0)
 - aa_model_id present OR supplement bench >=50 with http URL
@@ -27,7 +27,7 @@ HALLUCINATED_DENYLIST = {"tokenmix.ai", "callsphere.ai", "benchlm"}
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$", re.IGNORECASE)
 _UUID_HEX32_RE = re.compile(r"^[0-9a-f]{32}$", re.IGNORECASE)
 
-CACHEABLE_LEVELS = {"strong"}
+CACHEABLE_LEVELS = {"strong", "moderate"}
 
 SUPPLEMENT_50_KEYS = ("swe_bench_verified", "terminal_bench", "terminal_bench_2_1", "swe_bench_pro")
 
@@ -39,7 +39,7 @@ def _normalize_evidence_level(level: str | None) -> str:
 
 
 def should_cache(evidence_level: str | None, confidence: float | None = None) -> bool:
-    """Strong-only gate per ADR 0006. Moderate/weak/none never cached."""
+    """Strong+moderate gate (ADR 0006 patched). Weak/none never cached."""
     lvl = _normalize_evidence_level(evidence_level)
     return lvl in CACHEABLE_LEVELS
 
@@ -105,9 +105,9 @@ def is_accurate_enough(record: dict[str, Any]) -> tuple[bool, str]:
         except Exception:
             pricing_blended = pricing
 
-    # Floor 1: evidence_level strong
-    if _normalize_evidence_level(evidence_level) != "strong":
-        return False, f"evidence_level={evidence_level} not strong"
+    # Floor 1: evidence_level in (strong, moderate)
+    if _normalize_evidence_level(evidence_level) not in CACHEABLE_LEVELS:
+        return False, f"evidence_level={evidence_level} not in {sorted(CACHEABLE_LEVELS)}"
     # Floor 2: coding_score != null
     if coding_score is None:
         return False, "coding_score is null"

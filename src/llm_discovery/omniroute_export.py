@@ -69,10 +69,15 @@ _PROVIDER_ALIAS = {
 
 # Ticket 176: providers that map to custom OpenAI-compatible node ids
 # Stable custom ids — model names after import are provider/model like nararouter-custom/muse-spark-...
+# Also apinex/tokenharbor/xkiro: base_url incorrect / not in OmniRoute registry →
+# API Key Compatible Providers. Explicit `custom: true` in providers.yaml also forces this.
 CUSTOM_NODE_MAP = {
     "nararouter": "nararouter-custom",
     "zai": "zai-custom",
     "agnes": "agnes-custom",
+    "apinex": "apinex-custom",
+    "tokenharbor": "tokenharbor-custom",
+    "xkiro": "xkiro-custom",
 }
 
 # Ticket 176: opencode_zen maps to opencode-zen registry id (not free opencode)
@@ -127,12 +132,52 @@ def _load_raw_providers(path: Path) -> list[dict[str, Any]]:
     return [p for p in providers if isinstance(p, dict)]
 
 
+def _is_explicit_custom(raw_provider: dict[str, Any]) -> bool:
+    """Return True if provider is explicitly marked custom in YAML."""
+    # Accept `custom: true`, `custom: "true"`, or truthy string variants
+    val = raw_provider.get("custom")
+    if val is True:
+        return True
+    if isinstance(val, str) and val.strip().lower() in ("true", "1", "yes"):
+        return True
+    return False
+
+
+def _custom_provider_ids(providers_path: Path = DEFAULT_PROVIDERS) -> set[str]:
+    """Union of hardcoded CUSTOM_NODE_MAP keys and explicit `custom: true` providers."""
+    ids = set(CUSTOM_NODE_MAP.keys())
+    for p in _load_raw_providers(providers_path):
+        if _is_explicit_custom(p):
+            name = str(p.get("name") or p.get("provider") or "").strip()
+            if name:
+                ids.add(name)
+    return ids
+
+
+def _resolve_provider_id(name: str, raw: dict[str, Any] | None = None) -> str:
+    """Resolve provider id for export/combo/model mapping.
+
+    - Explicit `custom: true` in YAML forces `{name}-custom` (or CUSTOM_NODE_MAP value)
+    - Hardcoded CUSTOM_NODE_MAP entries map to their custom id
+    - Otherwise use full alias table (_MODEL_PROVIDER_MAP)
+    """
+    if raw is not None and _is_explicit_custom(raw):
+        return CUSTOM_NODE_MAP.get(name, f"{name}-custom")
+    if name in CUSTOM_NODE_MAP:
+        return CUSTOM_NODE_MAP[name]
+    return _MODEL_PROVIDER_MAP.get(name, name)
+
+
 def build_import_entries(providers_path: Path = DEFAULT_PROVIDERS) -> list[dict[str, Any]]:
     """Build import rows from providers.yaml.
 
     Ticket 176: nararouter/zai/agnes map to custom OpenAI-compatible node ids;
     opencode_zen maps to opencode-zen registry id. Connection names keep yaml
     names for traceability.
+
+    apinex/tokenharbor/xkiro: base_url incorrect / not in OmniRoute registry →
+    API Key Compatible Providers (custom nodes). Also any provider with
+    `custom: true` in YAML is forced to `{name}-custom`.
     """
     providers_path = Path(providers_path)
     raw = _load_raw_providers(providers_path)
@@ -145,9 +190,9 @@ def build_import_entries(providers_path: Path = DEFAULT_PROVIDERS) -> list[dict[
         base = p.get("base_url")
         if base is None:
             base = p.get("baseUrl")
-        # Ticket 176 + 177: map via full alias table so import provider ids match combo/model ids
-        # (custom nodes + gemini/cloudflare-ai/kilo-gateway/navy/nvidia/ollama-cloud etc)
-        provider_id = _MODEL_PROVIDER_MAP.get(name, name)
+        # Explicit custom flag overrides alias table so user can force any provider
+        # to an API Key Compatible (custom OpenAI-compatible) node.
+        provider_id = _resolve_provider_id(name, p)
         row: dict[str, Any] = {"provider": provider_id, "name": name, "apiKey": f"env:{secret}" if secret else ""}
         if base is not None and str(base).strip() != "":
             row["baseUrl"] = str(base)
@@ -250,6 +295,17 @@ def group_keeps_by_tier(keeps: list[dict[str, Any]], *, strict_contributor_free:
 
 
 def _map_provider_for_model(p: str) -> str:
+    # Custom nodes first (hardcoded + explicit `custom: true` in YAML)
+    if p in CUSTOM_NODE_MAP:
+        return CUSTOM_NODE_MAP[p]
+    # Explicit custom flag: any provider with `custom: true` maps to `{name}-custom`
+    # Loaded lazily so dry-run/build remains local-first without OmniRoute fetch.
+    try:
+        explicit = _custom_provider_ids()
+        if p in explicit:
+            return CUSTOM_NODE_MAP.get(p, f"{p}-custom")
+    except Exception:
+        pass
     return _MODEL_PROVIDER_MAP.get(p, p)
 
 

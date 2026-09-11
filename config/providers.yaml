@@ -16,6 +16,7 @@ providers:
   - name: agnes
     base_url: https://apihub.agnes-ai.com/v1
     secret: AGNES_AI_API_KEY
+    custom: true
 
   - name: ainative
     base_url: https://api.ainative.studio/api/v1
@@ -24,6 +25,7 @@ providers:
   - name: apinex
     base_url: https://api.apinex.bond/v1
     secret: APINEX_API_KEY
+    custom: true
 
   - name: bai
     base_url: https://api.b.ai/v1
@@ -67,6 +69,7 @@ providers:
     base_url: https://router.bynara.id/v1
     secret: NARAROUTER_API_KEY
     discovery_strategy: nararouter
+    custom: true
 
   - name: navy_ai
     base_url: https://api.navy/v1
@@ -99,6 +102,7 @@ providers:
   - name: tokenharbor
     base_url: https://tokenharbor.ai/v1
     secret: TOKENHARBOR_API_KEY
+    custom: true
 
   - name: tokenrouter
     base_url: https://api.tokenrouter.com/v1
@@ -111,3 +115,4 @@ providers:
   - name: xkiro
     base_url: https://api.xkiro.com/v1
     secret: XKIRO_API_KEY
+    custom: true

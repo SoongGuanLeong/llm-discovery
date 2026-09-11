@@ -17,6 +17,11 @@ class ProviderConfig(BaseModel):
     # Optional variant for NaraRouter: if true, paid-gated-free ids are
     # returned as dropped with reason "paid_gated_free" instead of excluded.
     include_paid_gated_as_dropped: bool = False
+    # If true, provider is provisioned as an API Key Compatible Provider
+    # (custom OpenAI-compatible node `{name}-custom`) in OmniRoute
+    # instead of a registry provider. Also auto-applied for providers in
+    # CUSTOM_NODE_MAP or unknown to the OmniRoute registry.
+    custom: bool = False
 
     @field_validator("discovery_strategy")
     @classmethod

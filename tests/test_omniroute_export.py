@@ -141,9 +141,9 @@ def test_build_import_entries_deterministic_idempotent():
 
 
 def test_build_import_entries_real_providers_count(tmp_path: Path):
-    # real config providers count (mapped ids)
+    # real config providers count (mapped ids) — 24 current providers
     rows = mod.build_import_entries(Path("config/providers.yaml"))
-    assert len(rows) == 20
+    assert len(rows) == 24
     assert [r["provider"] for r in rows] == sorted(r["provider"] for r in rows)
     # spot check: cloudflare maps to cloudflare-ai, groq present
     by_provider = {r["provider"]: r for r in rows}
@@ -210,16 +210,20 @@ def test_cli_dry_run_writes_import_file_fixture(tmp_path: Path):
 
 
 def test_custom_node_mapping():
-    """Import-row builder maps nararouter/zai/agnes to custom OpenAI-compatible node ids."""
+    """Import-row builder maps custom providers to `-custom` node ids (explicit `custom: true` + hardcoded map)."""
     rows = mod.build_import_entries(Path("config/providers.yaml"))
     by_name = {r["name"]: r for r in rows}
+    # providers.yaml currently has no `zai` entry (retired static catalog) — map still exists for retirement
+    assert "zai" in mod.CUSTOM_NODE_MAP
     assert by_name["nararouter"]["provider"] == mod.CUSTOM_NODE_MAP["nararouter"]
-    assert by_name["zai"]["provider"] == mod.CUSTOM_NODE_MAP["zai"]
     assert by_name["agnes"]["provider"] == mod.CUSTOM_NODE_MAP["agnes"]
+    assert by_name["apinex"]["provider"] == mod.CUSTOM_NODE_MAP["apinex"]
+    assert by_name["tokenharbor"]["provider"] == mod.CUSTOM_NODE_MAP["tokenharbor"]
+    assert by_name["xkiro"]["provider"] == mod.CUSTOM_NODE_MAP["xkiro"]
     # connection names keep yaml names
     assert by_name["nararouter"]["name"] == "nararouter"
-    assert by_name["zai"]["name"] == "zai"
     assert by_name["agnes"]["name"] == "agnes"
+    assert by_name["apinex"]["name"] == "apinex"
 
 
 def test_opencode_zen_mapping():
@@ -461,10 +465,11 @@ def test_patch_provider_specific_data_patches_base_url_when_stale(monkeypatch: p
     captured: list[dict[str, Any]] = []
 
     def fake_get(url, headers=None, timeout=None):
+        # zai is retired (not in providers.yaml) so not expected to be patched;
+        # keep live providers nararouter/agnes + control groq.
         return _FakeResponse({
             "connections": [
                 {"id": "c1", "provider": "nararouter", "name": "nararouter", "providerSpecificData": {"baseUrl": "https://old.nara.id/v1"}},
-                {"id": "c2", "provider": "zai", "name": "zai", "providerSpecificData": {"baseUrl": "https://old.z.ai/v1"}},
                 {"id": "c3", "provider": "agnes", "name": "agnes", "providerSpecificData": {}},
                 {"id": "c4", "provider": "groq", "name": "groq", "providerSpecificData": {"baseUrl": "https://api.groq.com/openai/v1"}},
             ]
@@ -478,10 +483,9 @@ def test_patch_provider_specific_data_patches_base_url_when_stale(monkeypatch: p
     monkeypatch.setattr("httpx.get", fake_get)
 
     res = mod.patch_provider_specific_data("http://x", rows)
-    assert res["count"] == 4
+    assert res["count"] == 3
     put_by_cid = {c["url"].split("/")[-1]: c["json"] for c in captured}
     assert put_by_cid["c1"]["providerSpecificData"]["baseUrl"] == "https://router.bynara.id/v1"
-    assert put_by_cid["c2"]["providerSpecificData"]["baseUrl"] == "https://api.z.ai/api/paas/v4"
     assert put_by_cid["c3"]["providerSpecificData"]["baseUrl"] == "https://apihub.agnes-ai.com/v1"
     assert put_by_cid["c4"]["providerSpecificData"].get("baseUrl") is None
 

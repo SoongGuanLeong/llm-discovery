@@ -2,8 +2,8 @@
 
 Tavily is **not** required.  Web search is **opt-in** — by default the judge
 operates on deterministic facts (AA catalog + models.dev metadata + its own
-training knowledge).  When ``ENABLE_WEB_SEARCH=1`` is set the pipeline activates
-DuckDuckGo (no key) or Brave (optional ``BRAVE_API_KEY``, $5 free credits/mo).
+training knowledge).  When `ENABLE_WEB_SEARCH=1` is set the pipeline activates
+DuckDuckGo (no key) or Brave (optional `BRAVE_API_KEY`, $5 free credits/mo).
 
 The judge always runs: when search is disabled or unavailable it gets `[]` and
 falls back to the AA intelligence index plus provider metadata and its own
@@ -18,7 +18,6 @@ import httpx
 
 SEARCH_HEADERS = {"User-Agent": "llm-discovery/1.0 (contact@example.com)"}
 TIMEOUT = 30.0
-
 
 # --------------------------------------------------------------------------- #
 # No-key backend: DuckDuckGo HTML                                                #
@@ -105,6 +104,67 @@ class BraveSearcher:
 
 
 # --------------------------------------------------------------------------- #
+# Free metasearch backend: SearXNG                                             #
+# --------------------------------------------------------------------------- #
+class SearXNGSearcher:
+    """Free metasearch via public SearXNG instances.
+
+    Uses a rotating list of public SearXNG instances for redundancy.
+    Failures degrade gracefully to an empty list so the judge never crashes.
+    """
+
+    # List of reliable public SearXNG instances (https://searx.space)
+    INSTANCES = [
+        "https://searx.tiekoetter.com",
+        "https://search.sapti.me",
+        "https://searx.epicyle.dev",
+        "https://searx.be",
+    ]
+
+    def __init__(self, max_results: int = 3, timeout: float = TIMEOUT) -> None:
+        self.max_results = max_results
+        self.timeout = timeout
+        self._instance_index = 0
+
+    def _get_next_instance(self) -> str:
+        """Get next SearXNG instance with simple round-robin."""
+        instance = self.INSTANCES[self._instance_index]
+        self._instance_index = (self._instance_index + 1) % len(self.INSTANCES)
+        return instance
+
+    def search(self, query: str) -> list[dict[str, Any]]:
+        # Try each instance until one works
+        for _ in range(len(self.INSTANCES)):
+            instance = self._get_next_instance()
+            try:
+                resp = httpx.get(
+                    f"{instance}/search",
+                    params={"q": query, "format": "json"},
+                    headers=SEARCH_HEADERS,
+                    timeout=self.timeout,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+
+                results = []
+                for result in data.get("results", [])[:self.max_results]:
+                    results.append({
+                        "title": result.get("title", ""),
+                        "url": result.get("url", ""),
+                        "snippet": result.get("content", "")[:1000],
+                    })
+
+                if results:
+                    return results
+
+            except Exception:  # noqa: BLE001 — try next instance
+                continue
+
+        # All instances failed
+        return []
+
+
+# --------------------------------------------------------------------------- #
 # No-op backend (offline fallback)                                             #
 # --------------------------------------------------------------------------- #
 class NoopSearcher:
@@ -128,15 +188,13 @@ def make_searcher(
 ) -> Any:
     """Return a search backend.
 
-    Default is DuckDuckGo (no key, works out of the box).  Set
-    ``disabled=True`` (``DISABLE_WEB_SEARCH=1``) to use NoopSearcher instead.
-
     Priority:
-    1. BraveSearcher  — if ``BRAVE_API_KEY`` is present (higher quality).
-    2. DuckDuckGoSearcher — no key required, degrades to empty on error.
-    3. NoopSearcher  — when disabled.
+    1. SearXNGSearcher — free metasearch, no key required (tries multiple instances)
+    2. BraveSearcher   — if `BRAVE_API_KEY` is present (higher quality).
+    3. DuckDuckGoSearcher — no key required, degrades to empty on error.
+    4. NoopSearcher   — when disabled.
 
-    The returned object has a ``search(query) -> list[dict]`` method matching
+    The returned object has a `search(query) -> list[dict]` method matching
     the shape the judge loop expects.
     """
     if disabled:

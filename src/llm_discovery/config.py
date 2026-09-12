@@ -21,6 +21,8 @@ class ProviderConfig(BaseModel):
     # (custom OpenAI-compatible node `{name}-custom`) in OmniRoute
     # instead of a registry provider. Also auto-applied for providers in
     # CUSTOM_NODE_MAP or unknown to the OmniRoute registry.
+    # Note: agnes/nararouter require explicit custom: true; other unknown providers
+    # auto-map to `{name}-custom` (see _resolve_provider_id logic).
     custom: bool = False
 
     @field_validator("discovery_strategy")

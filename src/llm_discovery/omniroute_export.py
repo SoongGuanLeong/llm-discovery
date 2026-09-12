@@ -1081,6 +1081,17 @@ def main(argv: list[str] | None = None) -> int:
             load_all_secrets()
         except Exception as e:
             print(f"warning: failed to load infisical secrets: {e}", file=sys.stderr)
+    if not Path(args.providers).exists():
+        print(f"error: providers file not found: {args.providers}", file=sys.stderr)
+        return 1
+    if not Path(args.results_dir).exists():
+        print(f"error: results directory not found: {args.results_dir}", file=sys.stderr)
+        return 1
+    if args.dry_run or args.check:
+        payload = generate_payload(Path(args.providers), Path(args.results_dir))
+        sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+        write_payload_files(payload, Path(args.output_dir))
+        return 0
     if args.apply:
         payload = generate_payload(Path(args.providers), Path(args.results_dir))
         write_payload_files(payload, Path(args.output_dir))
@@ -1104,3 +1115,8 @@ def main(argv: list[str] | None = None) -> int:
         snapshot = snapshot_gateway_state(args.omniroute_url, auth_headers=auth_headers or None)
         snapshot_path.write_text(json.dumps(snapshot, indent=2, sort_keys=True) + "\n")
         print(f"snapshot saved to {snapshot_path}", file=sys.stderr)
+        return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

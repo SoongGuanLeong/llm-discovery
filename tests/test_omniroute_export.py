@@ -92,23 +92,27 @@ def test_build_import_entries_fixture_shape():
     rows = mod.build_import_entries(Path("tests/fixtures/omniroute/providers.yaml"))
     assert len(rows) == 3
     # sorted provider order (cloudflare maps to cloudflare-ai via alias)
-    assert [r["provider"] for r in rows] == ["cloudflare-ai", "custom_openai", "groq"]
+    # T02/T03: custom_openai and groq auto-map to *-custom as they are unknown to OmniRoute registry
+    assert [r["provider"] for r in rows] == ["cloudflare-ai", "custom_openai-custom", "groq-custom"]
     for r in rows:
         assert set(r.keys()) >= {"provider", "name", "apiKey"}
-        # cloudflare maps to cloudflare-ai
-        if r["name"] != "cloudflare":
-            assert r["provider"] == r["name"]
+        # cloudflare maps to cloudflare-ai (registry alias)
+        # custom_openai and groq auto-map to *-custom (T02/T03)
+        if r["name"] == "cloudflare":
+            assert r["provider"] == "cloudflare-ai"
+        else:
+            assert r["provider"] == r["name"] + "-custom"
         assert r["apiKey"].startswith("env:")
         # no raw key leaked — placeholder only, should not contain actual key value pattern beyond env: prefix
         assert "sk-" not in r["apiKey"]
         # baseUrl present for all fixture rows
         assert "baseUrl" in r
-    # exact placeholder values
-    by_provider = {r["provider"]: r for r in rows}
-    assert by_provider["groq"]["apiKey"] == "env:GROQ_API_KEY"
-    assert by_provider["groq"]["baseUrl"] == "https://api.groq.com/openai/v1"
-    assert by_provider["custom_openai"]["apiKey"] == "env:CUSTOM_API_KEY"
-    assert by_provider["custom_openai"]["baseUrl"] == "https://custom.example.com/v1"
+    # exact placeholder values (look up by name rather than provider id)
+    by_name = {r["name"]: r for r in rows}
+    assert by_name["groq"]["apiKey"] == "env:GROQ_API_KEY"
+    assert by_name["groq"]["baseUrl"] == "https://api.groq.com/openai/v1"
+    assert by_name["custom_openai"]["apiKey"] == "env:CUSTOM_API_KEY"
+    assert by_name["custom_openai"]["baseUrl"] == "https://custom.example.com/v1"
 
 
 def test_build_import_entries_baseurl_verbatim():
@@ -121,9 +125,9 @@ def test_build_import_entries_baseurl_verbatim():
 
 def test_build_import_entries_unmapped_custom_emitted():
     rows = mod.build_import_entries(Path("tests/fixtures/omniroute/providers.yaml"))
-    # custom_openai not in OmniRoute 352 registry but still emitted (OpenAI-compatible fallback)
+    # custom_openai maps to custom_openai-custom (T02/T03)
     providers = {r["provider"] for r in rows}
-    assert "custom_openai" in providers
+    assert "custom_openai-custom" in providers
     # no client-side registry validation — no error, no filtering
     assert len(rows) == 3
 
@@ -141,14 +145,17 @@ def test_build_import_entries_deterministic_idempotent():
 
 
 def test_build_import_entries_real_providers_count(tmp_path: Path):
-    # real config providers count (mapped ids) — 24 current providers
+    # real config providers count (mapped ids) — 35 current providers
     rows = mod.build_import_entries(Path("config/providers.yaml"))
-    assert len(rows) == 24
+    assert len(rows) == 35
     assert [r["provider"] for r in rows] == sorted(r["provider"] for r in rows)
-    # spot check: cloudflare maps to cloudflare-ai, groq present
+    # spot check: cloudflare maps to cloudflare-ai (alias), groq auto-maps to groq-custom (T02/T03)
     by_provider = {r["provider"]: r for r in rows}
     assert "${CLOUDFLARE_ACCOUNT_ID}" in by_provider["cloudflare-ai"]["baseUrl"]
-    assert by_provider["groq"]["baseUrl"] == "https://api.groq.com/openai/v1"
+    # find groq row by name
+    groq_row = next((r for r in rows if r["name"] == "groq"), None)
+    assert groq_row is not None
+    assert groq_row["baseUrl"] == "https://api.groq.com/openai/v1"
 
 
 def test_generate_payload_import_snapshot(tmp_path: Path):
@@ -167,13 +174,13 @@ def test_generate_payload_import_snapshot(tmp_path: Path):
             "apiKey": "env:CUSTOM_API_KEY",
             "baseUrl": "https://custom.example.com/v1",
             "name": "custom_openai",
-            "provider": "custom_openai",
+            "provider": "custom_openai-custom",
         },
         {
             "apiKey": "env:GROQ_API_KEY",
             "baseUrl": "https://api.groq.com/openai/v1",
             "name": "groq",
-            "provider": "groq",
+            "provider": "groq-custom",
         },
     ]
     assert payload["import"] == expected
@@ -238,9 +245,10 @@ def test_untouched_providers_unchanged():
     """Providers without custom mapping keep their original id."""
     rows = mod.build_import_entries(Path("config/providers.yaml"))
     by_name = {r["name"]: r for r in rows}
-    assert by_name["groq"]["provider"] == "groq"
-    assert by_name["openrouter"]["provider"] == "openrouter"
-    assert by_name["mistral"]["provider"] == "mistral"
+    # T02/T03: unknown providers auto-map to *-custom
+    assert by_name["groq"]["provider"] == "groq-custom"
+    assert by_name["openrouter"]["provider"] == "openrouter-custom"
+    assert by_name["mistral"]["provider"] == "mistral-custom"
 
 
 def test_retired_provider_ids_exact():
@@ -273,8 +281,8 @@ def test_build_model_entries_fixture_shape():
     entries = mod.build_model_entries(Path("tests/fixtures/omniroute/results"))
     providers = {e["provider"] for e in entries}
     models = {e["modelId"] for e in entries}
-    assert "groq" in providers
-    assert "cerebras" in providers
+    assert "groq-custom" in providers
+    assert "cerebras-custom" in providers
     assert "llama-3.3-70b-versatile" in models
     assert "llama-4-maverick" in models
     assert "contributor-model-free" in models
@@ -300,8 +308,8 @@ def test_build_model_entries_deduplicated():
 def test_build_gc_plan_skips_missing_files(tmp_path: Path) -> None:
     (tmp_path / "keep.yaml").write_text("provider: ghost\nkeep:\n  - model_id: live-model\n    decision: keep\n    tier: flash\n")
     plan = mod.build_gc_plan(tmp_path)
-    assert "ghost" in plan
-    assert plan["ghost"] == {"live-model"}
+    assert "ghost-custom" in plan
+    assert plan["ghost-custom"] == {"live-model"}
 
 
 def test_build_gc_plan_skips_unparseable_files(tmp_path: Path) -> None:
@@ -313,9 +321,9 @@ def test_build_gc_plan_skips_unparseable_files(tmp_path: Path) -> None:
 
 def test_build_gc_plan_dropped_keep_deleted() -> None:
     plan = mod.build_gc_plan(Path("tests/fixtures/omniroute/results"))
-    assert "cerebras" in plan
-    assert "dropped-model" not in plan["cerebras"]
-    assert "llama-4-maverick" in plan["cerebras"]
+    assert "cerebras-custom" in plan
+    assert "dropped-model" not in plan["cerebras-custom"]
+    assert "llama-4-maverick" in plan["cerebras-custom"]
 
 
 def test_combo_provider_mapping() -> None:
@@ -329,7 +337,7 @@ def test_combo_provider_mapping() -> None:
             }
     flash = next(c for c in combos if c["name"] == "flash")
     flash_providers = {m["provider"] for m in flash["models"]}
-    assert "cerebras" in flash_providers
+    assert "cerebras-custom" in flash_providers
 
 
 def test_dry_run_emits_complete_model_plan() -> None:
@@ -338,10 +346,10 @@ def test_dry_run_emits_complete_model_plan() -> None:
     assert "gc" in payload
     assert len(payload["models"]) >= 3
     model_providers = {e["provider"] for e in payload["models"]}
-    assert "cerebras" in model_providers
-    assert "groq" in model_providers
-    assert set(payload["gc"]["cerebras"]) == {"llama-4-maverick", "contributor_special-model"}
-    assert payload["gc"]["groq"] == sorted(["llama-3.3-70b-versatile", "contributor-model-free"])
+    assert "cerebras-custom" in model_providers
+    assert "groq-custom" in model_providers
+    assert set(payload["gc"]["cerebras-custom"]) == {"llama-4-maverick", "contributor_special-model"}
+    assert payload["gc"]["groq-custom"] == sorted(["llama-3.3-70b-versatile", "contributor-model-free"])
 
 
 def test_double_apply_idempotency_models(monkeypatch: pytest.MonkeyPatch) -> None:

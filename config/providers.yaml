@@ -22,6 +22,10 @@ providers:
     secret: AGNES_AI_API_KEY
     custom: true
 
+  - name: aihubmix
+    base_url: https://aihubmix.com/v1
+    secret: AIHUBMIX_API_KEY
+
   - name: ainative
     base_url: https://api.ainative.studio/api/v1
     secret: AINATIVE_API_KEY
@@ -39,11 +43,27 @@ providers:
     secret: BAZAARLINK_API_KEY
     discovery_strategy: bazaarlink
 
+  - name: bestvirtualgoods
+    base_url: https://api.y-api.bestvirtualgoods.com/v1
+    secret: BESTVIRTUALGOODS_API_KEY
+
+  - name: cline
+    base_url: https://api.cline.bot/api/v1
+    secret: CLINE_API_KEY
+
   - name: cloudflare
     base_url: https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1
     secret: CLOUDFLARE_API_KEY
     discovery: cloudflare
 
+  - name: freemodel_dev
+    base_url: https://api.freemodel.dev/v1
+    secret: FREEMODEL_DEV_API_KEY
+
+  - name: getunikey_ai
+    base_url: https://www.getunikey.ai/v1
+    secret: GETUNIKEY_AI_API_KEY
+  
   - name: google
     base_url: https://generativelanguage.googleapis.com/v1beta/openai
     secret: GEMINI_API_KEY
@@ -109,6 +129,10 @@ providers:
   - name: reka
     base_url: https://api.reka.ai/v1
     secret: REKA_API_KEY
+
+  - name: sensenova
+    base_url: https://token.sensenova.ai/v1
+    secret: SENSENOVA_API_KEY
 
   - name: teamorouter
     base_url: https://api.teamorouter.com/v1

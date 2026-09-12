@@ -83,6 +83,11 @@ CUSTOM_NODE_MAP = {
 # Ticket 176: opencode_zen maps to opencode-zen registry id (not free opencode)
 OPENCOD_ZEN_MAP = {"opencode_zen": "opencode-zen"}
 
+# T03: agnes/nararouter still require explicit `custom: true` because their original
+# OmniRoute provider cannot fetch model names (wrong base_url). Other CUSTOM_NODE_MAP
+# entries and unknown providers auto-map to {name}-custom without the flag (T02).
+_REQUIRES_EXPLICIT_CUSTOM = frozenset({"agnes", "nararouter"})
+
 # Providers listed in the OmniRoute registry (canonical source of truth)
 # Entries from _PROVIDER_ALIAS that map to registry IDs (not custom node IDs)
 # plus OPENCOD_ZEN_MAP entries
@@ -153,8 +158,8 @@ def _is_explicit_custom(raw_provider: dict[str, Any]) -> bool:
 
 
 def _custom_provider_ids(providers_path: Path = DEFAULT_PROVIDERS) -> set[str]:
-    """Union of hardcoded CUSTOM_NODE_MAP keys and explicit `custom: true` providers."""
-    ids = set(CUSTOM_NODE_MAP.keys())
+    """Union of hardcoded CUSTOM_NODE_MAP keys (excluding those that require explicit) and explicit `custom: true` providers."""
+    ids = {k for k in CUSTOM_NODE_MAP if k not in _REQUIRES_EXPLICIT_CUSTOM}
     for p in _load_raw_providers(providers_path):
         if _is_explicit_custom(p):
             name = str(p.get("name") or p.get("provider") or "").strip()
@@ -167,7 +172,10 @@ def _resolve_provider_id(name: str, raw: dict[str, Any] | None = None) -> str:
     """Resolve provider id for export/combo/model mapping.
 
     - Explicit `custom: true` in YAML forces `{name}-custom` (or CUSTOM_NODE_MAP value)
-    - Providers listed in _MODEL_PROVIDER_MAP use their mapped id
+    - Providers in _REQUIRES_EXPLICIT_CUSTOM (agnes/nararouter) still require
+      explicit `custom: true`; without the flag their original provider id
+      is used because the OmniRoute base_url cannot fetch model names.
+    - Other providers listed in _MODEL_PROVIDER_MAP use their mapped id
       (OmniRoute registry aliases + CUSTOM_NODE_MAP custom nodes)
     - Providers not listed in _MODEL_PROVIDER_MAP are automatically
       mapped to `{name}-custom` as API Key Compatible Providers
@@ -175,6 +183,11 @@ def _resolve_provider_id(name: str, raw: dict[str, Any] | None = None) -> str:
     """
     if raw is not None and _is_explicit_custom(raw):
         return CUSTOM_NODE_MAP.get(name, f"{name}-custom")
+    if name in _REQUIRES_EXPLICIT_CUSTOM:
+        # T03: agnes/nararouter must not auto-map to -custom; require explicit flag.
+        # Without it, keep the original provider id (registry) even though its
+        # OmniRoute base_url may be wrong — that is the intended gate.
+        return name
     if name in _MODEL_PROVIDER_MAP:
         return _MODEL_PROVIDER_MAP[name]
     return f"{name}-custom"
@@ -307,7 +320,17 @@ def group_keeps_by_tier(keeps: list[dict[str, Any]], *, strict_contributor_free:
 
 
 def _map_provider_for_model(p: str) -> str:
-    # Custom nodes first (hardcoded + explicit `custom: true` in YAML)
+    # T03 gate: agnes/nararouter require explicit `custom: true` — do not auto-map
+    # to custom node when the flag is absent. Check explicit set first.
+    if p in _REQUIRES_EXPLICIT_CUSTOM:
+        try:
+            explicit = _custom_provider_ids()
+            if p in explicit:
+                return CUSTOM_NODE_MAP.get(p, f"{p}-custom")
+        except Exception:
+            pass
+        return p
+    # Custom nodes that do not require explicit (zai/apinex/tokenharbor/xkiro) auto-map
     if p in CUSTOM_NODE_MAP:
         return CUSTOM_NODE_MAP[p]
     # Explicit custom flag: any provider with `custom: true` maps to `{name}-custom`
@@ -1081,6 +1104,3 @@ def main(argv: list[str] | None = None) -> int:
         snapshot = snapshot_gateway_state(args.omniroute_url, auth_headers=auth_headers or None)
         snapshot_path.write_text(json.dumps(snapshot, indent=2, sort_keys=True) + "\n")
         print(f"snapshot saved to {snapshot_path}", file=sys.stderr)
-        return 0
-    if args.revert_summary:
-        summary_path = Path(args.revert_summary)

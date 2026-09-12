@@ -38,3 +38,5 @@ scripts/_probe_judge.py
 .local/
 # setup.sh sandbox demo fallback (setup.sh:323, :427)
 .tmp/
+.scratch/
+temp/

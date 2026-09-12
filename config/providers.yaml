@@ -13,6 +13,10 @@ judge_llm:
   secret: AGNES_AI_API_KEY
 
 providers:
+  - name: agentrouter
+    base_url:   https://agentrouter.org/v1
+    secret: AGENTROUTER_API_KEY
+
   - name: agnes
     base_url: https://apihub.agnes-ai.com/v1
     secret: AGNES_AI_API_KEY
@@ -25,7 +29,6 @@ providers:
   - name: apinex
     base_url: https://api.apinex.bond/v1
     secret: APINEX_API_KEY
-    custom: true
 
   - name: bai
     base_url: https://api.b.ai/v1
@@ -35,7 +38,7 @@ providers:
     base_url: https://api.bazaarlink.ai/v1
     secret: BAZAARLINK_API_KEY
     discovery_strategy: bazaarlink
-    
+
   - name: cloudflare
     base_url: https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1
     secret: CLOUDFLARE_API_KEY
@@ -44,19 +47,23 @@ providers:
   - name: google
     base_url: https://generativelanguage.googleapis.com/v1beta/openai
     secret: GEMINI_API_KEY
-  
+
   - name: groq
     base_url: https://api.groq.com/openai/v1
-    secret: GROQ_API_KEY 
+    secret: GROQ_API_KEY
 
   - name: kilo_ai
     base_url: https://api.kilo.ai/api/gateway
     secret: KILO_AI_API_KEY
-  
+
+  - name: kiosapi
+    base_url: https://router.kiosapi.com/v1
+    secret: KIOSAPI_API_KEY
+
   - name: llm7
     base_url: https://api.llm7.io/v1
     secret: LLM7_API_KEY
-  
+
   - name: mistral
     base_url: https://api.mistral.ai/v1
     secret: MISTRAL_API_KEY
@@ -82,11 +89,11 @@ providers:
   - name: ollama_cloud
     base_url: https://ollama.com/v1
     secret: OLLAMA_CLOUD_API_KEY
-  
+
   - name: opencode_zen
     base_url: https://opencode.ai/zen/v1
     secret: OPENCODE_ZEN_API_KEY
-  
+
   - name: openrouter
     base_url: https://openrouter.ai/api/v1
     secret: OPENROUTER_API_KEY
@@ -95,14 +102,25 @@ providers:
     base_url: https://api.orcarouter.ai/v1
     secret: ORCAROUTER_API_KEY
 
+  - name: qwencloud
+    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    secret: QWENCLOUD_API_KEY
+
   - name: reka
     base_url: https://api.reka.ai/v1
     secret: REKA_API_KEY
 
+  - name: teamorouter
+    base_url: https://api.teamorouter.com/v1
+    secret: TEAMOROUTER_API_KEY
+
+  - name: tensormux
+    base_url: https://api.tensormux.com/v1
+    secret: TENSORMUX_API_KEY
+
   - name: tokenharbor
     base_url: https://tokenharbor.ai/v1
     secret: TOKENHARBOR_API_KEY
-    custom: true
 
   - name: tokenrouter
     base_url: https://api.tokenrouter.com/v1
@@ -115,4 +133,3 @@ providers:
   - name: xkiro
     base_url: https://api.xkiro.com/v1
     secret: XKIRO_API_KEY
-    custom: true

@@ -167,17 +167,16 @@ def _resolve_provider_id(name: str, raw: dict[str, Any] | None = None) -> str:
     """Resolve provider id for export/combo/model mapping.
 
     - Explicit `custom: true` in YAML forces `{name}-custom` (or CUSTOM_NODE_MAP value)
-    - Providers listed in the OmniRoute registry use their registry id
-    - Providers not in the registry are automatically mapped to `{name}-custom`
-    - agnes/nararouter and other CUSTOM_NODE_MAP providers require explicit `custom: true`
+    - Providers listed in _MODEL_PROVIDER_MAP use their mapped id
+      (OmniRoute registry aliases + CUSTOM_NODE_MAP custom nodes)
+    - Providers not listed in _MODEL_PROVIDER_MAP are automatically
+      mapped to `{name}-custom` as API Key Compatible Providers
+      without requiring `custom: true` in providers.yaml.
     """
     if raw is not None and _is_explicit_custom(raw):
         return CUSTOM_NODE_MAP.get(name, f"{name}-custom")
-    if name in _OMNIROUTE_REGISTRY:
-        return _OMNIROUTE_REGISTRY[name]
-    if name in CUSTOM_NODE_MAP:
-        # agnes/nararouter and other custom-only providers require explicit custom: true
-        return CUSTOM_NODE_MAP[name]
+    if name in _MODEL_PROVIDER_MAP:
+        return _MODEL_PROVIDER_MAP[name]
     return f"{name}-custom"
 
 
@@ -319,7 +318,11 @@ def _map_provider_for_model(p: str) -> str:
             return CUSTOM_NODE_MAP.get(p, f"{p}-custom")
     except Exception:
         pass
-    return _MODEL_PROVIDER_MAP.get(p, p)
+    if p in _MODEL_PROVIDER_MAP:
+        return _MODEL_PROVIDER_MAP[p]
+    # Unknown providers automatically become API Key Compatible Providers
+    # without requiring `custom: true` (T02 / issue #198).
+    return f"{p}-custom"
 
 
 def build_model_entries(results_dir: Path = DEFAULT_RESULTS_DIR) -> list[dict[str, Any]]:

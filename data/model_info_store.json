@@ -7567,6 +7567,80 @@
         "decision": "drop",
         "tier": "drop"
       }
+    },
+    "claude-opus-4.5": {
+      "benchmarks": {
+        "scores": {
+          "aa_intelligence": {
+            "score": 35.6,
+            "metric": "index",
+            "source": "artificial_analysis"
+          }
+        },
+        "raw_benchmarks": [],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.08
+      },
+      "pricing": {
+        "blended": 10,
+        "input": 5,
+        "output": 25,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 10,
+        "price_1m_input_tokens": 5,
+        "price_1m_output_tokens": 25
+      },
+      "_meta": {
+        "first_seen": "2026-09-11T12:43:58.297764+00:00",
+        "last_updated": "2026-09-11T12:43:58.297764+00:00",
+        "version": 2
+      },
+      "judge": {
+        "evidence_level": "moderate",
+        "evidence": [
+          "AA Intelligence score of 35.6 matches Claude Opus 4.5 (Non-reasoning) at https://artificialanalysis.ai, above minimum threshold of 24.0",
+          "No coding benchmarks present for this provider model; coding capability cannot be confirmed",
+          "Deterministic override: coding_score=35.6 >= 35 (coding_min)"
+        ],
+        "confidence": 0.9,
+        "coding": false,
+        "decision": "keep",
+        "canonical_name": "Claude Opus 4.5 (Non-reasoning)",
+        "tier": "max"
+      }
+    },
+    "magistral-small-latest": {
+      "benchmarks": {
+        "scores": {},
+        "raw_benchmarks": []
+      },
+      "pricing": {
+        "blended": 0.75,
+        "input": 0.5,
+        "output": 1.5,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 0.75,
+        "price_1m_input_tokens": 0.5,
+        "price_1m_output_tokens": 1.5
+      },
+      "_meta": {
+        "first_seen": "2026-09-11T12:53:16.749717+00:00",
+        "last_updated": "2026-09-11T12:53:16.749717+00:00",
+        "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "AA score of 11.5 is below the 24.0 minimum threshold, requiring drop regardless of other evidence.",
+          "Small variant with no coding benchmarks and no verified coding capability.",
+          "Pricing blended $0.75/1M, intelligence per dollar 22.8 influenced tier=drop"
+        ],
+        "confidence": 0.9,
+        "coding": false,
+        "decision": "drop",
+        "canonical_name": "Magistral Small 1.2",
+        "tier": "drop"
+      }
     }
   }
 }

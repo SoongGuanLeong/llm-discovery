@@ -29,6 +29,8 @@ from .categorize import categorize_model
 from .policy_gate import PolicyGate
 from .secrets import load_all_secrets, load_discovery_secrets, load_shared_secrets  # noqa: keep aliases for patch compat
 
+from .evaluator import EvaluatorCoordinator  # Coordinator for evaluate_model (issue #96)
+
 TTL_DAYS = 28  # Record TTL for pricing reuse per CONTEXT / #91
 
 
@@ -466,76 +468,19 @@ VISION_BENCH_MIN = 50.0
 
 
 def _is_vision_only(flags: list[str]) -> bool:
-    """True only if every deterministic flag is vision — no embedding/tts/etc."""
-    if not flags:
-        return False
-    return all(f == "specialized_model:vision" for f in flags)
+    return EvaluatorCoordinator._is_vision_only(flags)
 
 
 def _is_vision_free_model(model_id: str, resolution: Any, models_dev: Any) -> bool:
-    lower = model_id.lower()
-    if "free" in lower:
-        return True
-    aa_model = getattr(resolution, "aa_model", None) if resolution else None
-    if aa_model:
-        pricing = aa_model.get("pricing") or {}
-        blended = pricing.get("price_1m_blended_3_to_1")
-        inp = pricing.get("price_1m_input_tokens")
-        out = pricing.get("price_1m_output_tokens")
-        if blended == 0 or (inp == 0 and out == 0):
-            return True
-    # models_dev has no pricing field; free detection via model_id substring is sufficient
-    return False
+    return EvaluatorCoordinator._is_vision_free_model(model_id, resolution, models_dev)
 
 
 def _is_cheap_or_free(resolution: Any, model_id: str, models_dev: Any) -> bool:
-    if _is_vision_free_model(model_id, resolution, models_dev):
-        return True
-    aa_model = getattr(resolution, "aa_model", None) if resolution else None
-    if aa_model:
-        pricing = aa_model.get("pricing") or {}
-        blended = pricing.get("price_1m_blended_3_to_1")
-        if blended is not None and blended <= VISION_CHEAP_THRESHOLD:
-            return True
-    return False
+    return EvaluatorCoordinator._is_cheap_or_free(resolution, model_id, models_dev)
 
 
 def _is_coding_capable(resolution: Any, cache: Any, model_id: str, provider_name: str) -> bool:
-    aa_model = getattr(resolution, "aa_model", None) if resolution else None
-    if aa_model:
-        evals = aa_model.get("evaluations") or {}
-        aa_coding = evals.get("artificial_analysis_coding_index")
-        aa_intel = evals.get("artificial_analysis_intelligence_index")
-        if aa_coding is not None and aa_coding >= VISION_AA_CODING_MIN:
-            return True
-        if aa_intel is not None and aa_intel >= VISION_AA_INTEL_MIN:
-            return True
-    if cache is not None:
-        from .benchmarks import build_benchmark_profile, compute_coding_score
-
-        profile = build_benchmark_profile(model_id, provider_name, cache)
-        if profile.scores:
-            coding_score, _, _ = compute_coding_score(profile)
-            if coding_score is not None and coding_score >= VISION_CODING_SCORE_MIN:
-                return True
-            for key in ("swe_bench_verified", "swe_bench_pro", "terminal_bench", "terminal_bench_2_1"):
-                val = profile.scores.get(key)
-                if val:
-                    score = val.get("score") if isinstance(val, dict) else getattr(val, "score", None)
-                    if score is not None and score >= VISION_BENCH_MIN:
-                        return True
-            # AA indexes also mirrored in benchmark cache
-            aa_coding_bm = profile.scores.get("aa_coding")
-            if aa_coding_bm:
-                s = aa_coding_bm.get("score") if isinstance(aa_coding_bm, dict) else None
-                if s is not None and s >= VISION_AA_CODING_MIN:
-                    return True
-            aa_intel_bm = profile.scores.get("aa_intelligence")
-            if aa_intel_bm:
-                s = aa_intel_bm.get("score") if isinstance(aa_intel_bm, dict) else None
-                if s is not None and s >= VISION_AA_INTEL_MIN:
-                    return True
-    return False
+    return EvaluatorCoordinator._is_coding_capable(resolution, cache, model_id, provider_name)
 
 
 def evaluate_model(
@@ -552,176 +497,33 @@ def evaluate_model(
 ) -> dict[str, Any]:
     """Judge one model and apply tiering (thin coordinator + cache seam per #96).
 
+    Thin shim that delegates to EvaluatorCoordinator.evaluate().
+    The coordinator holds shared state; evaluate() accepts only the per-model input.
+
     Early return right after resolve_model and before EvidenceCollector when
     store holds strong Keeper (slim v2). Hit = strong-only; moderate/weak = miss.
     Pricing stale (>28d) re-averaged via aggregate_pricing, benchmarks gap-fill only,
     raw provider_model_id preserved verbatim for Ephemeral Report.
     """
-    model_id = model["id"]  # raw verbatim per #90
-    print(f"  [evaluate] {model_id}: starting...")
-    resolution = resolve_model(model_id, aa, models_dev, cache)
-    # --- In-pipeline cache check (issue #96) — after resolve, before evidence ---
-    if store is not None:
-        try:
-            cache_key = normalize_store_key(model_id)
-            if cache_key:
-                cached = store.get(cache_key)
-                hit = classify_hit(cached)
-                if hit == "strong_hit":
-                    assert cached is not None
-                    # Fresh benchmarks for gap-fill from BenchmarkDataCache (no LLM)
-                    fresh_bm: dict[str, Any] | None = None
-                    if cache is not None:
-                        try:
-                            from .benchmarks import BenchmarkDataCache, build_benchmark_profile
-
-                            if isinstance(cache, BenchmarkDataCache):
-                                profile = build_benchmark_profile(model_id, provider_name, cache)
-                                fresh_bm = profile.to_dict() if profile.scores else None
-                        except Exception:
-                            fresh_bm = None
-                    # Derive fresh pricing obs from resolution if caller did not supply
-                    obs = fresh_pricing_obs
-                    if obs is None:
-                        try:
-                            aa_model = getattr(resolution, "aa_model", None)
-                            if aa_model and aa_model.get("pricing"):
-                                p = aa_model["pricing"]
-                                cand = {
-                                    "blended": p.get("price_1m_blended_3_to_1", p.get("blended")),
-                                    "input": p.get("price_1m_input_tokens", p.get("input")),
-                                    "output": p.get("price_1m_output_tokens", p.get("output")),
-                                    "provider": provider_name,
-                                }
-                                if cand["blended"] is not None or cand["input"] is not None or cand["output"] is not None:
-                                    obs = [cand]
-                        except Exception:
-                            obs = fresh_pricing_obs
-                    print(f"  [cache] HIT strong {model_id} key={cache_key}")
-                    result = build_cached_strong_record(model_id, provider_name, cached, obs, fresh_bm, resolution=resolution, cache=cache, min_score=min_score, max_score=max_score)
-                    if provider_name == "llm7" and model.get("tier") == "turbo" and result.get("decision") != "drop":
-                        result["tier"] = "flash"
-                    return result
-                else:
-                    if cached is not None:
-                        print(f"  [cache] MISS moderate/weak {model_id} key={cache_key} -> full pipeline")
-        except Exception as exc:  # cache seam never breaks pipeline
-            print(f"  [cache] lookup failed {model_id}: {exc} -> full pipeline")
-    packet = EvidenceCollector(provider_name).collect(model, cache, models_dev, resolution)
-    if packet.is_specialized():
-        if _is_vision_only(packet.deterministic_flags) and _is_coding_capable(resolution, cache, model_id, provider_name) and _is_cheap_or_free(resolution, model_id, models_dev):
-            print(f"  [evaluate] {model_id}: vision exception - bypass deterministic drop (coding+cheap)")
-        else:
-            reason = packet.deterministic_flags[0] if packet.deterministic_flags else "specialized_model"
-            print(f"  [evaluate] {model_id}: DROP (deterministic) - {reason}")
-            return deterministic_drop_record(model_id, reason, cache)
-    judge = Judge(evaluator)
-    try:
-        llm_result = judge.evaluate(provider_name, model, packet, cache)
-    except Exception as exc:  # noqa: BLE001 — judge/transport errors → error, not drop
-        print(f"  [evaluate] {model_id}: ERROR - {exc}")
-        profile = getattr(judge, "_last_profile", None)
-        return PolicyGate(min_score, max_score, cache).error_record(model_id, exc, provider_name, profile=profile)
-    gate = PolicyGate(min_score, max_score, cache)
-    result = gate.apply(llm_result, resolution, model_id, provider_name, profile=getattr(judge, "_last_profile", None))
-    # Router tagging per ADR 0006
-    try:
-        if _is_router_model_id(model_id):
-            result["router"] = True
-    except Exception:
-        pass
-    # Accurate-Enough Gate before store write (issue #107)
-    # Candidates never cached: fail => not Keeper even if decision keep
-    # Store write is gated; YAML remains ephemeral via backfill filter
-    # Strong == cache symmetric: drop strong persisted without gate (no LLM re-judge)
-    if store is not None and result.get("decision") == "keep":
-        try:
-            ok, reason = is_accurate_enough(result)
-            if not ok:
-                print(f"  [gate] SKIP store write {model_id}: {reason} -> Candidate not Keeper")
-            else:
-                # Write slim record to store (benchmarks+pricing only) when gate passes
-                try:
-                    from .model_info_store import ModelInfoRecord
-
-                    rec = ModelInfoRecord.from_provider_record(result, provider=provider_name, evaluated_at=datetime.now(UTC).isoformat())
-                    # Use normalized key for store; put merges via benchmarks union-max + pricing re-avg
-                    from .model_info_store import normalize_store_key as _nsk
-
-                    key = _nsk(model_id)
-                    if key:
-                        store.put(key, rec)
-                        print(f"  [gate] STORE Keeper {model_id} key={key}")
-                except Exception as exc2:
-                    print(f"  [gate] store put failed {model_id}: {exc2}")
-        except Exception as exc:
-            print(f"  [gate] check failed {model_id}: {exc}")
-    elif store is not None and str(result.get("decision", "")).strip().lower() == "drop" and str(result.get("evidence_level", "")).strip().lower() in ("strong", "moderate"): 
-        try:
-            from .model_info_store import ModelInfoRecord
-            from .model_info_store import normalize_store_key as _nsk2
-
-            rec = ModelInfoRecord.from_provider_record(result, provider=provider_name, evaluated_at=datetime.now(UTC).isoformat())
-            key = _nsk2(model_id)
-            if key:
-                store.put(key, rec)
-                print(f"  [gate] STORE DropStrong {model_id} key={key}")
-        except Exception as exc2:
-            print(f"  [gate] store put drop failed {model_id}: {exc2}")
-    # llm7 turbo = free-tier keep; normal judge still runs, but turbo never drops
-    if provider_name == "llm7" and model.get("tier") == "turbo":
-        result["decision"] = "keep"
-        result["tier"] = "flash"
-    return result
-
-
+    coord = EvaluatorCoordinator(
+        provider_name=provider_name,
+        aa=aa,
+        models_dev=models_dev,
+        evaluator=evaluator,
+        min_score=min_score,
+        max_score=max_score,
+        cache=cache,
+        store=store,
+    )
+    return coord.evaluate(model)
 def _llm_error_record(model_id: str, exc: Exception, coding_score: float = 0.0, benchmarks: dict = None) -> dict[str, Any]:
-    """Judge failure → decision=error, tier=error (NOT drop)."""
-    return {
-        "provider_model_id": model_id,
-        "source": "llm_error",
-        "coding": False,
-        "canonical_name": None,
-        "aa_model_id": None,
-        "aa_name": None,
-        "aa_slug": None,
-        "aa_score": None,
-        "coding_score": coding_score,
-        "benchmarks": benchmarks if benchmarks is not None else {},
-        "confidence": 0.0,
-        "decision": "error",
-        "tier": "error",
-        "evidence_level": "none",
-        "evidence": [f"LLM evaluation failed: {exc}"],
-        "coding_assessment": None,
-    }
+    """Judge failure → decision=error, tier=error (NOT drop). Delegates to EvaluatorCoordinator."""
+    return EvaluatorCoordinator(provider_name="", aa=None, models_dev=None, evaluator=None, min_score=24.0, max_score=45.0)._llm_error_record(model_id, exc, coding_score, benchmarks)
 
 
 def deterministic_drop_record(model_id: str, reason: str, cache=None) -> dict[str, Any]:
-    """Pre-filter drop (specialised / non-coding models)."""
-    from .benchmarks import BenchmarkDataCache, build_benchmark_profile, compute_coding_score
-
-    profile = build_benchmark_profile(model_id, "", cache)
-    benchmarks_dict = profile.to_dict() if profile.scores else {}
-    coding_score, _, _ = compute_coding_score(profile) if profile.scores else (None, 0.0, [])
-    return {
-        "provider_model_id": model_id,
-        "source": "deterministic",
-        "coding": False,
-        "canonical_name": None,
-        "aa_model_id": None,
-        "aa_name": None,
-        "aa_slug": None,
-        "aa_score": None,
-        "coding_score": coding_score if profile.scores else None,
-        "benchmarks": benchmarks_dict,
-        "confidence": 1.0,
-        "decision": "drop",
-        "tier": "drop",
-        "evidence_level": "strong",
-        "evidence": [reason],
-        "coding_assessment": None,
-    }
+    """Pre-filter drop (specialised / non-coding models). Delegates to EvaluatorCoordinator."""
+    return EvaluatorCoordinator(provider_name="", aa=None, models_dev=None, evaluator=None, min_score=24.0, max_score=45.0, cache=cache).deterministic_drop_record(model_id, reason, cache)
 
 
 _deterministic_drop_record = deterministic_drop_record
@@ -741,36 +543,17 @@ def _resolve_provider_config(provider_name: str, config: Any) -> Any:
 
 
 def _aa_score(aa_model: dict[str, Any] | None) -> float | None:
-    if aa_model is None:
-        return None
-    return aa_model.get("evaluations", {}).get("artificial_analysis_intelligence_index")
+    return EvaluatorCoordinator._aa_score(aa_model)
 
 
 def _aa_match(resolution: Any) -> dict[str, Any] | None:
-    """The deterministic AA match handed to the judge as verified context."""
-    if resolution.aa_model is None:
-        return {"matched": False, "model_id": None, "score": None}
-    aa_model = resolution.aa_model
-    return {
-        "matched": True,
-        "model_id": aa_model["id"],
-        "score": _aa_score(aa_model),
-    }
+    """The deterministic AA match handed to the judge as verified context. Delegates to EvaluatorCoordinator."""
+    return EvaluatorCoordinator._aa_match(resolution)
 
 
 def _aa_candidates(resolution: Any) -> list[dict[str, Any]]:
-    """Legacy: deterministic AA match(es) for backward compatibility."""
-    if resolution.aa_model is None:
-        return []
-    aa_model = resolution.aa_model
-    return [
-        {
-            "id": aa_model["id"],
-            "name": aa_model["name"],
-            "slug": aa_model["slug"],
-            "score": _aa_score(aa_model),
-        }
-    ]
+    """Legacy: deterministic AA match(es) for backward compatibility. Delegates to EvaluatorCoordinator."""
+    return EvaluatorCoordinator._aa_candidates(resolution)
 
 
 def pick_tracer_model(
@@ -795,25 +578,8 @@ def pick_tracer_model(
 
 
 def _auto_free_record(provider_name: str) -> dict[str, Any]:
-    """Auto-free provider: skip evaluation, return auto:free routing recommendation."""
-    return {
-        "provider_model_id": "auto:free",
-        "source": "auto_free",
-        "coding": True,
-        "canonical_name": None,
-        "aa_model_id": None,
-        "aa_name": None,
-        "aa_slug": None,
-        "aa_score": None,
-        "coding_score": None,
-        "benchmarks": {},
-        "confidence": 1.0,
-        "decision": "keep",
-        "tier": "max",
-        "evidence_level": "strong",
-        "evidence": [f"Provider {provider_name} uses auto_free discovery strategy"],
-        "coding_assessment": None,
-    }
+    """Auto-free provider: skip evaluation, return auto:free routing recommendation. Delegates to EvaluatorCoordinator."""
+    return EvaluatorCoordinator(provider_name=provider_name, aa=None, models_dev=None, evaluator=None, min_score=24.0, max_score=45.0)._auto_free_record(provider_name)
 
 
 def discover_single(

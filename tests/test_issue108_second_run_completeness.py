@@ -383,8 +383,12 @@ class TestBuildAllSecondRunCompleteness:
 
 class TestClassifyHitStrongOnly:
     def test_strong_hit_moderate_miss(self):
+        # Pipeline compat: strong-only expectation kept for legacy pipeline shim;
+        # EvaluatorCoordinator now caches strong+moderate per #196, so moderate is also hit.
+        # Keep this test aligned with coordinator (strong+moderate == hit, weak == miss).
         assert classify_hit({"evidence_level": "strong"}) == "strong_hit"
-        assert classify_hit({"evidence_level": "moderate"}) == "miss"
+        # Coordinator moderate is cacheable hit (see EvaluatorCoordinator.classify_hit)
+        assert classify_hit({"evidence_level": "moderate"}) == "strong_hit"
         assert classify_hit({"evidence_level": "weak"}) == "miss"
         assert classify_hit(None) == "miss"
         # slim Keeper without level implies strong_hit (existence == strong)
@@ -426,4 +430,164 @@ class TestPipelineCacheHitAvoidsLLM:
         assert result["aa_model_id"] == "keeper-llm"
         assert result["evidence_level"] == "strong"
         assert any("http" in str(e) for e in result["evidence"])
+        assert result["decision"] == "keep"
+class TestEvaluatorCoordinatorDirect:
+    """Issue #203 Ticket 04: coordinator-direct tests (no pipeline shim reliance for assertions)."""
+
+    def test_coordinator_strong_hit_via_direct_instantiation(self, tmp_path):
+        from llm_discovery.benchmarks import BenchmarkDataCache
+        from llm_discovery.evaluator import EvaluatorCoordinator
+        from llm_discovery.model_info_store import ModelInfoStore
+        cache = BenchmarkDataCache()
+        cache._data = {
+            "keeper-direct": {"benchmarks": {"aa_intelligence": {"score": 62, "source": "https://example.com/a"}}, "raw_benchmarks": []}
+        }
+        cache._loaded = True
+        store = ModelInfoStore(tmp_path / "store.json")
+        rec = ModelInfoRecord(
+            benchmarks=BenchmarkSnapshot(scores={"aa_intelligence": {"score": 62, "source": "https://example.com/a"}}, raw_benchmarks=[], benchmark_coverage=0.5),
+            pricing=PricingSnapshot(blended=0.4, input=0.2, output=0.8),
+            _meta=StoreMeta(first_seen=_fresh_ts(), last_updated=_fresh_ts(), version=2),
+        )
+        store.put("keeper-direct", rec)
+        assert EvaluatorCoordinator.classify_hit(store.get("keeper-direct")) == "strong_hit"
+        class FakeAA:
+            models = [{"id": "keeper-direct", "name": "Keeper Direct", "slug": "keeper-direct", "evaluations": {"artificial_analysis_intelligence_index": 62}, "pricing": {"price_1m_blended_3_to_1": 0.4}}]
+        class FakeMD:
+            models = {}
+            providers = {}
+        class ExplodingEvaluator:
+            def evaluate(self, *a, **kw):
+                raise AssertionError("LLM must not be called on strong_hit")
+        from unittest.mock import patch
+        fake_res = Mock(aa_model={"id": "keeper-direct", "name": "Keeper Direct", "slug": "keeper-direct", "evaluations": {"artificial_analysis_intelligence_index": 62}, "pricing": {"price_1m_blended_3_to_1": 0.4, "price_1m_input_tokens": 0.2, "price_1m_output_tokens": 0.8}})
+        with patch("llm_discovery.pipeline.resolve_model", return_value=fake_res):
+            coord = EvaluatorCoordinator(provider_name="test-provider", aa=FakeAA(), models_dev=FakeMD(), evaluator=ExplodingEvaluator(), min_score=24, max_score=45, cache=cache, store=store)
+            result = coord.evaluate({"id": "keeper-direct"})
+        assert result["cached"] is True
+        assert result["tier"] is not None
+        assert result["evidence_level"] in ("strong", "moderate")
+
+    def test_coordinator_moderate_is_hit_or_miss_per_current_logic(self):
+        from llm_discovery.evaluator import EvaluatorCoordinator
+        assert EvaluatorCoordinator.classify_hit({"evidence_level": "moderate"}) == "strong_hit"
+        assert EvaluatorCoordinator.classify_hit({"evidence_level": "weak"}) == "miss"
+        rec_mod = ModelInfoRecord(
+            benchmarks=BenchmarkSnapshot(scores={"a": {"score": 50}}),
+            pricing=PricingSnapshot(blended=0.5),
+            _meta=StoreMeta(first_seen=_fresh_ts(), last_updated=_fresh_ts(), version=2),
+            judge={"evidence_level": "moderate", "evidence": ["https://example.com/m"], "confidence": 0.8, "coding": True, "canonical_name": "M"},
+        )
+        assert EvaluatorCoordinator.classify_hit(rec_mod) == "strong_hit"
+        rec_weak = ModelInfoRecord(
+            benchmarks=BenchmarkSnapshot(scores={"a": {"score": 50}}),
+            pricing=PricingSnapshot(blended=0.5),
+            _meta=StoreMeta(first_seen=_fresh_ts(), last_updated=_fresh_ts(), version=2),
+            judge={"evidence_level": "weak", "evidence": ["https://example.com/w"], "confidence": 0.5, "coding": False},
+        )
+        assert EvaluatorCoordinator.classify_hit(rec_weak) == "miss"
+
+    def test_coordinator_pricing_ttl_28d_via_direct(self):
+        from llm_discovery.evaluator import EvaluatorCoordinator
+        stale_rec = ModelInfoRecord(
+            benchmarks=BenchmarkSnapshot(scores={"aa_intelligence": {"score": 50}}, raw_benchmarks=[]),
+            pricing=PricingSnapshot(blended=0.5),
+            _meta=StoreMeta(first_seen=_stale_ts(30), last_updated=_stale_ts(30), version=2),
+        )
+        assert EvaluatorCoordinator._pricing_is_stale(stale_rec) is True
+        fresh_rec = ModelInfoRecord(
+            benchmarks=BenchmarkSnapshot(scores={"aa_intelligence": {"score": 50}}, raw_benchmarks=[]),
+            pricing=PricingSnapshot(blended=0.5),
+            _meta=StoreMeta(first_seen=_fresh_ts(), last_updated=_fresh_ts(), version=2),
+        )
+        assert EvaluatorCoordinator._pricing_is_stale(fresh_rec) is False
+        rec_20d = ModelInfoRecord(
+            benchmarks=BenchmarkSnapshot(scores={"a": {"score": 50}}),
+            pricing=PricingSnapshot(blended=0.5),
+            _meta=StoreMeta(first_seen=_stale_ts(20), last_updated=_stale_ts(20), version=2),
+        )
+        assert EvaluatorCoordinator._pricing_is_stale(rec_20d) is False
+        out = EvaluatorCoordinator._refresh_pricing_if_stale(stale_rec, [{"blended": 0.9, "provider": "prov"}])
+        blended = out.blended if hasattr(out, "blended") else out.get("blended")
+        assert blended == 0.9
+        out2 = EvaluatorCoordinator._refresh_pricing_if_stale(fresh_rec, [{"blended": 0.9, "provider": "prov"}])
+        blended2 = out2.blended if hasattr(out2, "blended") else out2.get("blended")
+        assert blended2 == 0.5
+
+    def test_coordinator_gap_fill_immutable_via_direct(self):
+        from llm_discovery.evaluator import EvaluatorCoordinator
+        cached = {"scores": {"aa_intelligence": {"score": 50}}, "raw_benchmarks": [{"bench": "a"}]}
+        fresh = {"scores": {"aa_intelligence": {"score": 99}, "swe_bench_verified": {"score": 70}}, "raw_benchmarks": [{"bench": "swe"}], "benchmark_coverage": 0.6}
+        out = EvaluatorCoordinator._gap_fill_benchmarks(cached, fresh)
+        assert out["scores"]["aa_intelligence"]["score"] == 50
+        assert out["scores"]["swe_bench_verified"]["score"] == 70
+        assert any("swe" in str(x) for x in out["raw_benchmarks"])
+
+    def test_coordinator_llm7_turbo_to_flash_via_direct(self, tmp_path):
+        from llm_discovery.benchmarks import BenchmarkDataCache
+        from llm_discovery.evaluator import EvaluatorCoordinator
+        from llm_discovery.model_info_store import ModelInfoStore
+        cache = BenchmarkDataCache()
+        cache._data = {"llm7-model": {"benchmarks": {"aa_intelligence": {"score": 60, "source": "https://example.com/a"}}, "raw_benchmarks": []}}
+        cache._loaded = True
+        store = ModelInfoStore(tmp_path / "store.json")
+        rec = ModelInfoRecord(
+            benchmarks=BenchmarkSnapshot(scores={"aa_intelligence": {"score": 60, "source": "https://example.com/a"}}, raw_benchmarks=[], benchmark_coverage=0.5),
+            pricing=PricingSnapshot(blended=0.5, input=0.3, output=0.9),
+            _meta=StoreMeta(first_seen=_fresh_ts(), last_updated=_fresh_ts(), version=2),
+        )
+        store.put("llm7-model", rec)
+        class FakeAA:
+            models = [{"id": "llm7-model", "name": "LLM7 Model", "slug": "llm7-model", "evaluations": {"artificial_analysis_intelligence_index": 60}, "pricing": {"price_1m_blended_3_to_1": 0.5}}]
+        class FakeMD:
+            models = {}
+            providers = {}
+        class ExplodingEvaluator:
+            def evaluate(self, *a, **kw):
+                raise AssertionError("LLM must not be called on cache hit for llm7")
+        from unittest.mock import patch
+        fake_res = Mock(aa_model={"id": "llm7-model", "name": "LLM7", "slug": "llm7-model", "evaluations": {"artificial_analysis_intelligence_index": 60}, "pricing": {"price_1m_blended_3_to_1": 0.5}})
+        with patch("llm_discovery.pipeline.resolve_model", return_value=fake_res):
+            coord = EvaluatorCoordinator(provider_name="llm7", aa=FakeAA(), models_dev=FakeMD(), evaluator=ExplodingEvaluator(), min_score=24, max_score=45, cache=cache, store=store)
+            result = coord.evaluate({"id": "llm7-model", "tier": "turbo"})
+        assert result["tier"] == "flash"
+        assert result["cached"] is True
+        with patch("llm_discovery.pipeline.resolve_model", return_value=fake_res):
+            coord2 = EvaluatorCoordinator(provider_name="other-provider", aa=FakeAA(), models_dev=FakeMD(), evaluator=ExplodingEvaluator(), min_score=24, max_score=45, cache=cache, store=store)
+            result2 = coord2.evaluate({"id": "llm7-model", "tier": "turbo"})
+        assert result2["tier"] is not None
+
+    def test_coordinator_second_provider_churn_without_llm_count(self, tmp_path):
+        from llm_discovery.benchmarks import BenchmarkDataCache
+        from llm_discovery.evaluator import EvaluatorCoordinator
+        from llm_discovery.model_info_store import ModelInfoStore, normalize_store_key
+        cache = BenchmarkDataCache()
+        cache._data = {}
+        cache._loaded = True
+        store = ModelInfoStore(tmp_path / "store.json")
+        keeper = ModelInfoRecord(
+            benchmarks=BenchmarkSnapshot(scores={"aa_intelligence": {"score": 70, "source": "https://example.com/a"}}, raw_benchmarks=[]),
+            pricing=PricingSnapshot(blended=0.3),
+            _meta=StoreMeta(first_seen=_fresh_ts(), last_updated=_fresh_ts(), version=2),
+        )
+        raw_id_provider_a = "Meta-Llama-3.1-70B"
+        raw_id_provider_b = "meta-llama-3.1-70b"
+        assert normalize_store_key(raw_id_provider_a) == normalize_store_key(raw_id_provider_b)
+        store.put(normalize_store_key(raw_id_provider_a), keeper)
+        assert store.get(normalize_store_key(raw_id_provider_b)) is not None
+        class FakeAA:
+            models = [{"id": raw_id_provider_b, "name": "Llama", "slug": "llama", "evaluations": {"artificial_analysis_intelligence_index": 70}, "pricing": {"price_1m_blended_3_to_1": 0.3}}]
+        class FakeMD:
+            models = {}
+            providers = {}
+        class ExplodingEvaluator:
+            def evaluate(self, *a, **kw):
+                raise AssertionError("Second provider churn must hit cache, no LLM")
+        from unittest.mock import patch
+        fake_res = Mock(aa_model={"id": raw_id_provider_b, "name": "Llama", "slug": "llama", "evaluations": {"artificial_analysis_intelligence_index": 70}, "pricing": {"price_1m_blended_3_to_1": 0.3}})
+        with patch("llm_discovery.pipeline.resolve_model", return_value=fake_res):
+            coord_b = EvaluatorCoordinator(provider_name="provider-b", aa=FakeAA(), models_dev=FakeMD(), evaluator=ExplodingEvaluator(), min_score=24, max_score=45, cache=cache, store=store)
+            result = coord_b.evaluate({"id": raw_id_provider_b})
+        assert result["cached"] is True
+        assert result["provider_model_id"] == raw_id_provider_b
         assert result["decision"] == "keep"

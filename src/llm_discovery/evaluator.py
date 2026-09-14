@@ -729,9 +729,37 @@ def _pricing_is_stale(record): return EvaluatorCoordinator._pricing_is_stale(rec
 def _refresh_pricing_if_stale(cached, obs=None): return EvaluatorCoordinator._refresh_pricing_if_stale(cached, obs)
 def _gap_fill_benchmarks(cached_bm, fresh_bm=None): return EvaluatorCoordinator._gap_fill_benchmarks(cached_bm, fresh_bm)
 def _derive_fresh_pricing_obs(r, pn, eo=None): return EvaluatorCoordinator._derive_fresh_pricing_obs(r, pn, eo)
-def build_cached_strong_record(rid, pn, cached, fpo=None, fbm=None, res=None, c=None, ms=24.0, mx=45.0):
-    coord = EvaluatorCoordinator(provider_name=pn, aa=None, models_dev=None, evaluator=None, min_score=ms, max_score=mx, cache=c)
-    return coord._build_cached_strong_record(rid, cached, fpo, fbm, res, c, ms, mx)
+def build_cached_strong_record(
+    rid,
+    pn,
+    cached,
+    fresh_pricing_obs=None,
+    fresh_bm=None,
+    resolution=None,
+    cache=None,
+    min_score=24.0,
+    max_score=45.0,
+    **kwargs,
+):
+    # Compat aliases: old terse names from early Ticket 02 shim (fpo/fbm/res/c/ms/mx)
+    if fresh_pricing_obs is None and "fpo" in kwargs:
+        fresh_pricing_obs = kwargs.pop("fpo")
+    if fresh_bm is None and "fbm" in kwargs:
+        fresh_bm = kwargs.pop("fbm")
+    if resolution is None and "res" in kwargs:
+        resolution = kwargs.pop("res")
+    if cache is None and "c" in kwargs:
+        cache = kwargs.pop("c")
+    if kwargs.get("ms") is not None and min_score == 24.0:
+        min_score = kwargs.pop("ms")
+    if kwargs.get("mx") is not None and max_score == 45.0:
+        max_score = kwargs.pop("mx")
+    # Also pop terse if passed as kwargs with pipeline names already handled
+    kwargs.pop("fpo", None); kwargs.pop("fbm", None); kwargs.pop("res", None); kwargs.pop("c", None); kwargs.pop("ms", None); kwargs.pop("mx", None)
+    if kwargs:
+        raise TypeError(f"build_cached_strong_record() got unexpected keyword arguments {list(kwargs.keys())}")
+    coord = EvaluatorCoordinator(provider_name=pn, aa=None, models_dev=None, evaluator=None, min_score=min_score, max_score=max_score, cache=cache)
+    return coord._build_cached_strong_record(rid, cached, fresh_pricing_obs, fresh_bm, resolution, cache, min_score, max_score)
 def build_cached_keep_record(*a, **k): return build_cached_strong_record(*a, **k)
 
 # --- Record factory shims (Ticket 03) -- expand-contract ---

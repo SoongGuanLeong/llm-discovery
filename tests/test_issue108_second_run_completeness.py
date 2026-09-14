@@ -21,7 +21,7 @@ from llm_discovery.model_info_store import (
     StoreMeta,
     is_stale,
 )
-from llm_discovery.pipeline import (
+from llm_discovery.evaluator import (
     _gap_fill_benchmarks,
     _refresh_pricing_if_stale,
     build_cached_keep_record,

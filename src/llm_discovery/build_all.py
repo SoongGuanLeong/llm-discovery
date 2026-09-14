@@ -24,6 +24,7 @@ import yaml
 from collections import Counter
 from .backfill import backfill
 from .config import load_config
+from .evaluator import EvaluatorCoordinator  # Ticket 06: deep module seam (per-provider coordinator)
 from .model_info_store import DEFAULT_TTL_DAYS, ModelInfoStore, is_stale, normalize_store_key
 
 # Bounded provider concurrency: 3-4 concurrent per acceptance (issue #142)

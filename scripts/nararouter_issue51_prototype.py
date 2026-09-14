@@ -20,7 +20,7 @@ returns 401 without credentials. This prototype loads the captured
 data/nararouter_raw.json (59 models) and data/artifacts/nararouter_plans.json
 (free-plan allowlist), and swaps the LLM judge for DeterministicJudge, which
 derives a ModelEvaluation from the evidence-level thresholds PolicyGate
-consults. evaluate_model + PolicyGate.apply run UNMODIFIED, so the verdict
+consults. EvaluatorCoordinator.evaluate + PolicyGate.apply run UNMODIFIED, so the verdict
 layer exercises production policy exactly.
 
 Run:  .venv/bin/python scripts/nararouter_issue51_prototype.py [--diff]
@@ -38,7 +38,8 @@ from llm_discovery.catalogs import ArtificialAnalysisCatalog, ModelsDevCatalog
 from llm_discovery.discovery import NARAROUTER_FREE_SNAPSHOT
 from llm_discovery.evaluation import ModelEvaluation, ModelEvaluationRequest
 from llm_discovery.model_matching import ModelMatcher, normalize_model_id
-from llm_discovery.pipeline import _split_by_free_rule, evaluate_model
+from llm_discovery.evaluator import EvaluatorCoordinator
+from llm_discovery.pipeline import _split_by_free_rule
 from llm_discovery.policy_gate import PolicyGate
 from llm_discovery.results import ProviderBatchWriter, PROVIDER_SCHEMA_KEYS
 
@@ -132,11 +133,15 @@ class DeterministicJudge:
 def run_corrected_pipeline(raw_models, aa, md, cache, allowlist):
     filtered = [m for m in raw_models if m["id"] in allowlist]
     evaluator = DeterministicJudge(AA_MIN, AA_MAX, cache)
+    _prototype_coordinator = EvaluatorCoordinator(
+        provider_name="nararouter", aa=aa, models_dev=md, evaluator=evaluator,
+        min_score=AA_MIN, max_score=AA_MAX, cache=cache, store=None,
+    )
     kept_names = [m["id"] for m in sorted(filtered, key=lambda x: x["id"])]
     print("[prototype] corrected filter: raw " + str(len(raw_models)) + " -> true-free " + str(len(filtered)) + " (kept: " + str(kept_names) + ")")
     buckets = {"keep": [], "drop_llm": [], "error": []}
     for model in sorted(filtered, key=lambda x: x["id"]):
-        record = evaluate_model(model, "nararouter", aa, md, evaluator, AA_MIN, AA_MAX, cache)
+        record = _prototype_coordinator.evaluate(model)
         decision = record.get("decision", "drop")
         if decision == "keep":
             buckets["keep"].append(record)

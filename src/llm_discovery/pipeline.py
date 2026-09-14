@@ -226,8 +226,8 @@ def discover_single(
     )
     cache = BenchmarkDataCache()
     cache.collect_from_local(aa, models_dev)
-    return evaluate_model(
-        model=model,
+    # Ticket 06: per-provider coordinator seam (was pipeline.evaluate_model shim)
+    coordinator = EvaluatorCoordinator(
         provider_name=provider_name,
         aa=aa,
         models_dev=models_dev,
@@ -235,7 +235,9 @@ def discover_single(
         min_score=config.artificial_analysis.min_score,
         max_score=config.artificial_analysis.max_score,
         cache=cache,
+        store=None,
     )
+    return coordinator.evaluate(model)
 
 
 def discover_provider(
@@ -331,35 +333,25 @@ def discover_provider(
     coverage_stats = {sig: sum(1 for e in cache._data.values() if sig in e.get("benchmarks", {})) for sig in key_signals}
     print(f"[{provider_name}] Benchmark cache: {len(cache._data)} models | coverage: {coverage_stats}")
     print(f"[{provider_name}] Evaluating {len(eval_models)} model(s) with {max_workers} worker(s)...")
+    # Ticket 06: construct EvaluatorCoordinator per provider and reuse for all models
+    coordinator = EvaluatorCoordinator(
+        provider_name=provider_name,
+        aa=aa,
+        models_dev=models_dev,
+        evaluator=evaluator,
+        min_score=config.artificial_analysis.min_score,
+        max_score=config.artificial_analysis.max_score,
+        cache=cache,
+        store=store,
+    )
     result: dict[str, list[dict[str, Any]]] = {"keep": [], "drop": [], "error": []}
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
 
         def _evaluate_wrapper(m: dict[str, Any]):
             try:
-                return evaluate_model(
-                    model=m,
-                    provider_name=provider_name,
-                    aa=aa,
-                    models_dev=models_dev,
-                    evaluator=evaluator,
-                    min_score=config.artificial_analysis.min_score,
-                    max_score=config.artificial_analysis.max_score,
-                    cache=cache,
-                    store=store,
-                )
-            except TypeError as e:
-                if "store" in str(e) or "unexpected keyword" in str(e):
-                    return evaluate_model(
-                        model=m,
-                        provider_name=provider_name,
-                        aa=aa,
-                        models_dev=models_dev,
-                        evaluator=evaluator,
-                        min_score=config.artificial_analysis.min_score,
-                        max_score=config.artificial_analysis.max_score,
-                        cache=cache,
-                    )
-                raise
+                return coordinator.evaluate(m)
+            except Exception as exc:  # noqa: BLE001 — thread boundary, map to error record
+                return coordinator._llm_error_record(m["id"], exc)
 
         future_to_model = {
             pool.submit(_evaluate_wrapper, model): model

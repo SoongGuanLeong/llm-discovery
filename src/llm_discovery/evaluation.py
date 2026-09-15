@@ -34,3 +34,5 @@ class ModelEvaluation(BaseModel):
     evidence_level: Literal["strong", "moderate", "weak", "none"]
     evidence: list[str] = Field(default_factory=list, max_length=3)
     coding_assessment: CodingAssessment | None = None
+    # Provenance: which judge LLM produced this evaluation
+    judge_model: str | None = None

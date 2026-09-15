@@ -154,6 +154,10 @@ providers:
     base_url: https://api.unorouter.com/v1
     secret: UNOROUTER_API_KEY
 
+  - name: vyceai
+    base_url: https://vyceai.com/v1
+    secret: VYCE_AI_API_KEY
+
   - name: xkiro
     base_url: https://api.xkiro.com/v1
     secret: XKIRO_API_KEY

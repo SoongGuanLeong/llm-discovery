@@ -14,6 +14,8 @@ Keeps pipeline <30 lines and isolates policy bugs to this module.
 """
 from typing import Any
 
+import re
+
 from .benchmarks import build_benchmark_profile, compute_coding_score, has_critical_weakness
 from .categorize import categorize_model
 
@@ -42,13 +44,119 @@ def _aa_score(aa_model: dict[str, Any] | None) -> float | None:
     return aa_model.get("evaluations", {}).get("artificial_analysis_intelligence_index")
 
 
+def _version_tuple(v: str) -> tuple[int, ...]:
+    """Parse version string like '2.5', '3.0', '2-5' into comparable tuple."""
+    if not v:
+        return ()
+    # normalize hyphen to dot, split
+    parts = re.split(r"[.\-]", v)
+    out: list[int] = []
+    for p in parts:
+        # strip non-digit suffix (e.g., '3a' -> 3)
+        m = re.match(r"(\d+)", p)
+        if m:
+            try:
+                out.append(int(m.group(1)))
+            except Exception:
+                out.append(0)
+        elif p:
+            out.append(0)
+    return tuple(out)
+
+
+def _has_older_kept_sibling(model_id: str, store: Any | None) -> bool:
+    """Check if store has an older version of same family/variant that is kept.
+
+    Example: agnes-3.0-flash is newer than agnes-2.5-flash. If store has
+    agnes-2.5-flash with decision keep, then agnes-3.0-flash qualifies.
+    Uses base_without_numeric_version to handle version-in-variant like 2.5-flash.
+    """
+    if not store or not model_id:
+        return False
+    try:
+        from .model_matching import ModelNormalizer
+    except Exception:
+        return False
+    # numeric version pattern (without trailing variant)
+    _num_ver_re = re.compile(r"\d+(?:[\.\-]\d+)+")
+    def _numeric_part(v: str) -> str:
+        m = _num_ver_re.search(v or "")
+        return m.group(0) if m else ""
+    def _base_without_version(mid: str) -> str:
+        # normalized without numeric version -> family+variant base
+        norm = ModelNormalizer.normalize(mid)
+        base = _num_ver_re.sub("", norm)
+        base = re.sub(r"-+", "-", base).strip("-")
+        return base
+    try:
+        cur_sig = ModelNormalizer.extract_signature(model_id)
+    except Exception:
+        return False
+    cur_num = _numeric_part(cur_sig.version)
+    if not cur_num:
+        # fallback: try to find numeric version directly in model_id
+        cur_num = _numeric_part(model_id)
+        if not cur_num:
+            return False
+    cur_ver = _version_tuple(cur_num)
+    if not cur_ver:
+        return False
+    cur_base = _base_without_version(model_id)
+    if not cur_base:
+        return False
+    # ensure store loaded
+    try:
+        if hasattr(store, "_ensure_loaded"):
+            store._ensure_loaded()
+        data = getattr(store, "_data", None)
+        if data is None:
+            return False
+        # data is dict store_key -> ModelInfoRecord
+        for _key, rec in list(data.items()):
+            try:
+                judge = getattr(rec, "judge", None)
+                if judge is None and isinstance(rec, dict):
+                    judge = rec.get("judge")
+                decision = None
+                if judge is not None:
+                    decision = judge.get("decision") if isinstance(judge, dict) else getattr(judge, "decision", None)
+                if decision is None:
+                    decision = getattr(rec, "decision", None) if not isinstance(rec, dict) else rec.get("decision")
+                if not decision or str(decision).strip().lower() != "keep":
+                    continue
+                sibling_id = _key  # normalized store key
+                # base must match
+                sib_base = _base_without_version(sibling_id)
+                if sib_base != cur_base:
+                    continue
+                # extract sibling numeric version
+                try:
+                    sib_sig = ModelNormalizer.extract_signature(sibling_id)
+                    sib_num = _numeric_part(sib_sig.version) or _numeric_part(sibling_id)
+                except Exception:
+                    sib_num = _numeric_part(sibling_id)
+                if not sib_num:
+                    continue
+                sib_ver = _version_tuple(sib_num)
+                if not sib_ver:
+                    continue
+                if sib_ver < cur_ver:
+                    return True
+            except Exception:
+                continue
+    except Exception:
+        return False
+    return False
+
+
 class PolicyGate:
     """Deterministic policy: LLM result + benchmarks + AA → final record."""
 
-    def __init__(self, min_score: float, max_score: float, cache: Any = None):
+    def __init__(self, min_score: float, max_score: float, cache: Any = None, store: Any = None):
         self.min_score = min_score
         self.max_score = max_score
         self.cache = cache
+        self.store = store
 
     def apply(
         self,
@@ -99,6 +207,7 @@ class PolicyGate:
             "source": "llm",
             "coding": llm_result.coding,
             "canonical_name": llm_result.canonical_name,
+            "judge_model": getattr(llm_result, "judge_model", None),
             "aa_model_id": aa_model_id,
             "aa_name": aa_name,
             "aa_slug": aa_slug,
@@ -183,6 +292,20 @@ class PolicyGate:
         if aa_model is not None:
             pricing_blended = aa_model.get("pricing", {}).get("price_1m_blended_3_to_1")
             # Treat 0 as free (already handled in categorize)
+        # Sibling heuristic: if no aa_score/coding_score but older version kept, treat as keep
+        has_sibling = False
+        try:
+            # prefer explicit store passed to gate, else try cache if it looks like store
+            _store = getattr(self, "store", None)
+            # fallback: if cache is actually a store (duck typing)
+            if _store is None and self.cache is not None and hasattr(self.cache, "_data"):
+                _store = self.cache
+            if verified_score is None and (coding_score is None or not profile.scores):
+                has_sibling = _has_older_kept_sibling(model_id, _store)
+                if has_sibling:
+                    print(f"  [evaluate] {model_id}: SIBLING heuristic -> older kept sibling found, treating as flash")
+        except Exception:
+            has_sibling = False
         tier = categorize_model(
             coding=deterministic_coding,
             aa_score=verified_score,
@@ -193,8 +316,13 @@ class PolicyGate:
             coding_score=coding_score if profile.scores else None,
             has_critical_weakness=has_weakness,
             pricing_blended=pricing_blended,
+            has_older_kept_sibling=has_sibling,
         )
         evaluation["tier"] = tier
+        if has_sibling and verified_score is None and (coding_score is None or not profile.scores):
+            evaluation.setdefault("evidence", []).append(
+                f"Sibling heuristic: no aa_score but older kept sibling exists for {model_id}, assuming newer version superior -> keep as {tier}"
+            )
         # Include pricing influence in evidence for report
         if pricing_blended is not None:
             # Intelligence per dollar for report visibility

@@ -34,6 +34,21 @@ def _normalize_models(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
         # Preserve tier when present (llm7: tier==turbo => free-tier filter).
         if "tier" in m:
             entry["tier"] = m["tier"]
+        # Preserve pricing when present (generic free detection via pricing == 0).
+        # Covers vyceai/xkiro/bai/bestvirtualgoods/nvidia_nim/ollama_cloud etc
+        # without hardcoding model names. Pricing shapes vary: {prompt, completion,
+        # input, output, price_1m_*} may appear as numbers or numeric strings.
+        if "pricing" in m:
+            entry["pricing"] = m["pricing"]
+        # Also preserve flattened pricing keys when provider inlines them at top level
+        for _pk in ("price", "prices", "cost", "price_1m_input_tokens", "price_1m_output_tokens", "price_1m_blended_3_to_1", "prompt_price", "completion_price", "input_price", "output_price"):
+            if _pk in m:
+                entry[_pk] = m[_pk]
+        # Preserve access_tier / tier-like free signals (xkiro: access_tier==free)
+        if "access_tier" in m:
+            entry["access_tier"] = m["access_tier"]
+        if "tier" in m and "tier" not in entry:
+            entry["tier"] = m["tier"]
         normalized.append(entry)
     return normalized
 
@@ -92,6 +107,13 @@ def _normalize_cloudflare_models(models: list[dict[str, Any]]) -> list[dict[str,
             entry["task"] = m["task"]
         if "premium" in m:
             entry["premium"] = m["premium"]
+        if "pricing" in m:
+            entry["pricing"] = m["pricing"]
+        for _pk in ("price", "prices", "cost", "price_1m_input_tokens", "price_1m_output_tokens", "price_1m_blended_3_to_1"):
+            if _pk in m:
+                entry[_pk] = m[_pk]
+        if "access_tier" in m:
+            entry["access_tier"] = m["access_tier"]
         normalized.append(entry)
     return normalized
 

@@ -212,7 +212,9 @@ class LocalLLMEvaluator:
             if not tool_calls:
                 raw_content = _extract_message_text(message)
                 try:
-                    return extract_and_validate(raw_content)
+                    result = extract_and_validate(raw_content)
+                    result.judge_model = self.model
+                    return result
                 except ValueError:
                     messages.append(message)
                     messages.append({

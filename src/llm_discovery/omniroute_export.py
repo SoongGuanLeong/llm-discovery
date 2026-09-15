@@ -54,7 +54,16 @@ COMBO_CREATE_PATH = "/api/combos"
 
 PROVIDER_MODELS_PATH = "/api/provider-models"
 
-# Registry alias map for apply-time fallback (import file keeps original names for determinism)
+# Rule: ONLY Cloudflare Workers AI and Opencode Zen are Standard API Providers.
+# All other providers are API Key Compatible Providers (custom OpenAI-compatible nodes).
+# See CONTEXT.md / issue rule: standard = registry-backed, custom = {name}-custom.
+STANDARD_PROVIDER_MAP: dict[str, str] = {
+    "cloudflare": "cloudflare-ai",      # Cloudflare Workers AI (registry)
+    "opencode_zen": "opencode-zen",      # Opencode Zen (registry)
+}
+
+# Legacy alias map — retained for backwards-compat and apply-time fallback diagnostics.
+# Not used as source of truth (see STANDARD_PROVIDER_MAP). Deprecated.
 _PROVIDER_ALIAS = {
     "google": "gemini",
     "nvidia_nim": "nvidia",
@@ -67,10 +76,8 @@ _PROVIDER_ALIAS = {
     "modelscope": "modelscope-custom",
 }
 
-# Ticket 176: providers that map to custom OpenAI-compatible node ids
-# Stable custom ids — model names after import are provider/model like nararouter-custom/muse-spark-...
-# Also apinex/tokenharbor/xkiro: base_url incorrect / not in OmniRoute registry →
-# API Key Compatible Providers. Explicit `custom: true` in providers.yaml also forces this.
+# Legacy custom-node map — now redundant because every non-standard provider maps to
+# {name}-custom via fallback. Kept for stable ids and backwards-compat imports/tests.
 CUSTOM_NODE_MAP = {
     "nararouter": "nararouter-custom",
     "zai": "zai-custom",
@@ -80,30 +87,20 @@ CUSTOM_NODE_MAP = {
     "xkiro": "xkiro-custom",
 }
 
-# Ticket 176: opencode_zen maps to opencode-zen registry id (not free opencode)
+# Opencode Zen → registry id (alias for STANDARD_PROVIDER_MAP entry)
 OPENCOD_ZEN_MAP = {"opencode_zen": "opencode-zen"}
 
-# T03: agnes/nararouter still require explicit `custom: true` because their original
-# OmniRoute provider cannot fetch model names (wrong base_url). Other CUSTOM_NODE_MAP
-# entries and unknown providers auto-map to {name}-custom without the flag (T02).
-_REQUIRES_EXPLICIT_CUSTOM = frozenset({"agnes", "nararouter"})
+# Deprecated: all non-standard providers are now custom without requiring explicit flag.
+# Kept as empty frozenset for backwards-compat imports.
+_REQUIRES_EXPLICIT_CUSTOM = frozenset()
 
-# Providers listed in the OmniRoute registry (canonical source of truth)
-# Entries from _PROVIDER_ALIAS that map to registry IDs (not custom node IDs)
-# plus OPENCOD_ZEN_MAP entries
-# Explicitly excluded: providers in CUSTOM_NODE_MAP (they are API Key Compatible Providers)
-_OMNIROUTE_REGISTRY = {
-    k: v for k, v in {**_PROVIDER_ALIAS, **OPENCOD_ZEN_MAP}.items()
-    if k not in CUSTOM_NODE_MAP
-}
+# Canonical source of truth per new rule: only Standard providers are listed in registry.
+_OMNIROUTE_REGISTRY: dict[str, str] = dict(STANDARD_PROVIDER_MAP)
 
-
-# Ticket 177: model provisioning provider mapping (same as T1)
-_MODEL_PROVIDER_MAP = {
-    **CUSTOM_NODE_MAP,
-    **OPENCOD_ZEN_MAP,
-    **_PROVIDER_ALIAS,
-}
+# Model provisioning mapping — per new rule only Standard providers map to registry;
+# all others resolve to {name}-custom via _resolve_provider_id / _map_provider_for_model.
+# Kept as alias to STANDARD_PROVIDER_MAP for backwards compat.
+_MODEL_PROVIDER_MAP: dict[str, str] = dict(STANDARD_PROVIDER_MAP)
 
 # Ticket 176: retired provider ids â frozen registry + free opencode
 RETIRED_PROVIDER_IDS = frozenset({
@@ -158,8 +155,12 @@ def _is_explicit_custom(raw_provider: dict[str, Any]) -> bool:
 
 
 def _custom_provider_ids(providers_path: Path = DEFAULT_PROVIDERS) -> set[str]:
-    """Union of hardcoded CUSTOM_NODE_MAP keys (excluding those that require explicit) and explicit `custom: true` providers."""
-    ids = {k for k in CUSTOM_NODE_MAP if k not in _REQUIRES_EXPLICIT_CUSTOM}
+    """Legacy helper: returns explicit `custom: true` providers plus hardcoded custom nodes.
+
+    Per new rule all non-standard providers are custom anyway; this helper is
+    retained for backwards-compat and for _map_provider_for_model fallback.
+    """
+    ids = set(CUSTOM_NODE_MAP.keys())
     for p in _load_raw_providers(providers_path):
         if _is_explicit_custom(p):
             name = str(p.get("name") or p.get("provider") or "").strip()
@@ -169,40 +170,35 @@ def _custom_provider_ids(providers_path: Path = DEFAULT_PROVIDERS) -> set[str]:
 
 
 def _resolve_provider_id(name: str, raw: dict[str, Any] | None = None) -> str:
-    """Resolve provider id for export/combo/model mapping.
+    """Resolve provider id per new rule.
 
-    - Explicit `custom: true` in YAML forces `{name}-custom` (or CUSTOM_NODE_MAP value)
-    - Providers in _REQUIRES_EXPLICIT_CUSTOM (agnes/nararouter) still require
-      explicit `custom: true`; without the flag their original provider id
-      is used because the OmniRoute base_url cannot fetch model names.
-    - Other providers listed in _MODEL_PROVIDER_MAP use their mapped id
-      (OmniRoute registry aliases + CUSTOM_NODE_MAP custom nodes)
-    - Providers not listed in _MODEL_PROVIDER_MAP are automatically
-      mapped to `{name}-custom` as API Key Compatible Providers
-      without requiring `custom: true` in providers.yaml.
+    ONLY Cloudflare Workers AI (cloudflare -> cloudflare-ai) and Opencode Zen
+    (opencode_zen -> opencode-zen) are Standard API Providers (registry-backed).
+    ALL other providers are API Key Compatible Providers (custom OpenAI-compatible)
+    and map to `{name}-custom` (or stable CUSTOM_NODE_MAP id if defined).
+
+    Explicit `custom: true` in YAML still forces custom (backwards-compat) but
+    is now redundant because non-standard already default to custom.
     """
+    # Explicit flag forces custom even for standard (allow override)
     if raw is not None and _is_explicit_custom(raw):
         return CUSTOM_NODE_MAP.get(name, f"{name}-custom")
-    if name in _REQUIRES_EXPLICIT_CUSTOM:
-        # T03: agnes/nararouter must not auto-map to -custom; require explicit flag.
-        # Without it, keep the original provider id (registry) even though its
-        # OmniRoute base_url may be wrong — that is the intended gate.
-        return name
-    if name in _MODEL_PROVIDER_MAP:
-        return _MODEL_PROVIDER_MAP[name]
-    return f"{name}-custom"
+    # Standard providers → registry id
+    if name in STANDARD_PROVIDER_MAP:
+        return STANDARD_PROVIDER_MAP[name]
+    # All others → API Key Compatible (custom) node
+    return CUSTOM_NODE_MAP.get(name, f"{name}-custom")
 
 
 def build_import_entries(providers_path: Path = DEFAULT_PROVIDERS) -> list[dict[str, Any]]:
     """Build import rows from providers.yaml.
 
-    Ticket 176: nararouter/zai/agnes map to custom OpenAI-compatible node ids;
-    opencode_zen maps to opencode-zen registry id. Connection names keep yaml
-    names for traceability.
-
-    apinex/tokenharbor/xkiro: base_url incorrect / not in OmniRoute registry →
-    API Key Compatible Providers (custom nodes). Also any provider with
-    `custom: true` in YAML is forced to `{name}-custom`.
+    Rule: ONLY Cloudflare Workers AI (cloudflare → cloudflare-ai) and Opencode Zen
+    (opencode_zen → opencode-zen) are Standard API Providers (registry-backed).
+    ALL other providers are API Key Compatible Providers (custom OpenAI-compatible
+    nodes) and are emitted as `{name}-custom` (stable CUSTOM_NODE_MAP id if defined).
+    Connection names keep yaml names for traceability. Explicit `custom: true`
+    still forces custom but is now redundant.
     """
     providers_path = Path(providers_path)
     raw = _load_raw_providers(providers_path)
@@ -320,32 +316,16 @@ def group_keeps_by_tier(keeps: list[dict[str, Any]], *, strict_contributor_free:
 
 
 def _map_provider_for_model(p: str) -> str:
-    # T03 gate: agnes/nararouter require explicit `custom: true` — do not auto-map
-    # to custom node when the flag is absent. Check explicit set first.
-    if p in _REQUIRES_EXPLICIT_CUSTOM:
-        try:
-            explicit = _custom_provider_ids()
-            if p in explicit:
-                return CUSTOM_NODE_MAP.get(p, f"{p}-custom")
-        except Exception:
-            pass
-        return p
-    # Custom nodes that do not require explicit (zai/apinex/tokenharbor/xkiro) auto-map
-    if p in CUSTOM_NODE_MAP:
-        return CUSTOM_NODE_MAP[p]
-    # Explicit custom flag: any provider with `custom: true` maps to `{name}-custom`
-    # Loaded lazily so dry-run/build remains local-first without OmniRoute fetch.
-    try:
-        explicit = _custom_provider_ids()
-        if p in explicit:
-            return CUSTOM_NODE_MAP.get(p, f"{p}-custom")
-    except Exception:
-        pass
-    if p in _MODEL_PROVIDER_MAP:
-        return _MODEL_PROVIDER_MAP[p]
-    # Unknown providers automatically become API Key Compatible Providers
-    # without requiring `custom: true` (T02 / issue #198).
-    return f"{p}-custom"
+    """Map provider for model/combo entries per new rule.
+
+    Only Cloudflare Workers AI and Opencode Zen are Standard API Providers
+    (registry-backed). All others → API Key Compatible (custom) node
+    `{name}-custom` (stable CUSTOM_NODE_MAP id if defined).
+    """
+    if p in STANDARD_PROVIDER_MAP:
+        return STANDARD_PROVIDER_MAP[p]
+    # All non-standard → custom OpenAI-compatible node
+    return CUSTOM_NODE_MAP.get(p, f"{p}-custom")
 
 
 def build_model_entries(results_dir: Path = DEFAULT_RESULTS_DIR) -> list[dict[str, Any]]:
@@ -453,7 +433,17 @@ def _httpx_client():
 
 
 def _map_provider(p: str) -> str:
-    return _PROVIDER_ALIAS.get(p, p)
+    """Legacy alias helper — per new rule only Standard providers have registry aliases.
+
+    Returns STANDARD_PROVIDER_MAP id if p is a yaml name for a standard provider,
+    otherwise returns p unchanged (custom nodes are already `name-custom`).
+    Kept for backwards-compat apply-time fallback.
+    """
+    if p in STANDARD_PROVIDER_MAP:
+        return STANDARD_PROVIDER_MAP[p]
+    # Legacy: keep _PROVIDER_ALIAS fallback only for standard providers
+    # (e.g. cloudflare → cloudflare-ai already covered above). Others unchanged.
+    return p
 
 
 def apply_import_entries(base_url: str, rows: list[dict[str, Any]], auth_headers: dict[str, str] | None = None, timeout: float = 15.0) -> dict[str, Any]:
@@ -496,15 +486,18 @@ def apply_import_entries(base_url: str, rows: list[dict[str, Any]], auth_headers
             print(f"skip {row.get('provider')}: apiKey still placeholder {ak} (missing env)", file=sys.stderr)
             results.append({"provider": row.get("provider"), "skipped": True, "reason": "missing env"})
             continue
-        # map provider for registry gaps, keep original name as connection name
+        # Apply full standard-vs-custom rule to provider id before sending.
+        # Only Cloudflare Workers AI + Opencode Zen are Standard (registry-backed);
+        # everything else must be a {name}-custom (API Key Compatible Provider).
         orig = row.get("provider")
-        mapped = _map_provider(str(orig))
+        mapped = _map_provider_for_model(str(orig))
         send_row = dict(row)
         send_row["provider"] = mapped
         # name stays original for traceability
         send_row["name"] = row.get("name", orig)
         if mapped != orig:
-            print(f"map {orig} -> {mapped} (registry alias)", file=sys.stderr)
+            tag = "standard" if mapped in STANDARD_PROVIDER_MAP.values() else "custom"
+            print(f"map {orig} -> {mapped} ({tag})", file=sys.stderr)
         try:
             resp = httpx.post(single_url, json=send_row, headers=headers, timeout=timeout)
         except Exception as e:
@@ -638,6 +631,86 @@ def retire_connections(base_url: str, retired_ids: frozenset[str], auth_headers:
         except Exception:
             pass
         # Fallback: DELETE
+        del_url = f"{base}/api/providers/{cid}"
+        try:
+            resp = httpx.delete(del_url, headers=headers, timeout=timeout)
+            if resp.status_code in (200, 201, 204):
+                results.append({"id": cid, "provider": conn.get("provider"), "method": "DELETE", "status": resp.status_code})
+                continue
+        except Exception as e:
+            results.append({"id": cid, "provider": conn.get("provider"), "error": str(e)})
+    return {"retired": results, "count": len(results)}
+
+
+def _legacy_standard_provider_ids(resolved_import: list[dict[str, Any]]) -> set[str]:
+    """Compute set of provider ids that should NOT exist as Standard connections on OmniRoute.
+
+    Per new rule, only Cloudflare Workers AI (cloudflare-ai) and Opencode Zen
+    (opencode-zen) are Standard. Any existing connection on OmniRoute whose
+    provider id is a yaml provider name (e.g. 'groq') without the '-custom'
+    suffix is a legacy Standard that should be deprecated so OmniRoute UI
+    shows it as a custom API Key Compatible Provider instead.
+    """
+    yaml_names = set()
+    for r in resolved_import:
+        name = str(r.get("name") or "").strip()
+        mapped = str(r.get("provider") or "").strip()
+        if not name:
+            continue
+        # If yaml name maps to different provider id ending in -custom,
+        # the yaml name was a legacy Standard connection on OmniRoute.
+        if mapped.endswith("-custom") and name != mapped:
+            yaml_names.add(name)
+    # Legacy _PROVIDER_ALIAS providers that are now Custom (not Standard)
+    for legacy in dict(_PROVIDER_ALIAS):
+        if legacy not in STANDARD_PROVIDER_MAP:
+            yaml_names.add(legacy)
+    return yaml_names
+
+
+def retire_legacy_standard_connections(base_url: str, resolved_import: list[dict[str, Any]], auth_headers: dict[str, str] | None = None, timeout: float = 15.0) -> dict[str, Any]:
+    """Retire legacy Standard connections that should now be API Key Compatible (custom).
+
+    After switching to the new rule (only Cloudflare + Opencode Zen are Standard),
+    any existing connection on OmniRoute whose provider was a plain yaml name
+    (e.g. 'groq', 'agnes', 'openrouter') is still treated by OmniRoute as Standard.
+    This function deprecates/deletes those so they are re-created as '{name}-custom'
+    on the next import, making the OmniRoute UI show them correctly as Custom.
+    """
+    httpx = _httpx_client()
+    headers = {"Content-Type": "application/json"}
+    if auth_headers:
+        headers.update(auth_headers)
+    base = base_url.rstrip("/")
+    existing = _fetch_existing_connections(base_url, auth_headers, timeout)
+
+    # Build set of legacy Standard provider ids that should be retired.
+    # These are connection providers on OmniRoute that match yaml names but
+    # should now be {name}-custom. Exclude the two actual Standard providers.
+    legacy_ids = _legacy_standard_provider_ids(resolved_import)
+    # Also explicitly add legacy alias names from _PROVIDER_ALIAS that OmniRoute
+    # may have stored as Standard (google, nvidia_nim, kilo_ai, etc.)
+    for p in dict(_PROVIDER_ALIAS):
+        if p not in STANDARD_PROVIDER_MAP:
+            legacy_ids.add(p)
+
+    to_retire = [c for c in existing if str(c.get("provider")) in legacy_ids]
+    if not to_retire:
+        return {"retired": [], "count": 0, "skipped": True}
+    results: list[dict[str, Any]] = []
+    for conn in to_retire:
+        cid = conn.get("id")
+        if not cid:
+            continue
+        # Deactivate via PUT isActive=false, then DELETE as fallback
+        put_url = f"{base}/api/providers/{cid}"
+        try:
+            resp = httpx.put(put_url, json={"isActive": False}, headers=headers, timeout=timeout)
+            if resp.status_code in (200, 201, 204):
+                results.append({"id": cid, "provider": conn.get("provider"), "method": "PUT", "status": resp.status_code})
+                continue
+        except Exception:
+            pass
         del_url = f"{base}/api/providers/{cid}"
         try:
             resp = httpx.delete(del_url, headers=headers, timeout=timeout)
@@ -823,6 +896,11 @@ def apply_payload(payload: dict[str, Any], base_url: str = DEFAULT_OMNIROUTE_URL
         retire_res = retire_connections(base_url, RETIRED_PROVIDER_IDS, auth_headers=auth_headers)
         summary["retire"] = retire_res
         print(f"retired: {retire_res['count']}", file=sys.stderr)
+    # Ticket 176: retire legacy Standard connections that should now be custom (API Key Compatible)
+    legacy_res = retire_legacy_standard_connections(base_url, resolved_import, auth_headers=auth_headers)
+    summary["retire_legacy"] = legacy_res
+    if legacy_res.get("retired"):
+        print(f"retired {legacy_res['count']} legacy standard connections", file=sys.stderr)
     if resolved_import:
         print(f"applying {len(resolved_import)} provider imports to {base_url} ...", file=sys.stderr)
         res = apply_import_entries(base_url, resolved_import, auth_headers=auth_headers)

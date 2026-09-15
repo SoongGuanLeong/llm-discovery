@@ -329,10 +329,13 @@ def build_all(
         else:
             _aa_shared, _md_shared = aa, models_dev
 
+        # Determine if catalog is stale: any catalog older than TTL triggers re-eval of keeps
+        catalog_stale = any(catalog_status["stale"].values())
+
         def _run_real_provider(name: str) -> tuple[str, dict[str, list[dict[str, Any]]], Path]:
             print(f"\n=== {name} === (build-all)")
             try:
-                result = discover_provider(name, config, _aa_shared, _md_shared, max_workers=max_workers, store=store_for_discovery)
+                result = discover_provider(name, config, _aa_shared, _md_shared, max_workers=max_workers, store=store_for_discovery, catalog_stale=catalog_stale)
             except Exception as exc:
                 from .pipeline import provider_error_result
                 result = provider_error_result(name, exc)

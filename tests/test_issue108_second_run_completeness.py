@@ -15,6 +15,7 @@ from llm_discovery.config import load_config
 from llm_discovery.gate import is_accurate_enough
 from llm_discovery.model_info_store import (
     BenchmarkSnapshot,
+    JudgeSnapshot,
     ModelInfoRecord,
     ModelInfoStore,
     PricingSnapshot,
@@ -26,6 +27,7 @@ from llm_discovery.evaluator import (
     _refresh_pricing_if_stale,
     build_cached_keep_record,
     classify_hit,
+    resolve_cache_identity,
 )
 from llm_discovery.policy_gate import PolicyGate
 from llm_discovery.results import ProviderBatchWriter
@@ -381,19 +383,17 @@ class TestBuildAllSecondRunCompleteness:
         assert tel["reused"] >= 1
 
 
-class TestClassifyHitStrongOnly:
+class TestClassifyHitStrongModerate:
     def test_strong_hit_moderate_miss(self):
-        # Pipeline compat: strong-only expectation kept for legacy pipeline shim;
-        # EvaluatorCoordinator now caches strong+moderate per #196, so moderate is also hit.
-        # Keep this test aligned with coordinator (strong+moderate == hit, weak == miss).
+        # EvaluatorCoordinator caches strong+moderate (28d TTL store).
+        # strong/moderate → strong_hit, weak/none/missing → miss
         assert classify_hit({"evidence_level": "strong"}) == "strong_hit"
-        # Coordinator moderate is cacheable hit (see EvaluatorCoordinator.classify_hit)
         assert classify_hit({"evidence_level": "moderate"}) == "strong_hit"
         assert classify_hit({"evidence_level": "weak"}) == "miss"
         assert classify_hit(None) == "miss"
-        # slim Keeper without level implies strong_hit (existence == strong)
+        # Missing evidence_level → miss (existence alone is not a valid cache hit)
         rec = ModelInfoRecord(benchmarks=BenchmarkSnapshot(scores={"a": {"score": 50}}), pricing=PricingSnapshot(blended=0.5), _meta=StoreMeta(first_seen=_fresh_ts(), last_updated=_fresh_ts(), version=2))
-        assert classify_hit(rec) == "strong_hit"
+        assert classify_hit(rec) == "miss"
 
 class TestPipelineCacheHitAvoidsLLM:
     def test_evaluate_model_hit_does_not_call_llm(self, tmp_path):
@@ -411,6 +411,7 @@ class TestPipelineCacheHitAvoidsLLM:
             benchmarks=BenchmarkSnapshot(scores={"aa_intelligence": {"score": 60, "source": "https://example.com/a"}, "swe_bench_verified": {"score": 65, "source": "https://swebench.com/b"}}, raw_benchmarks=[], benchmark_coverage=0.5),
             pricing=PricingSnapshot(blended=0.5, input=0.3, output=0.9),
             _meta=StoreMeta(first_seen=_fresh_ts(), last_updated=_fresh_ts(), version=2),
+            judge=JudgeSnapshot(evidence_level="strong", evidence=["https://example.com/a"], confidence=0.9, coding=True, canonical_name="Keeper LLM", tier="premium", decision="keep", judge_model="claude-3-5-sonnet"),
         )
         store.put("keeper-llm", rec)
         class FakeAA:
@@ -431,6 +432,41 @@ class TestPipelineCacheHitAvoidsLLM:
         assert result["evidence_level"] == "strong"
         assert any("http" in str(e) for e in result["evidence"])
         assert result["decision"] == "keep"
+
+
+class TestResolveCacheIdentity:
+    """Tests for cross-provider cache identity resolution (#196 cache reuse)."""
+
+    def test_fallback_when_no_resolution(self):
+        from llm_discovery.model_info_store import normalize_store_key
+        # No resolution → falls back to normalize_store_key(provider_model_id)
+        assert resolve_cache_identity("openai/gpt-4o", None) == normalize_store_key("openai/gpt-4o")
+
+    def test_fallback_when_no_aa_model(self):
+        from llm_discovery.model_info_store import normalize_store_key
+        # resolution with no aa_model → fallback
+        res = Mock(aa_model=None, method="none")
+        assert resolve_cache_identity("openai/gpt-4", res) == normalize_store_key("openai/gpt-4")
+
+    def test_fallback_when_method_none(self):
+        from llm_discovery.model_info_store import normalize_store_key
+        res = Mock(aa_model={"id": "4", "slug": "gpt-4"}, method="none")
+        assert resolve_cache_identity("openai/gpt-4", res) == normalize_store_key("openai/gpt-4")
+
+    def test_uses_aa_slug_when_confident(self):
+        # When aa_model has a slug and method is not 'none', use AA slug as identity
+        res = Mock(aa_model={"id": "4", "slug": "gpt-4"}, method="aa_match")
+        assert resolve_cache_identity("openai/gpt-4", res) == "gpt-4"
+
+    def test_cross_provider_same_identity(self):
+        # Same AA model via different providers → identical cache identity
+        res = Mock(aa_model={"id": "4", "slug": "gpt-4"}, method="aa_match")
+        identity_a = resolve_cache_identity("openai/gpt-4", res)
+        identity_b = resolve_cache_identity("openrouter/gpt-4", res)
+        assert identity_a == identity_b
+        assert identity_a == "gpt-4"
+
+
 class TestEvaluatorCoordinatorDirect:
     """Issue #203 Ticket 04: coordinator-direct tests (no pipeline shim reliance for assertions)."""
 
@@ -448,6 +484,7 @@ class TestEvaluatorCoordinatorDirect:
             benchmarks=BenchmarkSnapshot(scores={"aa_intelligence": {"score": 62, "source": "https://example.com/a"}}, raw_benchmarks=[], benchmark_coverage=0.5),
             pricing=PricingSnapshot(blended=0.4, input=0.2, output=0.8),
             _meta=StoreMeta(first_seen=_fresh_ts(), last_updated=_fresh_ts(), version=2),
+            judge=JudgeSnapshot(evidence_level="strong", evidence=["https://example.com/a"], confidence=0.9, coding=True, canonical_name="Keeper Direct", tier="premium", decision="keep", judge_model="claude-3-5-sonnet"),
         )
         store.put("keeper-direct", rec)
         assert EvaluatorCoordinator.classify_hit(store.get("keeper-direct")) == "strong_hit"
@@ -535,6 +572,7 @@ class TestEvaluatorCoordinatorDirect:
             benchmarks=BenchmarkSnapshot(scores={"aa_intelligence": {"score": 60, "source": "https://example.com/a"}}, raw_benchmarks=[], benchmark_coverage=0.5),
             pricing=PricingSnapshot(blended=0.5, input=0.3, output=0.9),
             _meta=StoreMeta(first_seen=_fresh_ts(), last_updated=_fresh_ts(), version=2),
+            judge=JudgeSnapshot(evidence_level="strong", evidence=["https://example.com/a"], confidence=0.9, coding=True, canonical_name="LLM7 Model", tier="premium", decision="keep", judge_model="claude-3-5-sonnet"),
         )
         store.put("llm7-model", rec)
         class FakeAA:
@@ -559,7 +597,7 @@ class TestEvaluatorCoordinatorDirect:
 
     def test_coordinator_second_provider_churn_without_llm_count(self, tmp_path):
         from llm_discovery.benchmarks import BenchmarkDataCache
-        from llm_discovery.evaluator import EvaluatorCoordinator
+        from llm_discovery.evaluator import EvaluatorCoordinator, resolve_cache_identity
         from llm_discovery.model_info_store import ModelInfoStore, normalize_store_key
         cache = BenchmarkDataCache()
         cache._data = {}
@@ -569,12 +607,15 @@ class TestEvaluatorCoordinatorDirect:
             benchmarks=BenchmarkSnapshot(scores={"aa_intelligence": {"score": 70, "source": "https://example.com/a"}}, raw_benchmarks=[]),
             pricing=PricingSnapshot(blended=0.3),
             _meta=StoreMeta(first_seen=_fresh_ts(), last_updated=_fresh_ts(), version=2),
+            judge=JudgeSnapshot(evidence_level="strong", evidence=["https://example.com/a"], confidence=0.9, coding=True, canonical_name="Llama", tier="premium", decision="keep", judge_model="claude-3-5-sonnet"),
         )
         raw_id_provider_a = "Meta-Llama-3.1-70B"
         raw_id_provider_b = "meta-llama-3.1-70b"
         assert normalize_store_key(raw_id_provider_a) == normalize_store_key(raw_id_provider_b)
-        store.put(normalize_store_key(raw_id_provider_a), keeper)
-        assert store.get(normalize_store_key(raw_id_provider_b)) is not None
+        # Use resolve_cache_identity for storage (same identity used in evaluate() for lookup)
+        fake_res = Mock(aa_model={"id": raw_id_provider_b, "name": "Llama", "slug": "llama", "evaluations": {"artificial_analysis_intelligence_index": 70}, "pricing": {"price_1m_blended_3_to_1": 0.3}}, method="aa_match")
+        store.put(resolve_cache_identity(raw_id_provider_a, fake_res), keeper)
+        assert store.get(resolve_cache_identity(raw_id_provider_b, fake_res)) is not None
         class FakeAA:
             models = [{"id": raw_id_provider_b, "name": "Llama", "slug": "llama", "evaluations": {"artificial_analysis_intelligence_index": 70}, "pricing": {"price_1m_blended_3_to_1": 0.3}}]
         class FakeMD:
@@ -584,10 +625,203 @@ class TestEvaluatorCoordinatorDirect:
             def evaluate(self, *a, **kw):
                 raise AssertionError("Second provider churn must hit cache, no LLM")
         from unittest.mock import patch
-        fake_res = Mock(aa_model={"id": raw_id_provider_b, "name": "Llama", "slug": "llama", "evaluations": {"artificial_analysis_intelligence_index": 70}, "pricing": {"price_1m_blended_3_to_1": 0.3}})
         with patch("llm_discovery.pipeline.resolve_model", return_value=fake_res):
             coord_b = EvaluatorCoordinator(provider_name="provider-b", aa=FakeAA(), models_dev=FakeMD(), evaluator=ExplodingEvaluator(), min_score=24, max_score=45, cache=cache, store=store)
             result = coord_b.evaluate({"id": raw_id_provider_b})
         assert result["cached"] is True
         assert result["provider_model_id"] == raw_id_provider_b
+        assert result["decision"] == "keep"
+
+
+class TestCatalogStaleBehavior:
+    """Tests for catalog stale (>28d TTL) behavior change.
+
+    When catalog is stale:
+    - Cached drops with strong/moderate evidence -> reuse (skip re-evaluation)
+    - Cached keeps -> re-evaluate (force re-run of LLM judge)
+    """
+
+    def test_stale_catalog_drop_cache_hit_skips_llm(self, tmp_path):
+        """Drop with stale catalog should skip LLM evaluation."""
+        from llm_discovery.benchmarks import BenchmarkDataCache
+        from llm_discovery.model_info_store import ModelInfoStore, ModelInfoRecord, PricingSnapshot, BenchmarkSnapshot, StoreMeta, JudgeSnapshot
+        from llm_discovery.evaluator import EvaluatorCoordinator
+
+        cache = BenchmarkDataCache()
+        cache._loaded = True
+        store = ModelInfoStore(tmp_path / "store.json")
+        store.load()
+
+        # Create a cached drop record with strong evidence
+        rec = ModelInfoRecord(
+            benchmarks=BenchmarkSnapshot(scores={"aa_intelligence": {"score": 60, "source": "https://example.com/a"}}, raw_benchmarks=[], benchmark_coverage=0.5),
+            pricing=PricingSnapshot(blended=0.5, input=0.3, output=0.9),
+            _meta=StoreMeta(first_seen=_fresh_ts(), last_updated=_fresh_ts(), version=2),
+            judge=JudgeSnapshot(evidence_level="strong", evidence=["https://example.com/a"], confidence=0.9, coding=True, canonical_name="Dropped Model", tier="drop", decision="drop", judge_model="claude-3-5-sonnet"),
+        )
+        store.put("dropped-model", rec)
+
+        class FakeAA:
+            models = []
+
+        class FakeMD:
+            models = {}
+            providers = {}
+            def get_model(self, model_id):
+                return None
+            def get_provider(self, provider_id):
+                return None
+
+        class ExplodingEvaluator:
+            def evaluate(self, *a, **kw):
+                raise AssertionError("LLM should not be called for stale drop cache hit")
+
+        # Call with catalog_stale=True
+        coordinator = EvaluatorCoordinator(
+            provider_name="test-provider",
+            aa=FakeAA(),
+            models_dev=FakeMD(),
+            evaluator=ExplodingEvaluator(),
+            min_score=24,
+            max_score=45,
+            store=store,
+            catalog_stale=True,
+        )
+        result = coordinator.evaluate({"id": "dropped-model"})
+
+        # Should have used cache (drop decision reused)
+        assert result["decision"] == "drop"
+
+    def test_stale_catalog_keep_cache_miss_forces_llm(self, tmp_path):
+        """Keep with stale catalog should force LLM re-evaluation."""
+        from llm_discovery.benchmarks import BenchmarkDataCache
+        from llm_discovery.model_info_store import ModelInfoStore, ModelInfoRecord, PricingSnapshot, BenchmarkSnapshot, StoreMeta, JudgeSnapshot
+        from llm_discovery.evaluator import EvaluatorCoordinator
+        from llm_discovery.evaluation import ModelEvaluation
+        from unittest.mock import patch
+
+        cache = BenchmarkDataCache()
+        cache._data = {
+            "keeper-direct": {"benchmarks": {"aa_intelligence": {"score": 62, "source": "https://example.com/a"}}, "raw_benchmarks": []}
+        }
+        cache._loaded = True
+        store = ModelInfoStore(tmp_path / "store.json")
+        store.load()
+
+        # Create a cached keep record with strong evidence (stale date)
+        rec = ModelInfoRecord(
+            benchmarks=BenchmarkSnapshot(scores={"aa_intelligence": {"score": 62, "source": "https://example.com/a"}}, raw_benchmarks=[], benchmark_coverage=0.5),
+            pricing=PricingSnapshot(blended=0.5, input=0.3, output=0.9),
+            _meta=StoreMeta(first_seen=_stale_ts(30), last_updated=_stale_ts(30), version=2),
+            judge=JudgeSnapshot(evidence_level="strong", evidence=["https://example.com/a"], confidence=0.9, coding=True, canonical_name="Keeper Direct", tier="premium", decision="keep", judge_model="claude-3-5-sonnet"),
+        )
+        store.put("keeper-direct", rec)
+
+        class FakeAA:
+            models = [{"id": "keeper-direct", "name": "Keeper Direct", "slug": "keeper-direct", "evaluations": {"artificial_analysis_intelligence_index": 62}, "pricing": {"price_1m_blended_3_to_1": 0.5}}]
+
+        class FakeMD:
+            models = {}
+            providers = {}
+            def get_model(self, model_id):
+                return None
+            def get_provider(self, provider_id):
+                return None
+
+        class LLMWasCalled(Exception):
+            pass
+
+        class TrackingEvaluator:
+            def __init__(self):
+                self.was_called = False
+            def evaluate(self, *a, **kw):
+                self.was_called = True
+                # Return a proper ModelEvaluation
+                from llm_discovery.evaluation import ModelEvaluation, CodingAssessment
+                return ModelEvaluation(
+                    canonical_name="Keeper Re-eval",
+                    coding=True,
+                    aa_relevance="strong",
+                    confidence=0.95,
+                    decision="keep",
+                    evidence_level="strong",
+                    evidence=["https://example.com/re-eval"],
+                    coding_assessment=CodingAssessment(overall="strong"),
+                    judge_model="test-judge",
+                )
+
+        evaluator = TrackingEvaluator()
+        coordinator = EvaluatorCoordinator(
+            provider_name="test-provider",
+            aa=FakeAA(),
+            models_dev=FakeMD(),
+            evaluator=evaluator,
+            min_score=24,
+            max_score=45,
+            cache=cache,
+            store=store,
+            catalog_stale=True,
+        )
+        fake_res = Mock(aa_model={"id": "keeper-direct", "name": "Keeper Direct", "slug": "keeper-direct", "evaluations": {"artificial_analysis_intelligence_index": 62}, "pricing": {"price_1m_blended_3_to_1": 0.5, "price_1m_input_tokens": 0.3, "price_1m_output_tokens": 0.9}})
+        with patch("llm_discovery.pipeline.resolve_model", return_value=fake_res):
+            result = coordinator.evaluate({"id": "keeper-direct"})
+
+        # LLM should have been called (cache was skipped)
+        assert evaluator.was_called, "LLM should have been called when catalog_stale=True and cached decision is keep"
+        assert result["decision"] == "keep"
+
+    def test_non_stale_catalog_keep_uses_cache(self, tmp_path):
+        """Keep with non-stale catalog should use cache (not re-evaluate)."""
+        from llm_discovery.benchmarks import BenchmarkDataCache
+        from llm_discovery.model_info_store import ModelInfoStore, ModelInfoRecord, PricingSnapshot, BenchmarkSnapshot, StoreMeta, JudgeSnapshot
+        from llm_discovery.evaluator import EvaluatorCoordinator
+
+        cache = BenchmarkDataCache()
+        cache._loaded = True
+        store = ModelInfoStore(tmp_path / "store.json")
+        store.load()
+
+        # Create a cached keep record with fresh dates
+        rec = ModelInfoRecord(
+            benchmarks=BenchmarkSnapshot(scores={"aa_intelligence": {"score": 62, "source": "https://example.com/a"}}, raw_benchmarks=[], benchmark_coverage=0.5),
+            pricing=PricingSnapshot(blended=0.5, input=0.3, output=0.9),
+            _meta=StoreMeta(first_seen=_fresh_ts(), last_updated=_fresh_ts(), version=2),
+            judge=JudgeSnapshot(evidence_level="strong", evidence=["https://example.com/a"], confidence=0.9, coding=True, canonical_name="Keeper Direct", tier="premium", decision="keep", judge_model="claude-3-5-sonnet"),
+        )
+        store.put("keeper-direct", rec)
+
+        class FakeAA:
+            models = [{"id": "keeper-direct", "name": "Keeper Direct", "slug": "keeper-direct", "evaluations": {"artificial_analysis_intelligence_index": 62}, "pricing": {"price_1m_blended_3_to_1": 0.5}}]
+
+        class FakeMD:
+            models = {}
+            providers = {}
+            def get_model(self, model_id):
+                return None
+            def get_provider(self, provider_id):
+                return None
+
+        class ExplodingEvaluator:
+            def evaluate(self, *a, **kw):
+                raise AssertionError("LLM should not be called when catalog is NOT stale")
+
+        # Call with catalog_stale=False (default)
+        coordinator = EvaluatorCoordinator(
+            provider_name="test-provider",
+            aa=FakeAA(),
+            models_dev=FakeMD(),
+            evaluator=ExplodingEvaluator(),
+            min_score=24,
+            max_score=45,
+            cache=cache,
+            store=store,
+            catalog_stale=False,
+        )
+        from unittest.mock import Mock, patch
+        fake_res = Mock(aa_model={"id": "keeper-direct", "name": "Keeper Direct", "slug": "keeper-direct", "evaluations": {"artificial_analysis_intelligence_index": 62}, "pricing": {"price_1m_blended_3_to_1": 0.5, "price_1m_input_tokens": 0.3, "price_1m_output_tokens": 0.9}})
+        with patch("llm_discovery.pipeline.resolve_model", return_value=fake_res):
+            result = coordinator.evaluate({"id": "keeper-direct"})
+
+        # Should have used cache
+        assert result["cached"] is True
         assert result["decision"] == "keep"

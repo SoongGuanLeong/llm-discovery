@@ -51,6 +51,7 @@ def categorize_model(
     coding_max_score: Optional[float] = DEFAULT_CODING_MAX_THRESHOLD,
     pricing: Optional[float] = None,
     pricing_blended: Optional[float] = None,
+    has_older_kept_sibling: bool = False,
 ) -> str:
     """Return 'max' | 'flash' | 'contributor_free' | 'drop' | 'uncertain' | 'error' per T1 bands.
 
@@ -62,6 +63,10 @@ def categorize_model(
     preferred, else aa_score scaled). Denominator is price. Cheap high-quality
     models bias to flash even if raw score is max-range.
     Dots in version numbers are preserved (2.5 stays 2.5).
+    
+    When aa_score and coding_score are both None but has_older_kept_sibling is True,
+    the model is assumed to be better than an older kept version and returns 'flash'.
+    This handles cases like: agnes-2.5-flash (kept) -> agnes-3.0-flash (no aa_score, kept).
     """
     if judge_decision == "error":
         return "error"
@@ -105,7 +110,13 @@ def categorize_model(
         else:
             base_tier = "flash"
     else:
-        return "uncertain"
+        # No aa_score and no coding_score.
+        # If there is an older kept sibling (e.g., agnes-2.5-flash kept => agnes-3.0-flash),
+        # assume the newer model is better and keep it as flash.
+        if has_older_kept_sibling:
+            base_tier = "flash"
+        else:
+            return "uncertain"
 
     # Flagship boost: if flagship and no strong price demotion yet, promote flash->max
     if has_flagship and base_tier == "flash":

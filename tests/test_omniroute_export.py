@@ -145,9 +145,10 @@ def test_build_import_entries_deterministic_idempotent():
 
 
 def test_build_import_entries_real_providers_count(tmp_path: Path):
-    # real config providers count (mapped ids) — 35 current providers
+    # real config providers count (mapped ids) — dynamically computed from YAML
     rows = mod.build_import_entries(Path("config/providers.yaml"))
-    assert len(rows) == 35
+    expected_count = len([p for p in mod._load_raw_providers(Path("config/providers.yaml")) if isinstance(p, dict) and p.get("name")])
+    assert len(rows) == expected_count, f"expected {expected_count} providers, got {len(rows)}"
     assert [r["provider"] for r in rows] == sorted(r["provider"] for r in rows)
     # spot check: cloudflare maps to cloudflare-ai (alias), groq auto-maps to groq-custom (T02/T03)
     by_provider = {r["provider"]: r for r in rows}
@@ -234,10 +235,10 @@ def test_custom_node_mapping():
 
 
 def test_opencode_zen_mapping():
-    """opencode_zen maps to opencode-zen-custom node."""
+    """opencode_zen maps to opencode-zen registry id (Standard API Provider)."""
     rows = mod.build_import_entries(Path("config/providers.yaml"))
     by_name = {r["name"]: r for r in rows}
-    assert by_name["opencode_zen"]["provider"] == "opencode-zen-custom"
+    assert by_name["opencode_zen"]["provider"] == "opencode-zen"
     assert by_name["opencode_zen"]["name"] == "opencode_zen"
 
 

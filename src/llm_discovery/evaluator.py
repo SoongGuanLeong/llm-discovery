@@ -20,11 +20,53 @@ from .policy_gate import PolicyGate
 
 TTL_DAYS = 28
 
+# Internal exception to skip cache hit for keep records when catalog is stale
+class _SkipCacheHit(Exception):
+    """Internal signal to skip cache hit and re-evaluate."""
+    pass
+
 VISION_CHEAP_THRESHOLD = 1.2
 VISION_CODING_SCORE_MIN = 35.0
 VISION_AA_CODING_MIN = 45.0
 VISION_AA_INTEL_MIN = 55.0
 VISION_BENCH_MIN = 50.0
+
+
+def resolve_cache_identity(model_id: str, resolution: Any = None) -> str:
+    """Resolve canonical cache identity for a model.
+
+    Returns the AA canonical model slug when the provider model reliably
+    resolves to a canonical AA identity. Falls back to normalize_store_key(model_id)
+    (the provider-specific normalized ID) when no AA match exists.
+
+    Cache identity rule:
+      - If resolve_model gives confident aa_model match → use normalize_store_key(aa_model slug/id)
+      - Else → normalize_store_key(provider_model_id)
+
+    This ensures that the same underlying model appearing through different
+    providers (e.g., openai/gpt-4o and openrouter/gpt-4o) reuses one cached
+    judge result when they resolve to the same canonical AA identity.
+    """
+    # Try AA canonical identity first
+    if resolution is not None:
+        aa_model = getattr(resolution, "aa_model", None) if not isinstance(resolution, dict) else resolution.get("aa_model")
+        if aa_model is not None:
+            # Method must indicate a confident match (not "none" or empty)
+            method = getattr(resolution, "method", "") if not isinstance(resolution, dict) else resolution.get("method", "")
+            if method not in ("none", "", None):
+                # Use AA model slug/id as canonical identity
+                slug = aa_model.get("slug") if isinstance(aa_model, dict) else getattr(aa_model, "slug", None)
+                if slug:
+                    identity = normalize_store_key(str(slug))
+                    if identity:
+                        return identity
+                mid = aa_model.get("id") if isinstance(aa_model, dict) else getattr(aa_model, "id", None)
+                if mid:
+                    identity = normalize_store_key(str(mid))
+                    if identity:
+                        return identity
+    # Fallback: provider-specific normalized key
+    return normalize_store_key(model_id)
 
 
 @dataclass
@@ -38,6 +80,27 @@ class EvaluatorCoordinator:
     max_score: float
     cache: Any = None
     store: ModelInfoStore = None
+    catalog_stale: bool = False  # True when catalog fetched_at > 28d TTL
+
+    @staticmethod
+    def _cached_decision(record: Any | None) -> str | None:
+        """Extract the cached decision ('keep'/'drop') from a store record.
+
+        Returns None when the record is missing or decision is not present.
+        """
+        if record is None:
+            return None
+        judge = getattr(record, "judge", None) if not isinstance(record, dict) else record.get("judge")
+        if judge is not None:
+            dec = judge.get("decision") if isinstance(judge, dict) else getattr(judge, "decision", None)
+            if dec is not None:
+                return str(dec).strip().lower()
+        dec = getattr(record, "decision", None)
+        if dec is None and isinstance(record, dict):
+            dec = record.get("decision")
+        if dec is not None:
+            return str(dec).strip().lower()
+        return None
 
     def evaluate(self, model: dict[str, Any]) -> dict[str, Any]:
         """Judge one model and apply tiering."""
@@ -46,12 +109,17 @@ class EvaluatorCoordinator:
         resolution = _resolve(model_id, self.aa, self.models_dev, self.cache)
         if self.store is not None:
             try:
-                cache_key = normalize_store_key(model_id)
+                cache_key = resolve_cache_identity(model_id, resolution)
                 if cache_key:
                     cached = self.store.get(cache_key)
                     hit = self.classify_hit(cached)
                     if hit == "strong_hit":
                         assert cached is not None
+                        # When catalog is stale (>28d TTL), drop results with strong/moderate evidence
+                        # are reused without re-evaluation, but keep results are re-evaluated.
+                        if self.catalog_stale and self._cached_decision(cached) == "keep":
+                            # Keep + stale catalog -> fall through to re-evaluate (skip cache hit)
+                            raise _SkipCacheHit
                         fresh_bm = None
                         if self.cache is not None:
                             try:
@@ -70,6 +138,8 @@ class EvaluatorCoordinator:
                         if self.provider_name == "llm7" and model.get("tier") == "turbo" and result.get("decision") != "drop":
                             result["tier"] = "flash"
                         return result
+            except _SkipCacheHit:
+                pass  # Fall through to re-evaluate (catalog stale + cached keep)
             except Exception:
                 pass
         from .evidence_collector import EvidenceCollector
@@ -90,7 +160,7 @@ class EvaluatorCoordinator:
             llm_result = judge.evaluate(self.provider_name, model, packet, self.cache)
         except Exception as exc:
             return self._llm_error_record(model_id, exc)
-        gate = PolicyGate(self.min_score, self.max_score, self.cache)
+        gate = PolicyGate(self.min_score, self.max_score, self.cache, store=self.store)
         result = gate.apply(llm_result, resolution, model_id, self.provider_name)
         if self.store is not None and result.get("decision") == "keep":
             try:
@@ -98,7 +168,7 @@ class EvaluatorCoordinator:
                 if ok:
                     from .model_info_store import ModelInfoRecord
                     rec = ModelInfoRecord.from_provider_record(result, provider=self.provider_name, evaluated_at=datetime.now(UTC).isoformat())
-                    key = normalize_store_key(model_id)
+                    key = resolve_cache_identity(model_id, resolution)
                     if key:
                         self.store.put(key, rec)
             except Exception:
@@ -107,7 +177,7 @@ class EvaluatorCoordinator:
             try:
                 from .model_info_store import ModelInfoRecord
                 rec = ModelInfoRecord.from_provider_record(result, provider=self.provider_name, evaluated_at=datetime.now(UTC).isoformat())
-                key = normalize_store_key(model_id)
+                key = resolve_cache_identity(model_id, resolution)
                 if key:
                     self.store.put(key, rec)
             except Exception:
@@ -122,10 +192,11 @@ class EvaluatorCoordinator:
         """Strong+moderate hit classification (28d TTL, same JSON).
 
         Slim v2+judge store holds strong+moderate (benchmarks+pricing+_meta+judge?); weak
-        never written, so existence without evidence_level implies Keeper. When
-        judge snapshot present enforce strong+moderate via judge.evidence_level; legacy
-        top-level evidence_level also checked. Returns "strong_hit" or "miss"
-        (kept name for compat — means cacheable hit).
+        never written. When judge snapshot present, require judge.evidence_level in
+        (strong, moderate) to classify as "strong_hit". Legacy top-level evidence_level
+        is also checked. Records lacking evidence_level in both judge and top-level
+        return "miss" (existence alone is not sufficient for a cache hit).
+        Returns "strong_hit" or "miss" (kept name for compat — means cacheable hit).
         """
         if record is None:
             return "miss"
@@ -138,14 +209,15 @@ class EvaluatorCoordinator:
             if lvl is not None and str(lvl).strip() != "":
                 lvl_norm = str(lvl).strip().lower()
                 return "strong_hit" if lvl_norm in ("strong", "moderate") else "miss"
-            # judge present but no level -> treat as strong (legacy strong store)
-            return "strong_hit"
+            # judge present but no evidence_level — ambiguous, must not be a hit
+            return "miss"
         lvl = getattr(record, "evidence_level", None)
         if lvl is None:
             lvl = record.get("evidence_level") if isinstance(record, dict) else None
         if lvl is None or str(lvl).strip() == "":
-            # Slim Keeper — no evidence_level persisted, existence == strong
-            return "strong_hit"
+            # Missing evidence_level: ambiguous legacy record — must NOT be a hit.
+            # A record existing in the store is not sufficient evidence of a trustworthy judge result.
+            return "miss"
         lvl_norm = str(lvl).strip().lower()
         return "strong_hit" if lvl_norm in ("strong", "moderate") else "miss"
 
@@ -328,6 +400,16 @@ class EvaluatorCoordinator:
         else:
             aa_model_id = aa_name = aa_slug = verified_score = None
 
+        # Sibling heuristic for cache rebuild: if no verified_score and no coding_score, check older kept sibling
+        has_sibling = False
+        try:
+            if verified_score is None and coding_score is None:
+                from .policy_gate import _has_older_kept_sibling
+                # use self.store as sibling source
+                has_sibling = _has_older_kept_sibling(raw_model_id, self.store)
+        except Exception:
+            has_sibling = False
+
         # Judge reuse: if stored strong/moderate judge snapshot exists, reuse its evidence/confidence/coding/canonical_name verbatim
         # Pricing/benchmarks still gap-filled above; judge evidence preserved as-audited (http URLs already gated)
         cached_judge = getattr(cached, "judge", None) if not isinstance(cached, dict) else cached.get("judge")
@@ -408,6 +490,7 @@ class EvaluatorCoordinator:
                     coding_score=coding_score,
                     has_critical_weakness=has_weakness,
                     pricing_blended=pricing_blended,
+                    has_older_kept_sibling=has_sibling,
                 )
                 # Only override if pricing influence changes tier; keep judge tier otherwise
                 if recomputed != judge_tier and pricing_blended is not None:
@@ -425,6 +508,7 @@ class EvaluatorCoordinator:
                 coding_score=coding_score,
                 has_critical_weakness=has_weakness,
                 pricing_blended=pricing_blended,
+                has_older_kept_sibling=has_sibling,
             )
 
 

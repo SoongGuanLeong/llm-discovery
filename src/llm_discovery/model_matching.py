@@ -28,6 +28,14 @@ def normalize_model_id(value: str) -> str:
     value = value.rsplit("/", 1)[-1]
     # Strip free markers (:free, -free, _free, /free) before normalization
     value = re.sub(r"[:/_-]free$", "", value)
+    # Strip vendor-specific prefixes added by providers:
+    # - "coding-" prefix added by AiHubMix to tag coding-capable models (e.g., coding-glm-5.3 -> glm-5.3)
+    # - "xiaomi-" prefix added by AiHubMix for Xiaomi models (e.g., xiaomi-mimo-v2-pro -> mimo-v2-pro)
+    # These prefixes are provider-side tags not present in AA catalog slugs
+    for _prefix in ("coding-", "xiaomi-"):
+        if value.startswith(_prefix):
+            value = value[len(_prefix):]
+            break
     # Strip nvidia- hyphen prefix to match AA slugs (nvidia/nemotron vs nvidia-nemotron)
     # Other providers (llama, minimax) keep their family prefix; only nvidia AA uses provider hyphen
     if value.startswith("nvidia-"):
@@ -163,7 +171,9 @@ class ModelNormalizer:
         "llama-", "minimax-", "poolside-", "stepfun-", "thinkingmachines-",
         "meta-", "google-", "anthropic-", "openai-", "cohere-",
         "mistral-", "microsoft-", "databricks-", "together-", "deepseek-",
-        "qwen-", "yi-", "inclusionai-", "liquid-", "dots-studio-"
+        "qwen-", "yi-", "inclusionai-", "liquid-", "dots-studio-",
+        # AiHubMix vendor prefixes (coding-, xiaomi- are provider-side tags not in canonical names)
+        "coding-", "xiaomi-",
     )
 
     # Suffixes to strip
@@ -200,6 +210,12 @@ class ModelNormalizer:
             name = model_id.split("/")[-1].lower().strip()
         else:
             name = re.sub(r"^.+?/", "", name)
+
+        # Strip vendor-specific prefixes added by providers (e.g., AiHubMix coding-, xiaomi-)
+        for _prefix in ("coding-", "xiaomi-"):
+            if name.startswith(_prefix):
+                name = name[len(_prefix):]
+                break
 
         # Remove suffixes
         for pattern in cls.SUFFIX_PATTERNS:
@@ -519,6 +535,9 @@ class ModelMatcher:
         # Strip free suffix before alias lookup so mimo-v2.5-free hits mimo-v2.5 entry (issue #50)
         stripped_slug = re.sub(r"[:/_-]free$", "", provider_slug, flags=re.IGNORECASE)
         stripped_base = re.sub(r"[:/_-]free$", "", base_slug, flags=re.IGNORECASE)
+        # Strip AiHubMix vendor prefix (coding-, xiaomi-) for alias lookup
+        prefix_stripped_slug = re.sub(r"^(coding-|xiaomi-)", "", stripped_slug, flags=re.IGNORECASE)
+        prefix_stripped_base = re.sub(r"^(coding-|xiaomi-)", "", stripped_base, flags=re.IGNORECASE)
         alias_map = {
             "mimo-v2.5": "mimo-v2-5-0424",
             "mimo-v2-5": "mimo-v2-5-0424",
@@ -537,6 +556,23 @@ class ModelMatcher:
             "qwen3.8-flash": "qwen3-8-flash-next",
             "qwen-3-8-flash": "qwen3-8-flash-next",
             "qwen3-8-flash": "qwen3-8-flash-next",
+            # AiHubMix vendor prefix aliases (coding-, xiaomi- prefixes stripped by prefix_stripped_slug)
+            # These keys match AFTER prefix stripping, so no coding-/ xiaomi- prefix
+            "glm-4.6": "glm-4-6",
+            "glm-4-6": "glm-4-6",
+            "glm-4.7": "glm-4-7",
+            "glm-4-7": "glm-4-7",
+            "glm-5": "glm-5",
+            "glm-5.1": "glm-5-1",
+            "glm-5-1": "glm-5-1",
+            "glm-5.3": "glm-5-3-flash",
+            "glm-5-3": "glm-5-3-flash",
+            "glm-5-turbo": "glm-5-turbo",
+            "mimo-v2-pro": "mimo-v2-pro",
+            "mimo-v2.5-pro": "mimo-v2-5-0424",
+            "minimax-m2.7": "minimax-m2-7",
+            "minimax-m2-7": "minimax-m2-7",
+            "minimax-m3": "minimax-m3",
             # Mistral *-latest aliases (issue #42)
             "mistral-medium-latest": "mistral-medium-3-5",
             "mistral-large-latest": "mistral-large-3",
@@ -547,7 +583,8 @@ class ModelMatcher:
         }
         for k, v in alias_map.items():
             if (provider_slug.lower() == k.lower() or base_slug.lower() == k.lower()
-                or stripped_slug.lower() == k.lower() or stripped_base.lower() == k.lower()):
+                or stripped_slug.lower() == k.lower() or stripped_base.lower() == k.lower()
+                or prefix_stripped_slug.lower() == k.lower() or prefix_stripped_base.lower() == k.lower()):
                 hit = [m for m in self.aa_catalog.models if m.get("slug") == v]
                 if hit:
                     return ModelResolution(provider_model_id=provider_model_id, aa_model=hit[0], method="alias_"+v)

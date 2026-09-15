@@ -66,6 +66,7 @@ def evaluate_model(
     cache: Any | None = None,
     store: ModelInfoStore | None = None,
     fresh_pricing_obs: list[dict[str, Any]] | None = None,
+    catalog_stale: bool = False,
 ) -> dict[str, Any]:
     """Judge one model and apply tiering (thin coordinator + cache seam per #96).
 
@@ -76,6 +77,9 @@ def evaluate_model(
     store holds strong Keeper (slim v2). Hit = strong-only; moderate/weak = miss.
     Pricing stale (>28d) re-averaged via aggregate_pricing, benchmarks gap-fill only,
     raw provider_model_id preserved verbatim for Ephemeral Report.
+
+    catalog_stale: when True (catalog fetched_at > 28d TTL), cached drop results with
+    strong/moderate evidence are reused, but cached keep results are re-evaluated.
     """
     coord = EvaluatorCoordinator(
         provider_name=provider_name,
@@ -86,6 +90,7 @@ def evaluate_model(
         max_score=max_score,
         cache=cache,
         store=store,
+        catalog_stale=catalog_stale,
     )
     return coord.evaluate(model)
 def _llm_error_record(model_id: str, exc: Exception, coding_score: float = 0.0, benchmarks: dict = None) -> dict[str, Any]:
@@ -209,6 +214,13 @@ def discover_single(
         eval_models, dropped_models = _split_by_free_rule(models, provider_name)
         if dropped_models:
             print(f"[{provider_name}] Free-model filter: dropped {len(dropped_models)} non-free, keeping {len(eval_models)} free")
+        elif provider_name in PROBE_FREE_PROVIDERS:
+            # No free via marker/pricing but provider may have free vs paid via live probe (bai, ollama, vyceai, bvg, nvidia)
+            probed_free, probed_paid = _probe_free_models(base_url, api_key, models, provider_name)
+            if probed_paid:
+                eval_models, dropped_models = probed_free, probed_paid
+        if dropped_models:
+            print(f"[{provider_name}] Free-model filter: dropped {len(dropped_models)} non-free, keeping {len(eval_models)} free")
     if not eval_models:
         raise RuntimeError(f"No models to evaluate for {provider_name!r} after filtering (all {len(dropped_models)} dropped)")
     model = pick_tracer_model(eval_models, aa, config.artificial_analysis.min_score)
@@ -247,11 +259,15 @@ def discover_provider(
     models_dev: Any,
     max_workers: int = 8,
     store: ModelInfoStore | None = None,
+    catalog_stale: bool = False,
 ) -> dict[str, list[dict[str, Any]]]:
     """T3 path: evaluate every model for a provider in parallel.
 
     store optional for in-pipeline cache reuse per #96 (strong-only, TTL 28d).
     When provided, evaluate_model early-returns on hit before LLM.
+
+    catalog_stale: when True, cached drops with strong/moderate evidence are
+    reused but cached keeps are re-evaluated (catalog fetched_at > 28d TTL).
     """
     print(f"[{provider_name}] Starting discovery...")
     from .benchmarks import BenchmarkDataCache
@@ -312,6 +328,11 @@ def discover_provider(
             eval_models, dropped_models = _split_by_free_rule(models, provider_name)
             if dropped_models:
                 print(f"[{provider_name}] Free-model filter: dropped {len(dropped_models)} non-free, keeping {len(eval_models)} free")
+            elif provider_name in PROBE_FREE_PROVIDERS:
+                probed_free, probed_paid = _probe_free_models(base_url, api_key, models, provider_name)
+                if probed_paid:
+                    eval_models, dropped_models = probed_free, probed_paid
+                    print(f"[{provider_name}] Probe free filter: dropped {len(dropped_models)} non-free, keeping {len(eval_models)} free")
     except Exception as exc:  # noqa: BLE001 — provider-level failure
         print(f"[{provider_name}] Discovery failed: {exc}")
         return provider_error_result(provider_name, exc)
@@ -343,6 +364,7 @@ def discover_provider(
         max_score=config.artificial_analysis.max_score,
         cache=cache,
         store=store,
+        catalog_stale=catalog_stale,
     )
     result: dict[str, list[dict[str, Any]]] = {"keep": [], "drop": [], "error": []}
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
@@ -379,6 +401,109 @@ def discover_provider(
         for m in dropped_models:
             reason = m.get("_drop_reason", "free-model-rule" if provider.discovery_strategy != "nararouter" else "paid_gated_free")
             print(f"[{provider_name}] SKIP ({reason}) {m['id']}")
+    # --- Sibling heuristic post-pass: promote newer versions without aa_score if older kept exists ---
+    # Handles same-batch siblings where older keep not yet in store during gate evaluation
+    try:
+        import re
+        from llm_discovery.model_matching import ModelNormalizer
+        from llm_discovery.categorize import categorize_model
+        _num_re = re.compile(r"\d+(?:[\.\-]\d+)+")
+        def _num(v: str) -> str:
+            m = _num_re.search(v or "")
+            return m.group(0) if m else ""
+        def _ver_tuple(v: str):
+            parts = re.split(r"[.\-]", v)
+            out=[]
+            for p in parts:
+                mm=re.match(r"(\d+)", p)
+                if mm:
+                    out.append(int(mm.group(1)))
+            return tuple(out)
+        def _base(mid: str) -> str:
+            norm = ModelNormalizer.normalize(mid)
+            base = _num_re.sub("", norm)
+            base = re.sub(r"-+", "-", base).strip("-")
+            return base
+        # Build set of kept bases+versions
+        kept = result.get("keep", [])
+        # For each keep with uncertain tier and no aa_score/coding_score, check older kept
+        # Also check drops that are uncertain? Actually drops with no aa_score due to uncertain tier could be promoted if sibling exists
+        # But spec says newer should be keep if older keep exists, so promote drops with sibling
+        # Check all evaluations in keep + drop where aa_score is None and coding_score is None/uncertain
+        for evaluation in list(result.get("keep", [])) + list(result.get("drop", [])):
+            if evaluation.get("aa_score") is not None:
+                continue
+            if evaluation.get("coding_score") is not None:
+                continue
+            tier = evaluation.get("tier")
+            if tier not in ("uncertain", "drop"):
+                continue
+            mid = evaluation.get("provider_model_id") or evaluation.get("model_id") or ""
+            cur_num = _num(mid if mid else "")
+            # try via signature if direct numeric not found
+            if not cur_num:
+                try:
+                    sig = ModelNormalizer.extract_signature(mid)
+                    cur_num = _num(sig.version)
+                except Exception:
+                    continue
+            if not cur_num:
+                continue
+            cur_ver = _ver_tuple(cur_num)
+            cur_base = _base(mid)
+            promoted = False
+            for k in kept:
+                if k is evaluation:
+                    continue
+                kmid = k.get("provider_model_id") or k.get("model_id") or ""
+                k_base = _base(kmid)
+                if k_base != cur_base:
+                    continue
+                try:
+                    k_sig = ModelNormalizer.extract_signature(kmid)
+                    k_num = _num(k_sig.version) or _num(kmid)
+                except Exception:
+                    k_num = _num(kmid)
+                if not k_num:
+                    continue
+                if _ver_tuple(k_num) < cur_ver:
+                    promoted = True
+                    break
+            # also check store for older kept (covers cross-batch)
+            if not promoted and store is not None:
+                try:
+                    from llm_discovery.policy_gate import _has_older_kept_sibling
+                    if _has_older_kept_sibling(mid, store):
+                        promoted = True
+                except Exception:
+                    pass
+            if promoted:
+                # promote tier to flash via categorize with sibling flag (respects flagship)
+                try:
+                    new_tier = categorize_model(
+                        coding=bool(evaluation.get("coding", True)),
+                        aa_score=None,
+                        coding_score=None,
+                        model_id=mid,
+                        has_older_kept_sibling=True,
+                    )
+                except Exception:
+                    new_tier = "flash"
+                if tier != new_tier:
+                    print(f"[{provider_name}] SIBLING post-promote {mid}: {tier} -> {new_tier} (older kept sibling)")
+                    evaluation["tier"] = new_tier
+                    # if was drop due to uncertain, flip to keep
+                    if evaluation.get("decision") == "drop":
+                        evaluation["decision"] = "keep"
+                        # move between buckets
+                        if evaluation in result.get("drop", []):
+                            result["drop"].remove(evaluation)
+                            result["keep"].append(evaluation)
+                    # append evidence
+                    evaluation.setdefault("evidence", []).append(f"Sibling heuristic (post-pass): newer version of kept model, promoted {tier}->{new_tier}")
+        # also handle store-only older (if kept not in same batch but in store) - already covered inside loop via store check
+    except Exception as e:
+        print(f"[{provider_name}] sibling post-pass failed: {e}")
     for bucket in result.values():
         bucket.sort(key=lambda r: r["provider_model_id"])
     print(f"[{provider_name}] Done: KEEP={len(result['keep'])} DROP={len(result['drop'])} ERROR={len(result['error'])}")
@@ -480,22 +605,89 @@ _provider_error_result = provider_error_result
 FREE_MARKERS = (":free", "-free", "_free", "/free")
 
 
-def _is_free_model(model: dict[str, Any] | str, provider_name: str | None = None) -> bool:
-    """Return True if model is free (ADR 0004 navy-scoped).
+def _is_pricing_free(model: dict[str, Any]) -> bool:
+    """Generic pricing==0 free detection (no hardcoded model names).
 
-    Generic: id contains any FREE_MARKERS.
-    Navy_ai scoped: marker OR premium is False (identity check).
-    Missing/None/string premium -> marker-only fallback. Str model -> marker-only.
+    Only checks prompt/completion/input/output pricing, not ancillary
+    fields like request/image/web_search which are 0 for many paid models
+    (e.g. kilo). Covers prompt/input/output/blended and flattened prices.
     """
+    pricing = model.get("pricing")
+    # Only check relevant pricing keys, not every value in dict
+    relevant_keys = ("prompt", "completion", "input", "output", "input_cache_read", "input_cache_write", "price", "prices", "cost", "price_1m_input_tokens", "price_1m_output_tokens", "price_1m_blended_3_to_1", "prompt_price", "completion_price", "input_price", "output_price")
+    if isinstance(pricing, dict):
+        for k, v in pricing.items():
+            if k not in relevant_keys and "prompt" not in k and "completion" not in k and "input" not in k and "output" not in k and "price" not in k:
+                continue
+            try:
+                if float(v) == 0:
+                    # Need to ensure it's actually prompt/completion/input/output, not request/image
+                    # For kilo, efficient has prompt -1, free has 0, so this distinguishes
+                    return True
+            except (ValueError, TypeError):
+                continue
+    for _k in relevant_keys:
+        val = model.get(_k)
+        if val is not None:
+            try:
+                if float(val) == 0:
+                    return True
+            except (ValueError, TypeError):
+                continue
+        if isinstance(pricing, dict) and _k in pricing:
+            try:
+                if float(pricing[_k]) == 0:
+                    return True
+            except (ValueError, TypeError):
+                continue
+    return False
+
+
+def _is_access_tier_free(model: dict[str, Any]) -> bool:
+    """Check access_tier == free (xkiro: access_tier free vs paid/premium)."""
+    tier = model.get("access_tier")
+    if isinstance(tier, str) and tier.strip().lower() == "free":
+        return True
+    return False
+
+
+def _is_free_model(model: dict[str, Any] | str, provider_name: str | None = None) -> bool:
+    """Return True if model is free (provider-aware, no hardcoded model names).
+
+    Generic: id contains any FREE_MARKERS OR pricing == 0 OR access_tier == free.
+    navy_ai: marker OR premium is False (identity check) OR pricing == 0.
+    llm7: tier==turbo OR marker OR pricing == 0.
+    agnes: marker OR -flash suffix OR pricing == 0.
+    xkiro: no free filtering (keep all) per user request.
+    All other providers (bai, bestvirtualgoods, vyceai, nvidia_nim,
+    ollama_cloud, etc): marker OR pricing == 0 OR access_tier free — no hardcoded allowlists.
+    Missing/None/string premium -> marker/pricing fallback. Str model -> marker-only.
+    """
+    if provider_name == "xkiro":
+        return False
+    # kilo: isFree flag is authoritative
+    if model.get("isFree") is True:
+        return True
     if isinstance(model, dict):
         model_id = str(model.get("id", ""))
         is_marker = any(marker in model_id for marker in FREE_MARKERS)
         if is_marker:
             return True
+
+        # Provider-specific flags (non-name signals)
         if provider_name == "navy_ai" and model.get("premium") is False:
             return True
         if provider_name == "llm7" and model.get("tier") == "turbo":
             return True
+        if provider_name == "agnes" and "-flash" in model_id:
+            return True
+
+        # Generic pricing == 0 — applies to ALL providers (replaces hardcoded BVG list and vyceai/xkiro scoping)
+        if _is_pricing_free(model):
+            return True
+        if _is_access_tier_free(model):
+            return True
+
         return False
     model_id = str(model)
     return any(marker in model_id for marker in FREE_MARKERS)
@@ -512,13 +704,19 @@ def _split_by_free_rule(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Split models into (keep, dropped) by free-model rule (provider-aware).
 
-    Generic (default): if any id contains a free marker (``:free``, ``-free``, ``_free``),
-    only free models kept.
-    Navy_ai (provider_name=="navy_ai"): marker OR premium is False.
-    LLM7 (provider_name=="llm7"): tier==turbo is treated as free.
-    Default provider_name="" => generic marker-only, zero regression for others.
-    Dropped models must NOT be sent to LLM nor written to YAML.
+    Generic (default): if any id contains a free marker OR pricing == 0,
+    only free models kept (pricing check replaces hardcoded allowlists).
+    navy_ai: marker OR premium is False OR pricing == 0.
+    llm7: tier==turbo OR marker OR pricing == 0.
+    agnes: -flash suffix OR marker OR pricing == 0.
+    xkiro: no filtering per user request (keep all 83).
+    All other providers: marker OR pricing == 0 (generic, no hardcoded names).
+    Default provider_name="" => generic marker/pricing, zero regression.
+    Dropped models must NOT be sent to LLM nor written to YAML — free filter
+    always runs before LLM judgement.
     """
+    if provider_name == "xkiro":
+        return models, []
     # Normalize provider_name for _is_free_model (None vs "" both generic)
     pn = provider_name or None
     if not _has_free_name(models, pn):
@@ -545,3 +743,124 @@ def _apply_free_model_rule(
         m["_deterministic_drop"] = True
         m["_drop_reason"] = reason
     return models
+
+
+# Providers where /models gives no pricing/access_tier signal but live probe
+# via /chat/completions can distinguish free (200/400/429) vs paid (402/403
+# deposit/subscription). No hardcoded model names; probe is generic.
+# xkiro dropped per user request — no free filtering (keep all 83).
+PROBE_FREE_PROVIDERS = {"bai", "bestvirtualgoods", "nvidia_nim", "ollama_cloud", "vyceai"}
+# xkiro explicitly excluded from free filtering
+NO_FREE_FILTER_PROVIDERS = {"xkiro"}
+
+
+def _probe_model_is_free(base_url: str, api_key: str, model_id: str, timeout: float = 8.0) -> bool | None:
+    """Probe single model via chat completions to infer free vs paid.
+
+    Returns True=free, False=paid, None=unknown.
+    Free: 200 success, 429 rate-limit, 400 with max_tokens validation.
+    Paid: 402/403 with deposit/subscription, 400 with insufficient balance/quota.
+    404/5xx/timeout -> None.
+    """
+    try:
+        import httpx
+    except ImportError:
+        return None
+    try:
+        url = base_url.rstrip("/") + "/chat/completions"
+        resp = httpx.post(
+            url,
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={"model": model_id, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 5},
+            timeout=timeout,
+        )
+        code = resp.status_code
+        text = resp.text.lower() if resp.text else ""
+        # Paid billing signals take precedence even on 400
+        if any(k in text for k in ("insufficient", "credit", "balance", "quota", "exhausted", "deposit required", "access restricted", "subscription", "activate your plan")):
+            return False
+        if code in (402, 403):
+            return False
+        if code == 200:
+            return True
+        if code == 429:
+            return True
+        if code == 400:
+            # bai free models return 400 max_tokens validation; paid return 400 insufficient balance already handled above
+            if "max_tokens" in text:
+                return True
+            # other 400 with invalid_request but not billing -> treat as free (model exists)
+            if "invalid_request" in text and "max_tokens" not in text:
+                # could be other validation, but still indicates model accessible
+                return True
+            return False
+        if code == 404:
+            return None
+        if 200 <= code < 300:
+            return True
+        if 400 <= code < 500:
+            return False
+        return None
+    except Exception:
+        return None
+
+
+def _probe_free_models(
+    base_url: str,
+    api_key: str,
+    models: list[dict[str, Any]],
+    provider_name: str = "",
+    max_workers: int = 8,
+    timeout: float = 8.0,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Live probe to split free vs paid when /models gives no signal.
+
+    Concurrent probe via ThreadPool. Returns (free, paid). If probe yields
+    no mixed results (all free, all paid, or all unknown), returns (models, [])
+    to indicate no filtering (fallback to keep all). Never hardcodes model names.
+    """
+    if not models:
+        return models, []
+    # Only probe for providers in allowlist to avoid unnecessary calls for others
+    if provider_name not in PROBE_FREE_PROVIDERS:
+        return models, []
+    print(f"[{provider_name}] Probe free filter: probing {len(models)} models via live /chat/completions ...")
+    free: list[dict[str, Any]] = []
+    paid: list[dict[str, Any]] = []
+    unknown: list[dict[str, Any]] = []
+
+    def _check(m: dict[str, Any]) -> tuple[dict[str, Any], bool | None]:
+        mid = str(m.get("id", ""))
+        res = _probe_model_is_free(base_url, api_key, mid, timeout=timeout)
+        return m, res
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(_check, m): m for m in models}
+        for fut in as_completed(futures):
+            m, is_free = fut.result()
+            if is_free is True:
+                free.append(m)
+            elif is_free is False:
+                paid.append(m)
+            else:
+                unknown.append(m)
+    # If probe gave mixed free/paid, use it; else fallback
+    if free and paid:
+        # unknown treated as paid (conservative) or keep? For bai timeout case, unknown -> keep as free? But we treat unknown as paid to avoid inflating.
+        # However timeout for free model (mimo-v2.5) was unknown, would be misclassified as paid. So treat unknown as free if we have some free already?
+        # Instead, keep unknown with free to avoid dropping potentially free models that timed out.
+        # But then we might keep too many. For now, put unknown with free.
+        free.extend(unknown)
+        print(f"[{provider_name}] Probe result: {len(free)} free, {len(paid)} paid (unknown {len(unknown)} treated as free)")
+        return free, paid
+    if free and not paid and not unknown:
+        # all free -> no filtering needed
+        print(f"[{provider_name}] Probe: all {len(free)} models appear free, no filtering")
+        return models, []
+    if not free and paid:
+        # all paid -> no free to keep, keep all to avoid dropping everything (fallback)
+        print(f"[{provider_name}] Probe: all models appear paid, no free detected, keeping all {len(models)}")
+        return models, []
+    # ambiguous (e.g. nvidia all 404 unknown) -> fallback
+    print(f"[{provider_name}] Probe inconclusive (free={len(free)} paid={len(paid)} unknown={len(unknown)}), keeping all")
+    return models, []

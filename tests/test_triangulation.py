@@ -94,6 +94,31 @@ class TestTriangulationGuard:
         rec = gate.apply(llm, _resolution_none(), "chroma-v.46-flash", "chroma", profile=profile)
         assert rec["evidence_level"] == "weak"
 
+    def test_hallucinated_url_non_allowlisted_demoted(self):
+        """Issue #214: https://example.com must NOT bypass triangulation guard."""
+        gate = PolicyGate(min_score=24.0, max_score=45.0, cache=None)
+        profile = _profile_empty()
+        llm = _llm_result(
+            "moderate",
+            ["Supports Python (source: https://example.com/model)"],
+        )
+        rec = gate.apply(llm, _resolution_none(), "test-model", "test", profile=profile)
+        # example.com not in allowlist -> demoted to weak
+        assert rec["evidence_level"] == "weak"
+        assert any("demoted" in e for e in rec["evidence"])
+
+    def test_allowlisted_domain_moderate_kept(self):
+        """Issue #214: allowlisted domain URL keeps moderate."""
+        gate = PolicyGate(min_score=24.0, max_score=45.0, cache=None)
+        profile = _profile_empty()
+        for model, ev in [
+            ("qwen3", "SWE-bench 50% (source: https://huggingface.co/Qwen/Qwen3)"),
+            ("some-model", "AA index 41 (source: https://artificialanalysis.ai/models/some-model)"),
+        ]:
+            llm = _llm_result("moderate", [ev])
+            rec = gate.apply(llm, _resolution_none(), model, "test", profile=profile)
+            assert rec["evidence_level"] == "moderate", ev
+
 
 class TestSystemPromptTriangulation:
     def test_prompt_contains_provider_native_checklist(self):

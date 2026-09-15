@@ -292,7 +292,9 @@ class PolicyGate:
                     if not has_url and getattr(self, "_last_packet_claims", None):
                         has_url = _hvc(self._last_packet_claims, model_id)
                 except Exception:
-                    has_url = any("http" in str(e) for e in evaluation.get("evidence", []))
+                    # Allowlist-only guard: never fall back to substring "http" check (issue #213/#214).
+                    # A URL that is not allowlisted (e.g. https://example.com) must not bypass the guard.
+                    has_url = False
                 if not has_url:
                     # Only demote if LLM claimed moderate without verification
                     if orig_level == "moderate":

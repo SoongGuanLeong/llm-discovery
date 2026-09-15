@@ -165,6 +165,7 @@ class PolicyGate:
         model_id: str,
         provider_name: str,
         profile: Any = None,
+        packet: Any = None,
     ) -> dict[str, Any]:
         """Map LLM judge output + deterministic signals to final evaluation record.
 
@@ -260,9 +261,17 @@ class PolicyGate:
         # --- Hybrid deterministic evidence_level override (issue #35) ---
         # LLM is primary, but deterministic signals promote weak/moderate -> strong/moderate
         # when benchmarks/AA justify it. Never demote LLM strong.
+        # Store packet claims for guard use (#213)
+        _packet_claims = None
+        if packet is not None:
+            _packet_claims = getattr(packet, "provider_claims", None)
+            self._last_packet_claims = _packet_claims
+        else:
+            self._last_packet_claims = None
         orig_level = evaluation.get("evidence_level")
+        _claims_for_det = _packet_claims
         det_level = self._deterministic_evidence_level(
-            verified_score, coding_score, profile
+            verified_score, coding_score, profile, provider_claims=_claims_for_det, model_id=model_id
         )
         final_level = self._max_evidence_level(orig_level, det_level)
         if final_level != orig_level:
@@ -272,12 +281,18 @@ class PolicyGate:
                 f"Evidence level promoted {orig_level}→{final_level} via deterministic signals (aa={verified_score}, coding_score={coding_score})"
             )
 
-        # --- Triangulation guard for no-AA / claim-only moderate without source URL (issue #39) ---
+        # --- Triangulation guard for no-AA / claim-only moderate without source URL (issue #39, hardened to allowlist in #213) ---
         # Never demote LLM strong; only demote unverified claim-only moderate -> weak to prevent hallucination.
         if evaluation.get("evidence_level") == "moderate" and det_level == "weak":
             # No AA and no benchmark scores means deterministic weak; verify URL exists
             if verified_score is None and not (profile.scores if profile else {}):
-                has_url = any("http" in str(e) for e in evaluation.get("evidence", []))
+                try:
+                    from .verified_claim import evidence_has_allowlisted_url, has_verified_claim as _hvc
+                    has_url = evidence_has_allowlisted_url(evaluation.get("evidence", []))
+                    if not has_url and getattr(self, "_last_packet_claims", None):
+                        has_url = _hvc(self._last_packet_claims, model_id)
+                except Exception:
+                    has_url = any("http" in str(e) for e in evaluation.get("evidence", []))
                 if not has_url:
                     # Only demote if LLM claimed moderate without verification
                     if orig_level == "moderate":
@@ -337,8 +352,9 @@ class PolicyGate:
             evaluation["tier"] = "flash"
             evaluation["decision"] = "keep"
             evaluation["coding"] = True
+            evaluation["evidence_level"] = "strong"
             evaluation.setdefault("evidence", []).append("Router model: always keep (routing meta-model)")
-            print(f"  [evaluate] {model_id}: ROUTER override -> KEEP flash")
+            print(f"  [evaluate] {model_id}: ROUTER override -> KEEP flash strong")
             return evaluation
 
         # --- Python policy: map LLM decision to final decision ---
@@ -381,11 +397,12 @@ class PolicyGate:
         return evaluation
 
     @staticmethod
-    def _deterministic_evidence_level(verified_score, coding_score, profile) -> str:
+    def _deterministic_evidence_level(verified_score, coding_score, profile, provider_claims=None, model_id=None) -> str:
         """Compute deterministic evidence level from AA + coding_score + coverage.
 
         Hybrid promotion: LLM weak/moderate promoted when deterministic signals justify.
         Never demotes LLM strong. Thresholds align with categorize min 24 / max 45.
+        Verified provider claim (#213) promotes weak->moderate only when attributable + allowlisted URL + specific, never strong.
         """
         # Strong: frontier AA alone (>=55) or AA+benchmark combo or high coding_score
         if coding_score is not None and coding_score >= 45:
@@ -417,9 +434,25 @@ class PolicyGate:
                 sc = val.get("score") if isinstance(val, dict) else getattr(val, "score", None)
                 if sc is not None and sc >= 30:
                     return "moderate"
+            # Verified provider claim promotion (#213): weak->moderate only, never strong
+            if provider_claims and model_id:
+                try:
+                    from .verified_claim import has_verified_claim
+                    if has_verified_claim(provider_claims, model_id):
+                        return "moderate"
+                except Exception:
+                    pass
         else:
             if verified_score is not None and verified_score >= 24:
                 return "moderate"
+        # Verified provider claim promotion (#213): weak->moderate only, never strong
+        if provider_claims and model_id:
+            try:
+                from .verified_claim import has_verified_claim
+                if has_verified_claim(provider_claims, model_id):
+                    return "moderate"
+            except Exception:
+                pass
         return "weak"
 
     @staticmethod

@@ -34,6 +34,7 @@ class ProviderClaim:
     source: str
     category: EvidenceCategory = EvidenceCategory.CODING
     strength: EvidencePolarity = EvidencePolarity.NEUTRAL
+    url: str | None = None
 
 
 @dataclass
@@ -69,7 +70,7 @@ class EvidencePacket:
             "model_id": self.model_id,
             "provider": self.provider,
             "benchmarks": [e.to_summary() for e in self.benchmarks],
-            "provider_claims": [c.claim for c in self.provider_claims],
+            "provider_claims": [c.claim if not c.url else f"{c.claim} (source: {c.url})" for c in self.provider_claims],
             "deterministic_flags": self.deterministic_flags,
             "artificial_analysis": self.aa_match,
             "pricing": self.pricing,

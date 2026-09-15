@@ -161,7 +161,13 @@ class EvaluatorCoordinator:
         except Exception as exc:
             return self._llm_error_record(model_id, exc)
         gate = PolicyGate(self.min_score, self.max_score, self.cache, store=self.store)
-        result = gate.apply(llm_result, resolution, model_id, self.provider_name)
+        # Build profile for gate (dedup) and pass packet for verified-claim promotion (#213)
+        try:
+            from .benchmarks import build_benchmark_profile
+            _profile = build_benchmark_profile(model_id, self.provider_name, self.cache)
+        except Exception:
+            _profile = None
+        result = gate.apply(llm_result, resolution, model_id, self.provider_name, profile=_profile, packet=packet)
         if self.store is not None and result.get("decision") == "keep":
             try:
                 ok, _ = is_accurate_enough(result)

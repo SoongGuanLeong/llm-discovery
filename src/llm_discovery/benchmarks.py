@@ -270,10 +270,18 @@ class BenchmarkDataCache:
         norm_slug = _normalize_model_key(provider_slug)
         if not norm_slug:
             return None
-        for alt in (norm_slug, norm_slug.replace(".", "-"), re.sub(r"(\\d)-(\\d)", r"\1.\2", norm_slug)):
+        for alt in (norm_slug, norm_slug.replace(".", "-"), re.sub(r"(\d)-(\d)", r"\1.\2", norm_slug)):
             key = self._norm_index.get(alt)
             if key is not None and key in self._data:
                 return self._data[key]["benchmarks"]
+        # Conservative date-suffix fallback: strip trailing -YYYY or -MMDD if base exists (e.g. deepseek-v4-pro-0813 -> deepseek-v4-pro)
+        # Only when direct norm missed and base without date is distinct entry; never collapses two dated variants.
+        date_stripped = re.sub(r"-\d{4}$", "", norm_slug)
+        if date_stripped != norm_slug:
+            for alt in (date_stripped, date_stripped.replace(".", "-"), re.sub(r"(\d)-(\d)", r"\1.\2", date_stripped)):
+                key = self._norm_index.get(alt)
+                if key is not None and key in self._data:
+                    return self._data[key]["benchmarks"]
         return None
 
     def get_raw(self, model_id: str) -> list:
@@ -292,10 +300,16 @@ class BenchmarkDataCache:
         norm_slug = _normalize_model_key(provider_slug)
         if not norm_slug:
             return []
-        for alt in (norm_slug, norm_slug.replace(".", "-"), re.sub(r"(\\d)-(\\d)", r"\1.\2", norm_slug)):
+        for alt in (norm_slug, norm_slug.replace(".", "-"), re.sub(r"(\d)-(\d)", r"\1.\2", norm_slug)):
             key = self._norm_index.get(alt)
             if key is not None and key in self._data:
                 return self._data[key].get("raw_benchmarks", [])
+        date_stripped = re.sub(r"-\d{4}$", "", norm_slug)
+        if date_stripped != norm_slug:
+            for alt in (date_stripped, date_stripped.replace(".", "-"), re.sub(r"(\d)-(\d)", r"\1.\2", date_stripped)):
+                key = self._norm_index.get(alt)
+                if key is not None and key in self._data:
+                    return self._data[key].get("raw_benchmarks", [])
         return []
 
     def collect_from_web(self, urls: dict[str, str]) -> None:
@@ -371,6 +385,11 @@ def _normalize_model_key(name: str) -> str:
     name = name.lower().strip()
     # Remove provider prefix (everything before last /)
     name = re.sub(r"^.+?/", "", name)
+    # Strip AiHubMix vendor prefixes (coding-, xiaomi-) before other prefixes — provider-tag only, same base model
+    for _prefix in ("coding-", "xiaomi-"):
+        if name.startswith(_prefix):
+            name = name[len(_prefix):]
+            break
     # Also remove common provider prefixes from start if no / present
     for prefix in ("nvidia-", "llama-", "minimax-", "poolside-", "stepfun-", "thinkingmachines-"):
         if name.startswith(prefix):

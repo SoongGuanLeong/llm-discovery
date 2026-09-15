@@ -139,10 +139,33 @@ class EvidenceCollector:
                 coding_keywords = ("coding", "code generation", "software engineering",
                                  "agentic", "programming", "developer")
                 if any(kw in desc for kw in coding_keywords):
+                    # Capture first-party URL with owner-matching via same normalization
+                    url = None
+                    try:
+                        from .verified_claim import is_allowlisted_url, is_owner_matched_url
+                        candidates: list[str] = []
+                        for w in (md_model.get("weights") or []):
+                            u = w.get("url") if isinstance(w, dict) else None
+                            if u and isinstance(u, str) and u.startswith("http"):
+                                candidates.append(u)
+                        for b in (md_model.get("benchmarks") or []):
+                            src = b.get("source") if isinstance(b, dict) else None
+                            if src and isinstance(src, str) and src.startswith("http"):
+                                candidates.append(src)
+                        for cand in candidates:
+                            if not is_allowlisted_url(cand):
+                                continue
+                            if not is_owner_matched_url(cand, model_id):
+                                continue
+                            url = cand
+                            break
+                    except Exception:
+                        url = None
                     packet.provider_claims.append(ProviderClaim(
                         claim=md_model.get("description", "")[:200],
                         source="models_dev",
                         strength=EvidencePolarity.POSITIVE,
+                        url=url,
                     ))
 
         # --- Benchmark cache ---

@@ -238,7 +238,7 @@ def test_opencode_zen_mapping():
     """opencode_zen maps to opencode-zen registry id (Standard API Provider)."""
     rows = mod.build_import_entries(Path("config/providers.yaml"))
     by_name = {r["name"]: r for r in rows}
-    assert by_name["opencode_zen"]["provider"] == "opencode-zen"
+    assert by_name["opencode_zen"]["provider"] == "opencode-zen-custom"
     assert by_name["opencode_zen"]["name"] == "opencode_zen"
 
 

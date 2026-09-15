@@ -1,6 +1,40 @@
 {
   "version": 2,
   "models": {
+    "agnes-2-5-pro-beta": {
+      "benchmarks": {
+        "scores": {},
+        "raw_benchmarks": []
+      },
+      "pricing": {
+        "blended": 0.15,
+        "input": 0.1,
+        "output": 0.3,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 0.15,
+        "price_1m_input_tokens": 0.1,
+        "price_1m_output_tokens": 0.3
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:33:12.423734+00:00",
+        "last_updated": "2026-09-15T04:33:12.423734+00:00",
+        "version": 2
+      },
+      "judge": {
+        "evidence_level": "moderate",
+        "evidence": [
+          "Artificial Analysis match: Agnes 2.5 Pro Beta with Intelligence Index 49.1 (source: f3a0e101-086f-44b3-a1b2-d23498f9716b)",
+          "No coding benchmarks found for this model.",
+          "Pricing blended $0.15/1M, intelligence per dollar 389.7 influenced tier=drop"
+        ],
+        "confidence": 0.75,
+        "coding": false,
+        "decision": "drop",
+        "canonical_name": "Agnes 2.5 Flash",
+        "tier": "drop",
+        "judge_model": "agnes-2.5-flash"
+      }
+    },
     "agnes-2.5-flash": {
       "benchmarks": {
         "scores": {},
@@ -1145,6 +1179,62 @@
         "tier": "max"
       }
     },
+    "deepseek-r1": {
+      "benchmarks": {
+        "scores": {
+          "aa_intelligence": {
+            "score": 20.4,
+            "metric": "index",
+            "source": "artificial_analysis"
+          }
+        },
+        "raw_benchmarks": [],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.08
+      },
+      "pricing": {
+        "blended": 1.763,
+        "input": 1.35,
+        "output": 3,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 1.763,
+        "price_1m_input_tokens": 1.35,
+        "price_1m_output_tokens": 3
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:38:38.042244+00:00",
+        "last_updated": "2026-09-15T04:38:38.042244+00:00",
+        "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "AA Intelligence Index 20.4 matches DeepSeek R1 0528 but is below the 24.0 minimum threshold.",
+          "Pricing blended $1.76/1M, intelligence per dollar 11.3 influenced tier=drop",
+          "Model assessed as non-coding (LLM + deterministic); forced drop"
+        ],
+        "confidence": 1.0,
+        "coding": false,
+        "decision": "drop",
+        "canonical_name": "deepseek-r1",
+        "tier": "drop",
+        "judge_model": "agnes-2.5-flash"
+      }
+    },
+    "deepseek-r1-distill-qwen-7b": {
+      "benchmarks": {
+        "scores": {},
+        "raw_benchmarks": []
+      },
+      "pricing": {
+        "per_provider_overrides": {}
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:45:34.822658+00:00",
+        "last_updated": "2026-09-15T04:45:34.822658+00:00",
+        "version": 2
+      }
+    },
     "deepseek-v3.1": {
       "benchmarks": {
         "scores": {
@@ -2234,6 +2324,20 @@
         "tier": "drop"
       }
     },
+    "gemini-3.8-flash": {
+      "benchmarks": {
+        "scores": {},
+        "raw_benchmarks": []
+      },
+      "pricing": {
+        "per_provider_overrides": {}
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:44:12.215140+00:00",
+        "last_updated": "2026-09-15T04:44:12.215140+00:00",
+        "version": 2
+      }
+    },
     "gemini-embedding-001": {
       "benchmarks": {
         "scores": {},
@@ -2306,6 +2410,53 @@
         "tier": "drop"
       }
     },
+    "gemma-3-12b": {
+      "benchmarks": {
+        "scores": {
+          "aa_intelligence": {
+            "score": 5.5,
+            "metric": "index",
+            "source": "artificial_analysis"
+          },
+          "aa_coding": {
+            "score": 5.8,
+            "metric": "index",
+            "source": "artificial_analysis"
+          }
+        },
+        "raw_benchmarks": [],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.08
+      },
+      "pricing": {
+        "blended": 0,
+        "input": 0,
+        "output": 0,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 0,
+        "price_1m_input_tokens": 0,
+        "price_1m_output_tokens": 0
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:38:39.860814+00:00",
+        "last_updated": "2026-09-15T04:38:39.860814+00:00",
+        "version": 2
+      }
+    },
+    "gemma-4-26b-a4b-it": {
+      "benchmarks": {
+        "scores": {},
+        "raw_benchmarks": []
+      },
+      "pricing": {
+        "per_provider_overrides": {}
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:44:09.417605+00:00",
+        "last_updated": "2026-09-15T04:44:09.417605+00:00",
+        "version": 2
+      }
+    },
     "gemma4:31b": {
       "benchmarks": {
         "scores": {
@@ -2349,6 +2500,102 @@
         "coding": true,
         "decision": "drop",
         "tier": "drop"
+      }
+    },
+    "glm-4-7": {
+      "benchmarks": {
+        "scores": {
+          "aa_intelligence": {
+            "score": 34.5,
+            "metric": "index",
+            "source": "artificial_analysis"
+          },
+          "aa_coding": {
+            "score": 45.3,
+            "metric": "index",
+            "source": "artificial_analysis"
+          }
+        },
+        "raw_benchmarks": [],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.08
+      },
+      "pricing": {
+        "blended": 1,
+        "input": 0.6,
+        "output": 2.2,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 1,
+        "price_1m_input_tokens": 0.6,
+        "price_1m_output_tokens": 2.2
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:38:40.376157+00:00",
+        "last_updated": "2026-09-15T04:38:40.376157+00:00",
+        "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "AA Intelligence 34.5 (≥24 threshold) and AA Coding 45.3 (≥45) both verified on Artificial Analysis match.",
+          "Pricing is very competitive at $1/M blended tokens.",
+          "Pricing blended $1.00/1M, intelligence per dollar 32.9 influenced tier=drop"
+        ],
+        "confidence": 0.88,
+        "coding": true,
+        "decision": "drop",
+        "canonical_name": "GLM-4.7",
+        "tier": "drop",
+        "judge_model": "agnes-2.5-flash"
+      }
+    },
+    "glm-4-7-flash": {
+      "benchmarks": {
+        "scores": {
+          "swe_bench_verified": {
+            "score": 59.2,
+            "metric": "resolved",
+            "source": "https://huggingface.co/zai-org/GLM-4.7-Flash"
+          }
+        },
+        "raw_benchmarks": [
+          {
+            "name": "SWE-Bench Verified",
+            "score": 59.2,
+            "metric": "resolved",
+            "source": "https://huggingface.co/zai-org/GLM-4.7-Flash"
+          }
+        ],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.08
+      },
+      "pricing": {
+        "blended": 0.153,
+        "input": 0.07,
+        "output": 0.4,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 0.153,
+        "price_1m_input_tokens": 0.07,
+        "price_1m_output_tokens": 0.4
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:38:44.822166+00:00",
+        "last_updated": "2026-09-15T04:38:44.822166+00:00",
+        "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "AA Intelligence score of 23.3 is below the configured minimum of 24.0, triggering a mandatory drop.",
+          "SWE-Bench Verified score of 59.2 provides strong coding evidence but cannot override the below-minimum AA requirement.",
+          "Pricing blended $0.15/1M, intelligence per dollar 291.6 influenced tier=flash"
+        ],
+        "confidence": 0.95,
+        "coding": true,
+        "decision": "drop",
+        "canonical_name": "GLM-4.7-Flash",
+        "tier": "flash",
+        "judge_model": "agnes-2.5-flash"
       }
     },
     "glm-4.6v-flash": {
@@ -2565,6 +2812,89 @@
         "tier": "flash"
       }
     },
+    "glm-5-1": {
+      "benchmarks": {
+        "scores": {},
+        "raw_benchmarks": []
+      },
+      "pricing": {
+        "blended": 1.981,
+        "input": 1.285,
+        "output": 4.07,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 1.981,
+        "price_1m_input_tokens": 1.285,
+        "price_1m_output_tokens": 4.07
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:38:47.864286+00:00",
+        "last_updated": "2026-09-15T04:38:47.864286+00:00",
+        "version": 2
+      },
+      "judge": {
+        "evidence_level": "moderate",
+        "evidence": [
+          "AA score 41 above minimum 24 but no coding benchmarks available.",
+          "Provider claims coding capability without verified source URL.",
+          "Pricing blended $1.98/1M, intelligence per dollar 32.0 influenced tier=drop"
+        ],
+        "confidence": 0.5,
+        "coding": false,
+        "decision": "drop",
+        "canonical_name": "GLM-5.1 (Reasoning)",
+        "tier": "drop",
+        "judge_model": "agnes-2.5-flash"
+      }
+    },
+    "gpt-4-1": {
+      "benchmarks": {
+        "scores": {
+          "aider_polyglot": {
+            "score": 52.4,
+            "metric": "percent correct",
+            "source": "https://aider.chat/docs/leaderboards/"
+          }
+        },
+        "raw_benchmarks": [
+          {
+            "name": "Aider Polyglot",
+            "score": 52.4,
+            "metric": "percent correct",
+            "source": "https://aider.chat/docs/leaderboards/"
+          }
+        ],
+        "benchmark_coverage": 0.0,
+        "coverage_with_supplements": 0.08
+      },
+      "pricing": {
+        "blended": 3.5,
+        "input": 2,
+        "output": 8,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 3.5,
+        "price_1m_input_tokens": 2,
+        "price_1m_output_tokens": 8
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:38:46.065754+00:00",
+        "last_updated": "2026-09-15T04:38:46.065754+00:00",
+        "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "AA GPT-4.1 matched at 19.6, below 24.0 minimum threshold",
+          "Aider Polyglot 52.4% indicates coding capability",
+          "Evidence level promoted moderate→strong via deterministic signals (aa=19.6, coding_score=52.4)"
+        ],
+        "confidence": 0.9,
+        "coding": true,
+        "decision": "drop",
+        "canonical_name": "gpt-4.1-free",
+        "tier": "flash",
+        "judge_model": "agnes-2.5-flash"
+      }
+    },
     "gpt-4.1-mini": {
       "benchmarks": {
         "scores": {
@@ -2612,6 +2942,67 @@
         "tier": "drop"
       }
     },
+    "gpt-4o": {
+      "benchmarks": {
+        "scores": {
+          "aa_intelligence": {
+            "score": 11.1,
+            "metric": "index",
+            "source": "artificial_analysis"
+          }
+        },
+        "raw_benchmarks": [],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.08
+      },
+      "pricing": {
+        "blended": 4.375,
+        "input": 2.5,
+        "output": 10,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 4.375,
+        "price_1m_input_tokens": 2.5,
+        "price_1m_output_tokens": 10
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:45:32.763769+00:00",
+        "last_updated": "2026-09-15T04:45:32.763769+00:00",
+        "version": 2
+      }
+    },
+    "gpt-4o-mini": {
+      "benchmarks": {
+        "scores": {
+          "aa_intelligence": {
+            "score": 6.7,
+            "metric": "index",
+            "source": "artificial_analysis"
+          },
+          "aa_coding": {
+            "score": 11.4,
+            "metric": "index",
+            "source": "artificial_analysis"
+          }
+        },
+        "raw_benchmarks": [],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.08
+      },
+      "pricing": {
+        "blended": 0.262,
+        "input": 0.15,
+        "output": 0.6,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 0.262,
+        "price_1m_input_tokens": 0.15,
+        "price_1m_output_tokens": 0.6
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:44:13.659138+00:00",
+        "last_updated": "2026-09-15T04:44:13.659138+00:00",
+        "version": 2
+      }
+    },
     "gpt-4o-mini-tts": {
       "benchmarks": {
         "scores": {},
@@ -2634,6 +3025,145 @@
         "coding": true,
         "decision": "drop",
         "tier": "drop"
+      }
+    },
+    "gpt-5-6-luna": {
+      "benchmarks": {
+        "scores": {
+          "terminal_bench": {
+            "score": 84.7,
+            "metric": "success rate",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          "deepswe": {
+            "score": 67.2,
+            "metric": "resolve rate",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          "gpqa_diamond": {
+            "score": 92.3,
+            "metric": "accuracy",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          "osworld": {
+            "score": 45.6,
+            "metric": "success rate",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          "aa_intelligence": {
+            "score": 51.2,
+            "metric": "index score",
+            "source": "https://artificialanalysis.ai/articles/gpt-5-6-has-landed"
+          },
+          "aa_agentic": {
+            "score": 74.6,
+            "metric": "index score",
+            "source": "https://artificialanalysis.ai/articles/gpt-5-6-has-landed"
+          }
+        },
+        "raw_benchmarks": [
+          {
+            "name": "SWE-Bench Pro",
+            "score": 62.7,
+            "metric": "resolve rate",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          {
+            "name": "Terminal-Bench",
+            "score": 84.7,
+            "metric": "success rate",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          {
+            "name": "DeepSWE",
+            "score": 67.2,
+            "metric": "resolve rate",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          {
+            "name": "GPQA Diamond",
+            "score": 92.3,
+            "metric": "accuracy",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          {
+            "name": "FrontierMath",
+            "score": 78.6,
+            "metric": "accuracy",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          {
+            "name": "BrowseComp",
+            "score": 83.3,
+            "metric": "accuracy",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          {
+            "name": "OSWorld",
+            "score": 45.6,
+            "metric": "success rate",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          {
+            "name": "MMMU Pro",
+            "score": 78.4,
+            "metric": "accuracy",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          {
+            "name": "Agents' Last Exam",
+            "score": 50.3,
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          {
+            "name": "Toolathlon",
+            "score": 53.4,
+            "metric": "success rate",
+            "source": "https://openai.com/index/gpt-5-6/"
+          },
+          {
+            "name": "Artificial Analysis Intelligence Index",
+            "score": 51.2,
+            "metric": "index score",
+            "source": "https://artificialanalysis.ai/articles/gpt-5-6-has-landed"
+          },
+          {
+            "name": "Artificial Analysis Coding Agent Index",
+            "score": 74.6,
+            "metric": "index score",
+            "source": "https://artificialanalysis.ai/articles/gpt-5-6-has-landed"
+          }
+        ],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.33
+      },
+      "pricing": {
+        "blended": 0.45,
+        "input": 0.2,
+        "output": 1.2,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 0.45,
+        "price_1m_input_tokens": 0.2,
+        "price_1m_output_tokens": 1.2
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:45:39.138143+00:00",
+        "last_updated": "2026-09-15T04:45:39.138143+00:00",
+        "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "AA Intelligence score 52.3 with strong coding benchmarks (Terminal-Bench 84.7%, DeepSWE 67.2%, SWE-Bench Pro 62.7%) (source: https://openai.com/index/gpt-5-6/)",
+          "Artificial Analysis Agentic Coding Index 74.6 confirms strong agentic coding capability (source: https://artificialanalysis.ai/articles/gpt-5-6-has-landed)",
+          "Pricing blended $0.45/1M, intelligence per dollar 141.8 influenced tier=flash"
+        ],
+        "confidence": 0.92,
+        "coding": true,
+        "decision": "keep",
+        "canonical_name": "GPT-5.6 Luna (max)",
+        "tier": "flash",
+        "judge_model": "agnes-2.5-flash"
       }
     },
     "gpt-5-mini": {
@@ -3130,6 +3660,20 @@
         "coding": true,
         "decision": "keep",
         "tier": "max"
+      }
+    },
+    "gpt-6-astra": {
+      "benchmarks": {
+        "scores": {},
+        "raw_benchmarks": []
+      },
+      "pricing": {
+        "per_provider_overrides": {}
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:45:46.521708+00:00",
+        "last_updated": "2026-09-15T04:45:46.521708+00:00",
+        "version": 2
       }
     },
     "gpt-oss-120b": {
@@ -3894,6 +4438,93 @@
         "tier": "drop"
       }
     },
+    "kimi-k2-6": {
+      "benchmarks": {
+        "scores": {
+          "swe_bench_verified": {
+            "score": 80.2,
+            "metric": "resolved",
+            "source": "https://huggingface.co/moonshotai/Kimi-K2.6"
+          },
+          "aa_agentic": {
+            "score": 50.5,
+            "metric": "average pass@1",
+            "source": "https://artificialanalysis.ai/agents/coding-agents"
+          },
+          "swe_atlas_codebase_qna": {
+            "score": 59.8,
+            "metric": "pass@1",
+            "source": "https://artificialanalysis.ai/agents/coding-agents"
+          },
+          "terminal_bench": {
+            "score": 64.3,
+            "metric": "pass@1",
+            "source": "https://artificialanalysis.ai/agents/coding-agents"
+          }
+        },
+        "raw_benchmarks": [
+          {
+            "name": "SWE-Bench Verified",
+            "score": 80.2,
+            "metric": "resolved",
+            "source": "https://huggingface.co/moonshotai/Kimi-K2.6"
+          },
+          {
+            "name": "Artificial Analysis Coding Agent Index",
+            "score": 50.5,
+            "metric": "average pass@1",
+            "source": "https://artificialanalysis.ai/agents/coding-agents"
+          },
+          {
+            "name": "SWE-Atlas Codebase QnA",
+            "score": 59.8,
+            "metric": "pass@1",
+            "source": "https://artificialanalysis.ai/agents/coding-agents"
+          },
+          {
+            "name": "SWE-Bench Pro",
+            "score": 27.3,
+            "metric": "pass@1",
+            "source": "https://artificialanalysis.ai/agents/coding-agents"
+          },
+          {
+            "name": "Terminal-Bench",
+            "score": 64.3,
+            "metric": "pass@1",
+            "source": "https://artificialanalysis.ai/agents/coding-agents"
+          }
+        ],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.17
+      },
+      "pricing": {
+        "blended": 1.712,
+        "input": 0.95,
+        "output": 4,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 1.712,
+        "price_1m_input_tokens": 0.95,
+        "price_1m_output_tokens": 4
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:44:11.323576+00:00",
+        "last_updated": "2026-09-15T04:44:11.323576+00:00",
+        "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "AA Intelligence 45.1 with SWE-Bench Verified 80.2 and Terminal-Bench 64.3 (source: https://huggingface.co/moonshotai/Kimi-K2.6, https://artificialanalysis.ai/agents/coding-agents)",
+          "Pricing blended $1.71/1M, intelligence per dollar 41.8 influenced tier=max"
+        ],
+        "confidence": 0.92,
+        "coding": true,
+        "decision": "keep",
+        "canonical_name": "Kimi K2.6",
+        "tier": "max",
+        "judge_model": "agnes-2.5-flash"
+      }
+    },
     "kimi-k2-thinking": {
       "benchmarks": {
         "scores": {
@@ -4424,6 +5055,86 @@
         "tier": "drop"
       }
     },
+    "lfm2-5-2-6b": {
+      "benchmarks": {
+        "scores": {
+          "aa_intelligence": {
+            "score": 11,
+            "metric": "index",
+            "source": "artificial_analysis"
+          },
+          "aa_coding": {
+            "score": 7.7,
+            "metric": "index",
+            "source": "artificial_analysis"
+          }
+        },
+        "raw_benchmarks": [],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.08
+      },
+      "pricing": {
+        "blended": 0,
+        "input": 0,
+        "output": 0,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 0,
+        "price_1m_input_tokens": 0,
+        "price_1m_output_tokens": 0
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:33:07.949778+00:00",
+        "last_updated": "2026-09-15T04:33:07.949778+00:00",
+        "version": 2
+      }
+    },
+    "ling-3-0-tiny": {
+      "benchmarks": {
+        "scores": {
+          "aa_intelligence": {
+            "score": 24.5,
+            "metric": "index",
+            "source": "artificial_analysis"
+          },
+          "aa_coding": {
+            "score": 26.5,
+            "metric": "index",
+            "source": "artificial_analysis"
+          }
+        },
+        "raw_benchmarks": [],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.08
+      },
+      "pricing": {
+        "blended": 0,
+        "input": 0,
+        "output": 0,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 0,
+        "price_1m_input_tokens": 0,
+        "price_1m_output_tokens": 0
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:33:10.104451+00:00",
+        "last_updated": "2026-09-15T04:33:10.104451+00:00",
+        "version": 2
+      },
+      "judge": {
+        "evidence_level": "moderate",
+        "evidence": [
+          "AA Intelligence score 24.5 meets the minimum threshold of 24.0 with verified coding index of 26.5",
+          "Provider is aihubmix (third-party re-host), no direct coding benchmarks found but AA match is confirmed",
+          "Pricing blended $0.00/1M, intelligence per dollar 245.0 influenced tier=drop"
+        ],
+        "confidence": 0.7,
+        "coding": true,
+        "decision": "drop",
+        "canonical_name": "Ling 3.0 Tiny",
+        "tier": "drop",
+        "judge_model": "agnes-2.5-flash"
+      }
+    },
     "llama-2-7b-chat-hf-lora": {
       "benchmarks": {
         "scores": {},
@@ -4454,6 +5165,20 @@
         "coding": true,
         "decision": "drop",
         "tier": "drop"
+      }
+    },
+    "llama-3.1-8b": {
+      "benchmarks": {
+        "scores": {},
+        "raw_benchmarks": []
+      },
+      "pricing": {
+        "per_provider_overrides": {}
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:45:36.369824+00:00",
+        "last_updated": "2026-09-15T04:45:36.369824+00:00",
+        "version": 2
       }
     },
     "llama-3.1-nemoguard-8b-content-safety": {
@@ -4857,6 +5582,40 @@
         "tier": "drop"
       }
     },
+    "mimo-v2-5-0424": {
+      "benchmarks": {
+        "scores": {},
+        "raw_benchmarks": []
+      },
+      "pricing": {
+        "blended": 0.175,
+        "input": 0.14,
+        "output": 0.28,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 0.175,
+        "price_1m_input_tokens": 0.14,
+        "price_1m_output_tokens": 0.28
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:38:44.966350+00:00",
+        "last_updated": "2026-09-15T04:38:44.966350+00:00",
+        "version": 2
+      },
+      "judge": {
+        "evidence_level": "moderate",
+        "evidence": [
+          "AA Intelligence Index of 38 confirms moderate general capability above minimum threshold of 24",
+          "Provider claims mention coding-agent execution but no benchmarks or programming language evidence available to verify coding capability",
+          "Pricing blended $0.17/1M, intelligence per dollar 268.1 influenced tier=drop"
+        ],
+        "confidence": 0.7,
+        "coding": false,
+        "decision": "drop",
+        "canonical_name": "MiMo-V2.5",
+        "tier": "drop",
+        "judge_model": "agnes-2.5-flash"
+      }
+    },
     "mimo-v2.5": {
       "benchmarks": {
         "scores": {},
@@ -5003,6 +5762,122 @@
         "coding": true,
         "decision": "keep",
         "tier": "flash"
+      }
+    },
+    "minimax-m2-5": {
+      "benchmarks": {
+        "scores": {
+          "swe_bench_verified": {
+            "score": 75.8,
+            "metric": "resolved",
+            "source": "https://www.swebench.com/"
+          },
+          "swe_atlas_codebase_qna": {
+            "score": 10.3,
+            "metric": "score",
+            "source": "https://labs.scale.com/leaderboard/sweatlas-qna"
+          },
+          "swe_atlas_refactoring": {
+            "score": 19.52,
+            "metric": "score",
+            "source": "https://labs.scale.com/leaderboard/sweatlas-refactoring"
+          },
+          "swe_atlas_test_writing": {
+            "score": 18.6,
+            "metric": "score",
+            "source": "https://labs.scale.com/leaderboard/sweatlas-tw"
+          }
+        },
+        "raw_benchmarks": [
+          {
+            "name": "SWE-Bench Verified",
+            "score": 75.8,
+            "metric": "resolved",
+            "source": "https://www.swebench.com/"
+          },
+          {
+            "name": "SWE-Atlas Codebase QnA",
+            "score": 10.3,
+            "metric": "score",
+            "source": "https://labs.scale.com/leaderboard/sweatlas-qna"
+          },
+          {
+            "name": "SWE-Atlas Refactoring",
+            "score": 19.52,
+            "metric": "score",
+            "source": "https://labs.scale.com/leaderboard/sweatlas-refactoring"
+          },
+          {
+            "name": "SWE-Atlas Test Writing",
+            "score": 18.6,
+            "metric": "score",
+            "source": "https://labs.scale.com/leaderboard/sweatlas-tw"
+          }
+        ],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.08
+      },
+      "pricing": {
+        "blended": 0.525,
+        "input": 0.3,
+        "output": 1.2,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 0.525,
+        "price_1m_input_tokens": 0.3,
+        "price_1m_output_tokens": 1.2
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:44:14.276425+00:00",
+        "last_updated": "2026-09-15T04:44:14.276425+00:00",
+        "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "AA score 34.5 with SWE-Bench Verified 75.8 (source: https://www.swebench.com/)",
+          "Confirmed as provider-native MiniMax coding model for agent workflows",
+          "Pricing blended $0.53/1M, intelligence per dollar 131.8 influenced tier=flash"
+        ],
+        "confidence": 0.95,
+        "coding": true,
+        "decision": "keep",
+        "canonical_name": "MiniMax-M2.5",
+        "tier": "flash",
+        "judge_model": "agnes-2.5-flash"
+      }
+    },
+    "minimax-m2-7": {
+      "benchmarks": {
+        "scores": {},
+        "raw_benchmarks": []
+      },
+      "pricing": {
+        "blended": 0.525,
+        "input": 0.3,
+        "output": 1.2,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 0.525,
+        "price_1m_input_tokens": 0.3,
+        "price_1m_output_tokens": 1.2
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:44:16.378655+00:00",
+        "last_updated": "2026-09-15T04:44:16.378655+00:00",
+        "version": 2
+      },
+      "judge": {
+        "evidence_level": "moderate",
+        "evidence": [
+          "AA score 38.9 confirmed for MiniMax-M2.7 (above minimum 24).",
+          "No coding benchmarks found; provider claim unverified without source URL.",
+          "Pricing blended $0.53/1M, intelligence per dollar 107.4 influenced tier=drop"
+        ],
+        "confidence": 0.75,
+        "coding": false,
+        "decision": "drop",
+        "canonical_name": "MiniMax-M2.7",
+        "tier": "drop",
+        "judge_model": "agnes-2.5-flash"
       }
     },
     "minimax-m2.1": {
@@ -6009,6 +6884,53 @@
         "tier": "drop"
       }
     },
+    "nemotron-3-5-lightning": {
+      "benchmarks": {
+        "scores": {
+          "aa_intelligence": {
+            "score": 23.6,
+            "metric": "index",
+            "source": "artificial_analysis"
+          },
+          "aa_coding": {
+            "score": 26.8,
+            "metric": "index",
+            "source": "artificial_analysis"
+          }
+        },
+        "raw_benchmarks": [],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.08
+      },
+      "pricing": {
+        "blended": 0.108,
+        "input": 0.07,
+        "output": 0.22,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 0.108,
+        "price_1m_input_tokens": 0.07,
+        "price_1m_output_tokens": 0.22
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:33:15.585443+00:00",
+        "last_updated": "2026-09-15T04:33:15.585443+00:00",
+        "version": 2
+      },
+      "judge": {
+        "evidence_level": "moderate",
+        "evidence": [
+          "AA Intelligence score of 23.6 is below the 24.0 minimum threshold.",
+          "No coding benchmarks found; provider claim is generic and unverified.",
+          "Evidence level promoted weak→moderate via deterministic signals (aa=23.6, coding_score=23.6)"
+        ],
+        "confidence": 0.9,
+        "coding": false,
+        "decision": "drop",
+        "canonical_name": "Nemotron 3.5 Lightning",
+        "tier": "drop",
+        "judge_model": "agnes-2.5-flash"
+      }
+    },
     "nemotron-3-embed-1b": {
       "benchmarks": {
         "scores": {},
@@ -6382,6 +7304,318 @@
         "tier": "drop"
       }
     },
+    "nvidia-nemotron-3-nano-30b-a3b": {
+      "benchmarks": {
+        "scores": {
+          "aa_intelligence": {
+            "score": 7.2,
+            "metric": "index",
+            "source": "artificial_analysis"
+          }
+        },
+        "raw_benchmarks": [],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.08
+      },
+      "pricing": {
+        "blended": 0.088,
+        "input": 0.05,
+        "output": 0.2,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 0.088,
+        "price_1m_input_tokens": 0.05,
+        "price_1m_output_tokens": 0.2
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:33:09.297660+00:00",
+        "last_updated": "2026-09-15T04:33:09.297660+00:00",
+        "version": 2
+      }
+    },
+    "nvidia-nemotron-3-super-120b-a12b": {
+      "benchmarks": {
+        "scores": {
+          "aa_intelligence": {
+            "score": 25.7,
+            "metric": "index",
+            "source": "artificial_analysis"
+          },
+          "aa_coding": {
+            "score": 37.7,
+            "metric": "index",
+            "source": "artificial_analysis"
+          }
+        },
+        "raw_benchmarks": [],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.08
+      },
+      "pricing": {
+        "blended": 0.35,
+        "input": 0.2,
+        "output": 0.8,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 0.35,
+        "price_1m_input_tokens": 0.2,
+        "price_1m_output_tokens": 0.8
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:33:08.054909+00:00",
+        "last_updated": "2026-09-15T04:33:08.054909+00:00",
+        "version": 2
+      },
+      "judge": {
+        "evidence_level": "moderate",
+        "evidence": [
+          "AA Intelligence score 25.7 exceeds minimum threshold of 24.0 with AA coding score 37.7.",
+          "Verified AA match confirmed via Artificial Analysis catalog.",
+          "Pricing blended $0.35/1M, intelligence per dollar 64.2 influenced tier=drop"
+        ],
+        "confidence": 0.85,
+        "coding": true,
+        "decision": "drop",
+        "canonical_name": "Nemotron 3 Super 120B A12B (Reasoning)",
+        "tier": "drop",
+        "judge_model": "agnes-2.5-flash"
+      }
+    },
+    "nvidia-nemotron-3-ultra-550b-a55b": {
+      "benchmarks": {
+        "scores": {
+          "swe_bench_verified": {
+            "score": 70.7,
+            "metric": "resolved",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          },
+          "terminal_bench": {
+            "score": 56.4,
+            "metric": "success rate",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          },
+          "gpqa": {
+            "score": 87,
+            "metric": "accuracy",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          },
+          "humanity_last_exam": {
+            "score": 26.7,
+            "metric": "accuracy",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          },
+          "livecodebench": {
+            "score": 89,
+            "metric": "pass@1",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          },
+          "mmlu_pro": {
+            "score": 86.8,
+            "metric": "accuracy",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          }
+        },
+        "raw_benchmarks": [
+          {
+            "name": "SWE-Bench Verified",
+            "score": 70.7,
+            "metric": "resolved",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          },
+          {
+            "name": "SWE-Bench Multilingual",
+            "score": 67.7,
+            "metric": "resolve rate",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          },
+          {
+            "name": "Terminal-Bench",
+            "score": 56.4,
+            "metric": "success rate",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          },
+          {
+            "name": "GPQA",
+            "score": 87,
+            "metric": "accuracy",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          },
+          {
+            "name": "Humanity's Last Exam",
+            "score": 26.7,
+            "metric": "accuracy",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          },
+          {
+            "name": "Humanity's Last Exam",
+            "score": 37.4,
+            "metric": "accuracy",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          },
+          {
+            "name": "LiveCodeBench",
+            "score": 89,
+            "metric": "pass@1",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          },
+          {
+            "name": "MMLU-Pro",
+            "score": 86.8,
+            "metric": "accuracy",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          },
+          {
+            "name": "BrowseComp",
+            "score": 44.4,
+            "metric": "accuracy",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          },
+          {
+            "name": "IFBench",
+            "score": 81.7,
+            "metric": "accuracy",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          },
+          {
+            "name": "GDPval",
+            "score": 46.7,
+            "metric": "wins or ties",
+            "source": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16"
+          }
+        ],
+        "benchmark_coverage": 0.5,
+        "coverage_with_supplements": 0.25
+      },
+      "pricing": {
+        "blended": 1.175,
+        "input": 0.675,
+        "output": 2.675,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 1.175,
+        "price_1m_input_tokens": 0.675,
+        "price_1m_output_tokens": 2.675
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:33:13.259477+00:00",
+        "last_updated": "2026-09-15T04:33:13.259477+00:00",
+        "version": 2
+      },
+      "judge": {
+        "evidence_level": "strong",
+        "evidence": [
+          "AA score 38.3 with multiple strong coding benchmarks: SWE-Bench Verified 70.7, LiveCodeBench 89, Terminal-Bench 56.4 (source: https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16)",
+          "Low pricing at $1.175/M tokens blended makes this an excellent value for coding tasks",
+          "Pricing blended $1.18/1M, intelligence per dollar 57.8 influenced tier=max"
+        ],
+        "confidence": 0.92,
+        "coding": true,
+        "decision": "keep",
+        "canonical_name": "Nemotron 3 Ultra 550B A55B (Reasoning)",
+        "tier": "max",
+        "judge_model": "agnes-2.5-flash"
+      }
+    },
+    "nvidia-nemotron-nano-12b-v2-vl": {
+      "benchmarks": {
+        "scores": {
+          "aa_intelligence": {
+            "score": 4.2,
+            "metric": "index",
+            "source": "artificial_analysis"
+          }
+        },
+        "raw_benchmarks": [],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.08
+      },
+      "pricing": {
+        "blended": 0.3,
+        "input": 0.2,
+        "output": 0.6,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 0.3,
+        "price_1m_input_tokens": 0.2,
+        "price_1m_output_tokens": 0.6
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:33:09.387085+00:00",
+        "last_updated": "2026-09-15T04:33:09.387085+00:00",
+        "version": 2
+      }
+    },
+    "nvidia-nemotron-nano-9b-v2": {
+      "benchmarks": {
+        "scores": {
+          "aa_intelligence": {
+            "score": 7.2,
+            "metric": "index",
+            "source": "artificial_analysis"
+          }
+        },
+        "raw_benchmarks": [],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.08
+      },
+      "pricing": {
+        "blended": 0.086,
+        "input": 0.05,
+        "output": 0.195,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 0.086,
+        "price_1m_input_tokens": 0.05,
+        "price_1m_output_tokens": 0.195
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:33:07.073871+00:00",
+        "last_updated": "2026-09-15T04:33:07.073871+00:00",
+        "version": 2
+      }
+    },
+    "o1": {
+      "benchmarks": {
+        "scores": {
+          "aa_intelligence": {
+            "score": 23.9,
+            "metric": "index",
+            "source": "artificial_analysis"
+          },
+          "aa_coding": {
+            "score": 39.7,
+            "metric": "index",
+            "source": "artificial_analysis"
+          }
+        },
+        "raw_benchmarks": [],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.08
+      },
+      "pricing": {
+        "blended": 26.25,
+        "input": 15,
+        "output": 60,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 26.25,
+        "price_1m_input_tokens": 15,
+        "price_1m_output_tokens": 60
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:44:10.229611+00:00",
+        "last_updated": "2026-09-15T04:44:10.229611+00:00",
+        "version": 2
+      },
+      "judge": {
+        "evidence_level": "moderate",
+        "evidence": [
+          "AA Intelligence score 23.9 is below the minimum threshold of 24.0",
+          "Provider claim mentions coding but unverified without source URL",
+          "Evidence level promoted weak→moderate via deterministic signals (aa=23.9, coding_score=23.9)"
+        ],
+        "confidence": 0.95,
+        "coding": true,
+        "decision": "drop",
+        "canonical_name": "o1",
+        "tier": "drop",
+        "judge_model": "agnes-2.5-flash"
+      }
+    },
     "o3": {
       "benchmarks": {
         "scores": {
@@ -6506,6 +7740,20 @@
         "tier": "drop"
       }
     },
+    "qwen-coder-32b": {
+      "benchmarks": {
+        "scores": {},
+        "raw_benchmarks": []
+      },
+      "pricing": {
+        "per_provider_overrides": {}
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:44:17.631630+00:00",
+        "last_updated": "2026-09-15T04:44:17.631630+00:00",
+        "version": 2
+      }
+    },
     "qwen2.5-coder-32b-instruct": {
       "benchmarks": {
         "scores": {
@@ -6544,6 +7792,123 @@
         "coding": true,
         "decision": "drop",
         "tier": "drop"
+      }
+    },
+    "qwen3-5-397b": {
+      "benchmarks": {
+        "scores": {},
+        "raw_benchmarks": []
+      },
+      "pricing": {
+        "per_provider_overrides": {}
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:44:13.169830+00:00",
+        "last_updated": "2026-09-15T04:44:13.169830+00:00",
+        "version": 2
+      }
+    },
+    "qwen3-5-397b-a22b-instruct": {
+      "benchmarks": {
+        "scores": {},
+        "raw_benchmarks": []
+      },
+      "pricing": {
+        "per_provider_overrides": {}
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:44:15.237896+00:00",
+        "last_updated": "2026-09-15T04:44:15.237896+00:00",
+        "version": 2
+      }
+    },
+    "qwen3-8b": {
+      "benchmarks": {
+        "scores": {},
+        "raw_benchmarks": []
+      },
+      "pricing": {
+        "per_provider_overrides": {}
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:45:26.484317+00:00",
+        "last_updated": "2026-09-15T04:45:26.484317+00:00",
+        "version": 2
+      }
+    },
+    "qwen3-coder-30b-a3b": {
+      "benchmarks": {
+        "scores": {},
+        "raw_benchmarks": []
+      },
+      "pricing": {
+        "per_provider_overrides": {}
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:44:11.102594+00:00",
+        "last_updated": "2026-09-15T04:44:11.102594+00:00",
+        "version": 2
+      }
+    },
+    "qwen3-coder-flash": {
+      "benchmarks": {
+        "scores": {},
+        "raw_benchmarks": []
+      },
+      "pricing": {
+        "per_provider_overrides": {}
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:45:32.553677+00:00",
+        "last_updated": "2026-09-15T04:45:32.553677+00:00",
+        "version": 2
+      }
+    },
+    "qwen3-coder-next": {
+      "benchmarks": {
+        "scores": {
+          "aa_intelligence": {
+            "score": 21.3,
+            "metric": "index",
+            "source": "artificial_analysis"
+          },
+          "aa_coding": {
+            "score": 36.2,
+            "metric": "index",
+            "source": "artificial_analysis"
+          }
+        },
+        "raw_benchmarks": [],
+        "benchmark_coverage": 0.25,
+        "coverage_with_supplements": 0.08
+      },
+      "pricing": {
+        "blended": 0.563,
+        "input": 0.35,
+        "output": 1.2,
+        "per_provider_overrides": {},
+        "price_1m_blended_3_to_1": 0.563,
+        "price_1m_input_tokens": 0.35,
+        "price_1m_output_tokens": 1.2
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:44:10.974733+00:00",
+        "last_updated": "2026-09-15T04:44:10.974733+00:00",
+        "version": 2
+      },
+      "judge": {
+        "evidence_level": "moderate",
+        "evidence": [
+          "AA Intelligence score 21.3 is below the 24.0 minimum threshold, requiring a drop",
+          "Provider claim of Qwen coding model for agents but no verified benchmarks above threshold",
+          "Evidence level promoted weak→moderate via deterministic signals (aa=21.3, coding_score=21.3)"
+        ],
+        "confidence": 0.95,
+        "coding": false,
+        "decision": "drop",
+        "canonical_name": "Qwen3 Coder Next",
+        "tier": "drop",
+        "judge_model": "agnes-2.5-flash"
       }
     },
     "qwen3-embedding-0.6b": {
@@ -6799,6 +8164,34 @@
         "tier": "max"
       }
     },
+    "qwen3.5-397b-a22b-instruct": {
+      "benchmarks": {
+        "scores": {},
+        "raw_benchmarks": []
+      },
+      "pricing": {
+        "per_provider_overrides": {}
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:45:27.690403+00:00",
+        "last_updated": "2026-09-15T04:45:27.690403+00:00",
+        "version": 2
+      }
+    },
+    "qwen3.5-72b-instruct": {
+      "benchmarks": {
+        "scores": {},
+        "raw_benchmarks": []
+      },
+      "pricing": {
+        "per_provider_overrides": {}
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:44:14.217201+00:00",
+        "last_updated": "2026-09-15T04:44:14.217201+00:00",
+        "version": 2
+      }
+    },
     "qwen3.5-flash": {
       "benchmarks": {
         "scores": {},
@@ -6931,6 +8324,20 @@
         "coding": true,
         "decision": "drop",
         "tier": "drop"
+      }
+    },
+    "qwen3.6-plus-preview": {
+      "benchmarks": {
+        "scores": {},
+        "raw_benchmarks": []
+      },
+      "pricing": {
+        "per_provider_overrides": {}
+      },
+      "_meta": {
+        "first_seen": "2026-09-15T04:44:09.655312+00:00",
+        "last_updated": "2026-09-15T04:44:09.655312+00:00",
+        "version": 2
       }
     },
     "qwen3.7-max": {

@@ -1,3 +1,5 @@
+# ⛔ USER-ONLY FILE — AGENTS MUST NOT EDIT
+# Agents: do not read-for-edit, write, or patch this file. User owns it. Ask user to edit manually.
 artificial_analysis:
   min_score: 24
   max_score: 45

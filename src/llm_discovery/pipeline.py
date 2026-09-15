@@ -6,6 +6,7 @@ evaluate_model is now <30 lines coordinating four seamed adapters:
 Other entry points (discover_single, discover_provider, discover_all_providers)
 retain isolation but delegate per-model work to evaluate_model.
 """
+import re
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
@@ -221,6 +222,15 @@ def discover_single(
                 eval_models, dropped_models = probed_free, probed_paid
         if dropped_models:
             print(f"[{provider_name}] Free-model filter: dropped {len(dropped_models)} non-free, keeping {len(eval_models)} free")
+    # QwenCloud dated dedup: drop dated variant where undated base exists (after free/probe, all discovery branches)
+    if provider_name == "qwencloud" and "eval_models" in locals() and eval_models:
+        try:
+            _keep, _dropped = _dedupe_qwencloud_dated_models(eval_models, provider_name)
+            if _dropped:
+                eval_models = _keep
+                dropped_models = list(dropped_models) + list(_dropped) if "dropped_models" in locals() and dropped_models is not None else list(_dropped)
+        except Exception as _e:
+            print(f"[{provider_name}] qwencloud dedup failed: {_e}")
     if not eval_models:
         raise RuntimeError(f"No models to evaluate for {provider_name!r} after filtering (all {len(dropped_models)} dropped)")
     model = pick_tracer_model(eval_models, aa, config.artificial_analysis.min_score)
@@ -336,6 +346,15 @@ def discover_provider(
     except Exception as exc:  # noqa: BLE001 — provider-level failure
         print(f"[{provider_name}] Discovery failed: {exc}")
         return provider_error_result(provider_name, exc)
+    # QwenCloud dated dedup: drop dated variant where undated base exists (after free/probe filtering)
+    if provider_name == "qwencloud" and "eval_models" in locals() and eval_models:
+        try:
+            _keep, _dropped = _dedupe_qwencloud_dated_models(eval_models, provider_name)
+            if _dropped:
+                eval_models = _keep
+                dropped_models = list(dropped_models) + list(_dropped) if "dropped_models" in locals() and dropped_models is not None else list(_dropped)
+        except Exception as _e:
+            print(f"[{provider_name}] qwencloud dedup failed: {_e}")
     searcher = make_searcher(
         brave_api_key=os.environ.get("BRAVE_API_KEY"),
         disabled=os.environ.get("DISABLE_WEB_SEARCH") == "1",
@@ -864,3 +883,49 @@ def _probe_free_models(
     # ambiguous (e.g. nvidia all 404 unknown) -> fallback
     print(f"[{provider_name}] Probe inconclusive (free={len(free)} paid={len(paid)} unknown={len(unknown)}), keeping all")
     return models, []
+# --- QwenCloud dated dedup (provider-specific) ---
+_QWENCLOUD_DATE_PATTERNS = [
+    re.compile(r"[-_:/](\d{4}-\d{2}-\d{2})\s*$"),
+    re.compile(r"[-_:/](\d{4}_\d{2}_\d{2})\s*$"),
+    re.compile(r"[-_:/](\d{8})\s*$"),
+    re.compile(r"[-_:/](\d{6})\s*$"),
+    re.compile(r"[-_:/](\d{4})\s*$"),
+]
+
+def _qwencloud_base_without_date(model_id: str) -> str | None:
+    if not isinstance(model_id, str) or not model_id:
+        return None
+    mid = model_id.strip()
+    for pat in _QWENCLOUD_DATE_PATTERNS:
+        m = pat.search(mid)
+        if m:
+            base = mid[: m.start()]
+            if base and base != mid and re.search(r"[a-zA-Z]", base):
+                return base
+    return None
+
+def _dedupe_qwencloud_dated_models(
+    models: list[dict[str, Any]],
+    provider_name: str = "",
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if provider_name != "qwencloud":
+        return models, []
+    if not models:
+        return models, []
+    id_set = {str(m.get("id", "")).strip() for m in models}
+    keep: list[dict[str, Any]] = []
+    dropped: list[dict[str, Any]] = []
+    for m in models:
+        mid = str(m.get("id", "")).strip()
+        base = _qwencloud_base_without_date(mid)
+        if base is not None and base in id_set:
+            md = dict(m)
+            md["_drop_reason"] = f"qwencloud-dated-dedup: {mid} -> {base} exists"
+            dropped.append(md)
+            continue
+        keep.append(m)
+    if dropped:
+        print(f"[{provider_name}] QwenCloud dated dedup: dropped {len(dropped)} dated variant(s) where base exists, keeping {len(keep)}")
+        for d in dropped:
+            print(f"[{provider_name}]   DEDUP DROP {d['id']} -> {_qwencloud_base_without_date(str(d['id']))}")
+    return keep, dropped

@@ -257,7 +257,7 @@ class LocalLLMEvaluator:
                         "url": item.get("url", ""),
                         "snippet": item.get("snippet", "")[:800],
                     }
-                    for item in result[:3]
+                    for item in result
                 ]
 
                 messages.append(

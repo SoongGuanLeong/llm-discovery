@@ -5,12 +5,11 @@ operates on deterministic facts (AA catalog + models.dev metadata + its own
 training knowledge).  When `ENABLE_WEB_SEARCH=1` is set the pipeline activates
 DuckDuckGo (no key) or Brave (optional `BRAVE_API_KEY`, $5 free credits/mo).
 
-The judge always runs: when search is disabled or unavailable it gets `[]` and
-falls back to the AA intelligence index plus provider metadata and its own
-training knowledge.
+When DuckDuckGo rate-limits, SearXNG is tried as fallback.
 """
 from __future__ import annotations
 
+import os
 import re
 from typing import Any
 
@@ -18,6 +17,10 @@ import httpx
 
 SEARCH_HEADERS = {"User-Agent": "llm-discovery/1.0 (contact@example.com)"}
 TIMEOUT = 30.0
+
+# Default max_results; can be overridden via SEARCH_MAX_RESULTS env var
+DEFAULT_MAX_RESULTS = 3
+
 
 # --------------------------------------------------------------------------- #
 # No-key backend: DuckDuckGo HTML                                                #
@@ -32,7 +35,7 @@ class DuckDuckGoSearcher:
 
     URL = "https://html.duckduckgo.com/html/"
 
-    def __init__(self, max_results: int = 3, timeout: float = TIMEOUT) -> None:
+    def __init__(self, max_results: int = DEFAULT_MAX_RESULTS, timeout: float = TIMEOUT) -> None:
         self.max_results = max_results
         self.timeout = timeout
 
@@ -45,7 +48,7 @@ class DuckDuckGoSearcher:
                 timeout=self.timeout,
             )
             resp.raise_for_status()
-        except Exception:  # noqa: BLE001 — any transport/parse error → empty
+        except Exception:  # noqa: BLE001 - any transport/parse error -> empty
             return []
 
         return self._parse_html(resp.text)[: self.max_results]
@@ -54,7 +57,7 @@ class DuckDuckGoSearcher:
     def _parse_html(html: str) -> list[dict[str, Any]]:
         # DuckDuckGo HTML wraps each result in a <div class="result ...">
         result_re = re.compile(
-            r'<div class="result\s+.*?".*?>.*?<a rel="nofollow" class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>.*?'
+            r'<div class="result\\s+.*?".*?>.*?<a rel="nofollow" class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>.*?'
             r'<a class="result__snippet"[^>]*>(.*?)</a>',
             re.DOTALL,
         )
@@ -75,7 +78,7 @@ class BraveSearcher:
 
     URL = "https://api.search.brave.com/res/v1/web/search"
 
-    def __init__(self, api_key: str, max_results: int = 3, timeout: float = TIMEOUT) -> None:
+    def __init__(self, api_key: str, max_results: int = DEFAULT_MAX_RESULTS, timeout: float = TIMEOUT) -> None:
         self.api_key = api_key
         self.max_results = max_results
         self.timeout = timeout
@@ -90,7 +93,7 @@ class BraveSearcher:
             )
             resp.raise_for_status()
             data = resp.json()
-        except Exception:  # noqa: BLE001 — degrade to empty
+        except Exception:  # noqa: BLE001 - degrade to empty
             return []
 
         return [
@@ -113,7 +116,6 @@ class SearXNGSearcher:
     Failures degrade gracefully to an empty list so the judge never crashes.
     """
 
-    # List of reliable public SearXNG instances (https://searx.space)
     INSTANCES = [
         "https://searx.tiekoetter.com",
         "https://search.sapti.me",
@@ -121,7 +123,7 @@ class SearXNGSearcher:
         "https://searx.be",
     ]
 
-    def __init__(self, max_results: int = 3, timeout: float = TIMEOUT) -> None:
+    def __init__(self, max_results: int = DEFAULT_MAX_RESULTS, timeout: float = TIMEOUT) -> None:
         self.max_results = max_results
         self.timeout = timeout
         self._instance_index = 0
@@ -157,7 +159,7 @@ class SearXNGSearcher:
                 if results:
                     return results
 
-            except Exception:  # noqa: BLE001 — try next instance
+            except Exception:  # noqa: BLE001 - try next instance
                 continue
 
         # All instances failed
@@ -180,27 +182,76 @@ class NoopSearcher:
 
 
 # --------------------------------------------------------------------------- #
+# Fallback wrapper                                                              #
+# --------------------------------------------------------------------------- #
+class _SearchWithFallback:
+    """Wrapper that tries primary, falls back to secondary on empty/error."""
+
+    def __init__(self, primary: Any, fallback: Any) -> None:
+        self._primary = primary
+        self._fallback = fallback
+
+    def search(self, query: str) -> list[dict[str, Any]]:
+        try:
+            results = self._primary.search(query)
+            if results:
+                return results
+        except Exception:  # noqa: BLE001 - any error triggers fallback
+            pass
+        return self._fallback.search(query)
+
+
+# --------------------------------------------------------------------------- #
 # Factory                                                                      #
 # --------------------------------------------------------------------------- #
 def make_searcher(
     brave_api_key: str | None = None,
-    disabled: bool = False,
+    disabled: bool | None = None,
+    prefer: str | None = None,
 ) -> Any:
     """Return a search backend.
 
-    Priority:
-    1. SearXNGSearcher — free metasearch, no key required (tries multiple instances)
-    2. BraveSearcher   — if `BRAVE_API_KEY` is present (higher quality).
-    3. DuckDuckGoSearcher — no key required, degrades to empty on error.
-    4. NoopSearcher   — when disabled.
+    Priority (unless disabled=True):
+    1. BraveSearcher -- if BRAVE_API_KEY is set (higher quality).
+    2. DuckDuckGoSearcher -- no key required, SearXNG fallback on empty/429.
 
-    The returned object has a `search(query) -> list[dict]` method matching
+    When disabled=True (or DISABLE_WEB_SEARCH=1 in env), returns NoopSearcher.
+    When prefer="searxng", SearXNG is used initially with DDG as fallback.
+
+    The returned object has a search(query) -> list[dict] method matching
     the shape the judge loop expects.
+
+    Environment:
+    - SEARCH_MAX_RESULTS: default 3, controls backend output size (1-10).
+    - DISABLE_WEB_SEARCH=1: forces NoopSearcher.
     """
+    # Check DISABLE_WEB_SEARCH env first
+    if disabled is None:
+        disabled = os.environ.get("DISABLE_WEB_SEARCH") == "1"
+
     if disabled:
         return NoopSearcher()
 
-    if brave_api_key:
-        return BraveSearcher(brave_api_key)
+    # Read max_results from env
+    try:
+        max_results = int(os.environ.get("SEARCH_MAX_RESULTS", str(DEFAULT_MAX_RESULTS)))
+    except (ValueError, TypeError):
+        max_results = DEFAULT_MAX_RESULTS
 
-    return DuckDuckGoSearcher()
+    # Clamp to reasonable bounds
+    max_results = min(max(1, max_results), 10)
+
+    # If SearXNG is preferred, use it with DDG as fallback
+    if prefer == "searxng":
+        searxng = SearXNGSearcher(max_results=max_results)
+        ddg = DuckDuckGoSearcher(max_results=max_results)
+        return _SearchWithFallback(searxng, ddg)
+
+    # Brave wins when key present
+    if brave_api_key:
+        return BraveSearcher(brave_api_key, max_results=max_results)
+
+    # Default: DuckDuckGo with SearXNG fallback
+    ddg = DuckDuckGoSearcher(max_results=max_results)
+    searxng = SearXNGSearcher(max_results=max_results)
+    return _SearchWithFallback(ddg, searxng)

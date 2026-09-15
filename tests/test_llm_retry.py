@@ -217,7 +217,7 @@ def test_evaluate_retries_on_invalid_json_then_succeeds(monkeypatch):
 
 
 def test_evaluate_raises_after_one_invalid_json_retry(monkeypatch):
-    """Two consecutive invalid JSON responses → RuntimeError (→ error record)."""
+    """Two consecutive invalid JSON responses -> RuntimeError (-> error record)."""
     bad = {"choices": [{"message": {"content": "still garbage"}}]}
 
     def fake_post_chat(self, messages, disable_tools=False):
@@ -234,3 +234,63 @@ def test_evaluate_raises_after_one_invalid_json_retry(monkeypatch):
         assert False, "should have raised"
     except RuntimeError as exc:
         assert "invalid JSON" in str(exc)
+
+
+def test_evaluate_truncation_respects_search_results(monkeypatch):
+    """Issue #215: llm.py:260 previously hardcoded result[:3], truncating
+    even when SEARCH_MAX_RESULTS=5. The fix removes the redundant slice so
+    all results from the searcher are passed to the judge.
+    """
+    import os
+    from unittest.mock import patch
+
+    # Create 5 search results
+    search_results = [
+        {"title": f"result{i}", "url": f"https://example.com/{i}", "snippet": f"snippet{i}"}
+        for i in range(5)
+    ]
+
+    tool_content = None
+    call_count = [0]
+
+    def mock_post_chat(self, messages, disable_tools=False):
+        nonlocal tool_content
+        # Check if this is the tool result message
+        for msg in messages:
+            if msg.get("role") == "tool" and msg.get("content"):
+                tool_content = msg["content"]
+                break
+        # Return tool call response then final JSON
+        if call_count[0] == 0:
+            call_count[0] += 1
+            return _Resp(200, json_data={"choices": [{
+                "message": {
+                    "tool_calls": [{
+                        "id": "call_1",
+                        "function": {"name": "search_web", "arguments": json.dumps({"query": "test"})}
+                    }],
+                    "content": ""
+                }
+            }]})
+        return _Resp(200, json_data={"choices": [{"message": {"content": json.dumps(_valid_body)}}]})
+
+    monkeypatch.setattr(JudgeTransport, "post_chat", mock_post_chat)
+    monkeypatch.setattr("llm_discovery.llm.time.sleep", lambda s: None)
+
+    ev = LocalLLMEvaluator(
+        base_url="https://apihub.agnes-ai.com/v1",
+        model="mimo-v2-5-free",
+        api_key="fake",
+        min_score=24,
+        search_web=lambda q: search_results,  # Return 5 results
+    )
+
+    from llm_discovery.evaluation import ModelEvaluationRequest
+    req = ModelEvaluationRequest(provider="groq", model_id="test-model")
+    result = ev.evaluate(req)
+    assert result.decision == "keep"
+
+    # Verify tool_content contains all 5 results (not truncated to 3)
+    if tool_content:
+        parsed = json.loads(tool_content)
+        assert len(parsed) == 5, f"Expected 5 results, got {len(parsed)} - dual-site truncation bug"

@@ -569,7 +569,7 @@ class ModelInfoStore:
     def save(self) -> None:
         payload = {
             "version": STORE_FILE_VERSION,
-            "models": {k: v.to_dict() for k, v in self._data.items()},
+            "models": {k: v.to_dict() for k, v in sorted(self._data.items())},
         }
         _atomic_write_json(self.path, payload)
 
@@ -685,12 +685,12 @@ class ModelInfoStore:
 
     def dumps_compact(self) -> str:
         self._ensure_loaded()
-        payload = {"version": STORE_FILE_VERSION, "models": {k: v.to_dict() for k, v in self._data.items()}}
+        payload = {"version": STORE_FILE_VERSION, "models": {k: v.to_dict() for k, v in sorted(self._data.items())}}
         return dumps_compact(payload)
 
     def dumps_pretty(self) -> str:
         self._ensure_loaded()
-        payload = {"version": STORE_FILE_VERSION, "models": {k: v.to_dict() for k, v in self._data.items()}}
+        payload = {"version": STORE_FILE_VERSION, "models": {k: v.to_dict() for k, v in sorted(self._data.items())}}
         return json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=False) + "\n"
 
     def keys(self) -> list[str]:

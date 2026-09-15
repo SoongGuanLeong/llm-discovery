@@ -160,13 +160,25 @@ class BenchmarkDataCache:
     def __init__(self, cache_path: Path = DATA_DIR / "benchmarks.json"):
         self.cache_path = cache_path
         self._data: dict[str, dict[str, Any]] = {}
+        self._norm_index: dict[str, str] = {}  # norm alt -> _data key, O(1) fallback
         self._loaded = False
+
+    def _rebuild_norm_index(self) -> None:
+        idx: dict[str, str] = {}
+        for key in self._data:
+            norm = _normalize_model_key(key)
+            if not norm:
+                continue
+            for alt in {norm, norm.replace(".", "-"), re.sub(r"(\d)-(\d)", r"\1.\2", norm)}:
+                idx.setdefault(alt, key)
+        self._norm_index = idx
 
     def load(self) -> None:
         if self.cache_path.exists():
             with open(self.cache_path) as f:
                 self._data = json.load(f)
         self._loaded = True
+        self._rebuild_norm_index()
 
     def save(self) -> None:
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -223,12 +235,9 @@ class BenchmarkDataCache:
             if benchmarks:
                 key = None
                 norm_slug = _normalize_model_key(slug)
-                for existing_id in self._data:
-                    norm_existing = _normalize_model_key(existing_id)
-                    if norm_slug and norm_existing and norm_slug == norm_existing:
-                        key = existing_id
-                        break
-                if key:
+                if norm_slug:
+                    key = self._norm_index.get(norm_slug)
+                if key and key in self._data:
                     for cn, bm_data in benchmarks.items():
                         if cn not in self._data[key]["benchmarks"]:
                             self._data[key]["benchmarks"][cn] = bm_data
@@ -239,6 +248,11 @@ class BenchmarkDataCache:
                         "benchmarks": benchmarks,
                         "raw_benchmarks": [],
                     }
+                    # keep index in sync for next AA iteration (incremental)
+                    if norm_slug:
+                        for alt in {norm_slug, norm_slug.replace(".", "-"), re.sub(r"(\d)-(\d)", r"\1.\2", norm_slug)}:
+                            self._norm_index.setdefault(alt, slug if key is None else key)
+        self._rebuild_norm_index()
 
     def get(self, model_id: str) -> Optional[dict]:
         """Get benchmark scores for a model. Returns dict[canonical -> score_dict]."""
@@ -256,16 +270,10 @@ class BenchmarkDataCache:
         norm_slug = _normalize_model_key(provider_slug)
         if not norm_slug:
             return None
-        # Build alternates for version-dot typo (4-5 vs 4.5) and dot↔hyphen
-        alts = {norm_slug, norm_slug.replace(".", "-"), re.sub(r"(\\d)-(\\d)", r"\\1.\\2", norm_slug)}
-        for key, entry in self._data.items():
-            norm_key = _normalize_model_key(key)
-            if not norm_key:
-                continue
-            key_alts = {norm_key, norm_key.replace(".", "-"), re.sub(r"(\\d)-(\\d)", r"\\1.\\2", norm_key)}
-            if alts & key_alts:
-                return entry["benchmarks"]
-
+        for alt in (norm_slug, norm_slug.replace(".", "-"), re.sub(r"(\\d)-(\\d)", r"\1.\2", norm_slug)):
+            key = self._norm_index.get(alt)
+            if key is not None and key in self._data:
+                return self._data[key]["benchmarks"]
         return None
 
     def get_raw(self, model_id: str) -> list:
@@ -284,15 +292,10 @@ class BenchmarkDataCache:
         norm_slug = _normalize_model_key(provider_slug)
         if not norm_slug:
             return []
-        alts = {norm_slug, norm_slug.replace(".", "-"), re.sub(r"(\\d)-(\\d)", r"\\1.\\2", norm_slug)}
-        for key, entry in self._data.items():
-            norm_key = _normalize_model_key(key)
-            if not norm_key:
-                continue
-            key_alts = {norm_key, norm_key.replace(".", "-"), re.sub(r"(\\d)-(\\d)", r"\\1.\\2", norm_key)}
-            if alts & key_alts:
-                return entry.get("raw_benchmarks", [])
-
+        for alt in (norm_slug, norm_slug.replace(".", "-"), re.sub(r"(\\d)-(\\d)", r"\1.\2", norm_slug)):
+            key = self._norm_index.get(alt)
+            if key is not None and key in self._data:
+                return self._data[key].get("raw_benchmarks", [])
         return []
 
     def collect_from_web(self, urls: dict[str, str]) -> None:
@@ -360,6 +363,7 @@ class BenchmarkDataCache:
                                 self._data[model_key]["raw_benchmarks"].append({"name": canonical_name, "score": score, "source": url})
             except Exception:
                 pass
+        self._rebuild_norm_index()
 
 
 def _normalize_model_key(name: str) -> str:

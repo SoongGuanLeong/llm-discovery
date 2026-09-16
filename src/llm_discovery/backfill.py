@@ -129,6 +129,8 @@ def backfill(
             # Ensure decision drop survives even if from_provider_record defaulted
             if mir.judge is not None and mir.judge.decision != "drop":
                 mir.judge.decision = "drop"
+            if mir.judgement is not None and mir.judgement.decision != "drop":
+                mir.judgement.decision = "drop"
             record_groups[key].append(mir)
             drop_cacheable_written += 1
             pricing = rec.get("pricing")

@@ -56,8 +56,11 @@ class TestBackfillSeam:
         assert "gpt-4o" in raw["models"]
         assert raw["models"]["gpt-4o"]["pricing"]["blended"] == 0.51
         assert {"benchmarks", "pricing", "_meta"}.issubset(set(raw["models"]["gpt-4o"].keys()))
-        # judge is optional (strong-only reuse, 28d TTL)
-        assert set(raw["models"]["gpt-4o"].keys()).issubset({"benchmarks", "pricing", "_meta", "judge"})
+        # judge is optional (strong-only reuse, 28d TTL); the new optional keys
+        # (issue #223 expand) may sit alongside — dropped v1 keys must not reappear
+        assert set(raw["models"]["gpt-4o"].keys()).issubset(
+            {"benchmarks", "pricing", "_meta", "judge", "facts", "evidence_snapshot_hash", "judgement"}
+        )
         assert raw["models"]["gpt-4o"]["_meta"]["version"] == 2
 
     def test_weak_skipped(self, tmp_path):

@@ -109,11 +109,13 @@ class SingleModelWriter:
         return path
 
 
-# Per-provider result schema (keep/drop/error lists, idempotent overwrite).
+# Per-provider result schema (keep/uncertain/drop/error lists, idempotent overwrite).
+# Issue #220: keep filtered by is_accurate_enough; failing -> uncertain distinct from drop.
 PROVIDER_SCHEMA_KEYS = [
     "provider",
     "evaluated_at",
     "keep",
+    "uncertain",
     "coding_score",
     "drop_llm",
     "error",
@@ -190,10 +192,27 @@ class ProviderBatchWriter:
             if "free-model-rule" not in evidence_str:
                 drop_llm.append(projected)
 
+        # Issue #220: gate keep list pre-write; failing -> uncertain bucket
+        from .gate import is_accurate_enough
+
+        keep: list[dict[str, Any]] = []
+        uncertain: list[dict[str, Any]] = []
+        # Preserve existing uncertain if caller already partitioned (e.g. pipeline future)
+        for r in result.get("uncertain", []):
+            uncertain.append(self._to_record(r))
+        for r in result.get("keep", []):
+            projected = self._to_record(r)
+            ok, _ = is_accurate_enough(projected)
+            if ok:
+                keep.append(projected)
+            else:
+                uncertain.append(projected)
+
         payload = {
             "provider": provider,
             "evaluated_at": timestamp,
-            "keep": [self._to_record(r) for r in result.get("keep", [])],
+            "keep": keep,
+            "uncertain": uncertain,
             "drop_llm": drop_llm,
             "error": [self._to_record(r) for r in result.get("error", [])],
         }

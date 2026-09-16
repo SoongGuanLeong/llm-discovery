@@ -61,7 +61,7 @@ def _collect_live_keys(results_dir: Path) -> tuple[set[str], dict[str, int], int
 
 
 def _collect_per_provider_stats(results_dir: Path) -> dict[str, dict[str, int]]:
-    """Collect per-provider keep/drop/error counts from result YAMLs."""
+    """Collect per-provider keep/uncertain/drop/error counts from result YAMLs."""
     stats: dict[str, dict[str, int]] = {}
     if not results_dir.exists():
         return stats
@@ -74,11 +74,13 @@ def _collect_per_provider_stats(results_dir: Path) -> dict[str, dict[str, int]]:
         if not isinstance(data, dict):
             continue
         keep = data.get("keep") or []
+        uncertain = data.get("uncertain") or []
         drop = data.get("drop") or data.get("drop_llm") or []
         error = data.get("error") or []
-        # Backfill-projected keep entries still count as discovered
+        # Backfill-projected keep entries still count as discovered; uncertain distinct from drop
         stats[provider] = {
             "keep": len(keep) if isinstance(keep, list) else 0,
+            "uncertain": len(uncertain) if isinstance(uncertain, list) else 0,
             "drop": len(drop) if isinstance(drop, list) else 0,
             "error": len(error) if isinstance(error, list) else 0,
         }
@@ -299,7 +301,18 @@ def build_all(
                 n, res, path = _run_mock_provider(name)
                 files_written.append(str(path))
                 discovered += 1
-                per_provider_raw[n] = {"keep": len(res.get("keep", [])), "drop": len(res.get("drop", [])), "error": len(res.get("error", []))}
+                # telemetry distinguishes keep vs uncertain vs drop (issue #220)
+                try:
+                    import yaml as _yaml
+                    _data = _yaml.safe_load(path.read_text()) or {}
+                    per_provider_raw[n] = {
+                        "keep": len(_data.get("keep", [])),
+                        "uncertain": len(_data.get("uncertain", [])),
+                        "drop": len(_data.get("drop_llm") or _data.get("drop") or []),
+                        "error": len(_data.get("error", [])),
+                    }
+                except Exception:
+                    per_provider_raw[n] = {"keep": len(res.get("keep", [])), "uncertain": len(res.get("uncertain", [])), "drop": len(res.get("drop", [])), "error": len(res.get("error", []))}
         else:
             with ThreadPoolExecutor(max_workers=provider_concurrency) as pool:
                 fut_to_name = {pool.submit(_run_mock_provider, n): n for n in provider_list}
@@ -307,7 +320,17 @@ def build_all(
                     n, res, path = fut.result()
                     files_written.append(str(path))
                     discovered += 1
-                    per_provider_raw[n] = {"keep": len(res.get("keep", [])), "drop": len(res.get("drop", [])), "error": len(res.get("error", []))}
+                    try:
+                        import yaml as _yaml
+                        _data = _yaml.safe_load(path.read_text()) or {}
+                        per_provider_raw[n] = {
+                            "keep": len(_data.get("keep", [])),
+                            "uncertain": len(_data.get("uncertain", [])),
+                            "drop": len(_data.get("drop_llm") or _data.get("drop") or []),
+                            "error": len(_data.get("error", [])),
+                        }
+                    except Exception:
+                        per_provider_raw[n] = {"keep": len(res.get("keep", [])), "uncertain": len(res.get("uncertain", [])), "drop": len(res.get("drop", [])), "error": len(res.get("error", []))}
             # deterministic output order for callers/tests
             files_written.sort()
     else:
@@ -348,7 +371,17 @@ def build_all(
                 n, res, path = _run_real_provider(name)
                 files_written.append(str(path))
                 discovered += 1
-                per_provider_raw[n] = {"keep": len(res.get("keep", [])), "drop": len(res.get("drop", [])), "error": len(res.get("error", []))}
+                try:
+                    import yaml as _yaml
+                    _data = _yaml.safe_load(path.read_text()) or {}
+                    per_provider_raw[n] = {
+                        "keep": len(_data.get("keep", [])),
+                        "uncertain": len(_data.get("uncertain", [])),
+                        "drop": len(_data.get("drop_llm") or _data.get("drop") or []),
+                        "error": len(_data.get("error", [])),
+                    }
+                except Exception:
+                    per_provider_raw[n] = {"keep": len(res.get("keep", [])), "uncertain": len(res.get("uncertain", [])), "drop": len(res.get("drop", [])), "error": len(res.get("error", []))}
         else:
             with ThreadPoolExecutor(max_workers=provider_concurrency) as pool:
                 fut_to_name = {pool.submit(_run_real_provider, n): n for n in provider_list}
@@ -356,7 +389,17 @@ def build_all(
                     n, res, path = fut.result()
                     files_written.append(str(path))
                     discovered += 1
-                    per_provider_raw[n] = {"keep": len(res.get("keep", [])), "drop": len(res.get("drop", [])), "error": len(res.get("error", []))}
+                    try:
+                        import yaml as _yaml
+                        _data = _yaml.safe_load(path.read_text()) or {}
+                        per_provider_raw[n] = {
+                            "keep": len(_data.get("keep", [])),
+                            "uncertain": len(_data.get("uncertain", [])),
+                            "drop": len(_data.get("drop_llm") or _data.get("drop") or []),
+                            "error": len(_data.get("error", [])),
+                        }
+                    except Exception:
+                        per_provider_raw[n] = {"keep": len(res.get("keep", [])), "uncertain": len(res.get("uncertain", [])), "drop": len(res.get("drop", [])), "error": len(res.get("error", []))}
             files_written.sort()
 
     # 3b. Config-driven file GC: when building ALL providers, remove stale result files
@@ -405,7 +448,7 @@ def build_all(
     print(f"[build-all] telemetry discovered={total_keep} unique={len(live_keys)} reused={reused_unique} rebuilt={rebuilt_total} (new={rebuilt_new} identity={rebuilt_identity}) gc={gc_count} store={store.size()} wall={build_wall:.2f}s conc={provider_concurrency}")
     for prov in sorted(per_provider_raw):
         c = per_provider_raw[prov]
-        print(f"[build-all] provider {prov}: keep={c.get('keep',0)} drop={c.get('drop',0)} error={c.get('error',0)}")
+        print(f"[build-all] provider {prov}: keep={c.get('keep',0)} uncertain={c.get('uncertain',0)} drop={c.get('drop',0)} error={c.get('error',0)}")
 
     # 7. Ensure pretty + version header already via ModelInfoStore.save
     pretty = store.dumps_pretty()

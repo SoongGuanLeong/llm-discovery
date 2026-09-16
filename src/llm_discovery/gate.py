@@ -1,11 +1,12 @@
-"""Accurate-Enough Gate — ADR 0006 §3 Keeper eligibility.
+"""Accurate-Enough Gate — ADR 0006 §3 Keeper eligibility (issue #220: strong-only).
 
-All 7 floors must pass for Keeper; fail => Candidate (re-evaluated every build).
+All 7 floors must pass for Keeper; fail => uncertain/candidate (re-evaluated every build).
 Router keeps tagged separately per ADR 0006 (always keep but not coding Keeper).
-Strong+moderate via should_cache; weak/none never cached.
+Keeper gate is strong-only; should_cache remains strong+moderate for drop cache.
+Strong via is_accurate_enough; weak/moderate never Keeper (uncertain).
 
-Floors:
-- evidence_level in (strong, moderate)
+Floors (issue #220):
+- evidence_level == strong
 - coding_score != null
 - pricing present OR free-marker (:free/-free/_free//free or blended==0)
 - aa_model_id present OR supplement bench >=50 with http URL
@@ -28,6 +29,8 @@ _UUID_RE = re.compile(r"^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-
 _UUID_HEX32_RE = re.compile(r"^[0-9a-f]{32}$", re.IGNORECASE)
 
 CACHEABLE_LEVELS = {"strong", "moderate"}
+# Keeper gate is strong-only (issue #220): weak/moderate never Keeper; uncertain bucket.
+KEEPER_LEVELS = {"strong"}
 
 SUPPLEMENT_50_KEYS = ("swe_bench_verified", "terminal_bench", "terminal_bench_2_1", "swe_bench_pro")
 
@@ -105,9 +108,9 @@ def is_accurate_enough(record: dict[str, Any]) -> tuple[bool, str]:
         except Exception:
             pricing_blended = pricing
 
-    # Floor 1: evidence_level in (strong, moderate)
-    if _normalize_evidence_level(evidence_level) not in CACHEABLE_LEVELS:
-        return False, f"evidence_level={evidence_level} not in {sorted(CACHEABLE_LEVELS)}"
+    # Floor 1: evidence_level == strong (Keeper gate, issue #220)
+    if _normalize_evidence_level(evidence_level) not in KEEPER_LEVELS:
+        return False, f"evidence_level={evidence_level} not in {sorted(KEEPER_LEVELS)}"
     # Floor 2: coding_score != null
     if coding_score is None:
         return False, "coding_score is null"

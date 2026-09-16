@@ -295,8 +295,24 @@ class TestNoMaskedDefaults:
         assert out["evidence_level"] is None
         # pricing missing -> None, not fake dict
         assert out["pricing"] is None
+        assert out["benchmark_coverage"] is None
         # evidence empty clean -> []
         assert out["evidence"] == []
+
+    def test_provider_batch_writer_preserves_top_level_benchmark_coverage(self, tmp_path):
+        writer = ProviderBatchWriter()
+        record = _keep("top-level-coverage", benchmarks=None)
+        record["benchmarks"] = None
+        record["benchmark_coverage"] = 0.25
+
+        path = writer.write({"keep": [record]}, "test", tmp_path)
+        payload = yaml.safe_load(path.read_text())
+
+        assert payload["keep"][0]["benchmark_coverage"] == 0.25
+        assert payload["uncertain"] == []
+        stats = backfill(results_dir=tmp_path, store_path=tmp_path / "store.json")
+        assert stats["gate_skipped"] == 0
+        assert ModelInfoStore(tmp_path / "store.json").get("top-level-coverage") is not None
 
     def test_incomplete_yaml_shows_null_not_fake_09(self, tmp_path):
         writer = ProviderBatchWriter()

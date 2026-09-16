@@ -141,7 +141,8 @@ class TestSearchBudget:
     def test_snapshot_shape(self):
         accounting = SearchAccounting(budget=3)
         snap = accounting.snapshot()
-        assert snap == {"calls": 0, "cache_hits": 0, "budget_exhausted": 0, "budget": 3}
+        # issue #232 added judge_calls to the snapshot
+        assert snap == {"calls": 0, "cache_hits": 0, "budget_exhausted": 0, "budget": 3, "judge_calls": 0}
 
 
 # --------------------------------------------------------------------------- #
@@ -166,7 +167,8 @@ class TestBuildAllSearchTelemetry:
             discover_fn=discover_fn,
         )
         s = res["telemetry"]["search"]
-        assert set(s.keys()) == {"calls", "cache_hits", "budget_exhausted", "budget"}
+        # issue #232 extended the snapshot with judge_calls; original #225 keys remain a subset
+        assert {"calls", "cache_hits", "budget_exhausted", "budget"} <= set(s.keys())
         assert s["budget"] == 100  # default budget
         assert s["calls"] == 0 and s["cache_hits"] == 0 and s["budget_exhausted"] == 0
 

@@ -59,7 +59,13 @@ def _budget_from_env() -> int | None:
 
 
 class SearchAccounting:
-    """Thread-safe search counters + budget cap for one build."""
+    """Thread-safe search + judge counters + budget cap for one build.
+
+    Searches are bounded by budget (env SEARCH_GLOBAL_BUDGET, default 100;
+    0 or negative = unlimited).  Judge LLM invocations on the evaluation path
+    (issue #232) are tracked separately as judge_calls so build-all telemetry
+    reports the full search/judge budget consumption.
+    """
 
     def __init__(self, budget: int | None = None) -> None:
         if budget is None:
@@ -70,6 +76,7 @@ class SearchAccounting:
         self.calls = 0
         self.cache_hits = 0
         self.budget_exhausted = 0
+        self.judge_calls = 0  # issue #232: LLM judge invocations
         self._lock = threading.Lock()
         self._remaining = budget if budget is not None and budget > 0 else None
 
@@ -84,7 +91,7 @@ class SearchAccounting:
             return True
 
     def bump(self, name: str) -> None:
-        """Increment one counter by 1 (name in calls|cache_hits|budget_exhausted)."""
+        """Increment one counter by 1 (name in calls|cache_hits|budget_exhausted|judge_calls)."""
         with self._lock:
             if name == "calls":
                 self.calls += 1
@@ -92,6 +99,8 @@ class SearchAccounting:
                 self.cache_hits += 1
             elif name == "budget_exhausted":
                 self.budget_exhausted += 1
+            elif name == "judge_calls":
+                self.judge_calls += 1
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
@@ -100,6 +109,7 @@ class SearchAccounting:
                 "cache_hits": self.cache_hits,
                 "budget_exhausted": self.budget_exhausted,
                 "budget": self.budget,
+                "judge_calls": self.judge_calls,
             }
 
 
@@ -216,3 +226,15 @@ def reset_search_accounting() -> None:
     global _state
     with _state_lock:
         _state = (SearchAccounting(), CanonicalSearchCache())
+
+
+def bump_judge_call() -> None:
+    """Increment judge_calls on the module-global SearchAccounting (issue #232).
+
+    Called from EvaluatorCoordinator at every LLM-judge invocation on the
+    evaluation paths (claim-bearing weak recovery branch and the moderate/
+    ambiguous LLM tail), so build-all telemetry reports judge invocations
+    alongside search calls. Counts all attempted judge passes.
+    """
+    accounting, _ = get_search_accounting()
+    accounting.bump("judge_calls")

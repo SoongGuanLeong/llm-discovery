@@ -252,7 +252,12 @@ class LocalLLMEvaluator:
 
             messages.append(message)
 
+            # issue #232: hard cap — at most max_searches web searches are
+            # actually executed; further tool calls in the same turn are
+            # dropped and the limit notice is sent instead.
             for tool_call in tool_calls:
+                if search_count >= self.max_searches:
+                    break
                 result = self._execute_tool(tool_call)
                 search_count += 1
 

@@ -43,6 +43,10 @@ VISION_AA_CODING_MIN = 45.0
 VISION_AA_INTEL_MIN = 55.0
 VISION_BENCH_MIN = 50.0
 
+# issue #232: bounded web recovery — at most this many targeted web searches
+# per judge evaluation (first-party model card/docs, then benchmark evidence).
+JUDGE_MAX_SEARCHES = 2
+
 
 def _is_vision_only(flags: list[str]) -> bool:
     return EvaluatorCoordinator._is_vision_only(flags)
@@ -249,6 +253,7 @@ def discover_single(
         api_key=llm_api_key,
         min_score=config.artificial_analysis.min_score,
         search_web=searcher,
+        max_searches=JUDGE_MAX_SEARCHES,  # issue #232: bounded recovery — at most 2 targeted web searches
         timeout=getattr(config.judge_llm, "timeout", 120) or 120,
     )
     cache = BenchmarkDataCache()
@@ -376,6 +381,7 @@ def discover_provider(
         api_key=llm_api_key,
         min_score=config.artificial_analysis.min_score,
         search_web=searcher,
+        max_searches=JUDGE_MAX_SEARCHES,  # issue #232: bounded recovery — at most 2 targeted web searches
         timeout=getattr(config.judge_llm, "timeout", 120) or 120,
     )
     cache = BenchmarkDataCache()

@@ -8,6 +8,7 @@ from typing import Any
 
 from .gate import _is_router_model_id, is_accurate_enough
 from .judge import Judge
+from .search_throttle import bump_judge_call
 from .model_info_store import (
     ModelInfoStore,
     PricingSnapshot,
@@ -414,6 +415,7 @@ class EvaluatorCoordinator:
                 if should_try_llm and self.evaluator is not None:
                     try:
                         recovery_attempts.append("llm_web_recovery")
+                        bump_judge_call()  # issue #232: observability
                         judge = Judge(self.evaluator)
                         # Use recovered profile if any
                         llm_profile = rec_profile if rec_profile is not None else _profile
@@ -465,6 +467,8 @@ class EvaluatorCoordinator:
                 delattr(self, "_pending_recovery_attempts")
             except Exception:
                 pass
+        if self.evaluator is not None:
+            bump_judge_call()  # issue #232: observability (attempted)
         judge = Judge(self.evaluator)
         try:
             llm_result = judge.evaluate(self.provider_name, model, packet, self.cache, profile=_profile)
@@ -478,14 +482,21 @@ class EvaluatorCoordinator:
             return err
         gate = PolicyGate(self.min_score, self.max_score, self.cache, store=self.store)
         result = gate.apply(llm_result, resolution, model_id, self.provider_name, profile=_profile, packet=packet)
+        # issue #232: observability — record recovery attempts/status only when an
+        # actual alias recovery (weak->moderate) preceded this LLM evaluation.
+        # A plain moderate/ambiguous model (e.g. verified claim promoting to
+        # moderate, or a fresh moderate) reaching this path normally must NOT
+        # be tagged as "recovered", so aggregations on evidence_status are not
+        # polluted.  The _llm_lvl computation is unconditional (needed by the
+        # #222 store-write branches below regardless of recovery state).
+        _llm_lvl = str(result.get("evidence_level", "")).strip().lower()
         if pending:
             result["recovery_attempts"] = pending + ["llm_web_recovery"]
-            result["evidence_status"] = "uncertain" if str(result.get("evidence_level","")).lower() in ("weak","none") else "recovered"
+            result["evidence_status"] = "uncertain" if _llm_lvl in ("weak", "none") else "recovered"
             if "evidence_reason" not in result:
-                result["evidence_reason"] = "recovered_via_llm" if result.get("evidence_status")=="recovered" else "llm_still_weak"
+                result["evidence_reason"] = "recovered_via_llm" if result.get("evidence_status") == "recovered" else "llm_still_weak"
         # issue #222: weak/none LLM results are Candidates, never Keeper-store records.
         # strong/moderate keep/drop store writes stay exactly as before.
-        _llm_lvl = str(result.get("evidence_level", "")).strip().lower()
         if self.store is not None and _llm_lvl not in ("weak", "none") and result.get("decision") == "keep":
             try:
                 ok, _ = is_accurate_enough(result)

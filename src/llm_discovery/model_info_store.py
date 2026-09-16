@@ -38,14 +38,18 @@ BENCHMARK_TTL_MIN_DAYS: int = 60
 # ---------------------------------------------------------------------------
 
 def _normalize_model_id_stepfun(model_id: str) -> str:
-    if model_id.startswith("stepfun-"):
-        return "step-" + model_id[len("stepfun-"): ]
-    if model_id.startswith("stepfun/"):
-        return "step/" + model_id[len("stepfun/"): ]
-    return model_id
+    """Shim kept for backwards compat; delegate to canonical_key."""
+    from .evidence_identity import canonical_key
+    # canonical_key already handles stepfun -> step and free stripping
+    return canonical_key(model_id)
 
 
 def normalize_store_key(model_id: str) -> str:
+    """Canonical store key via evidence_identity.canonical_key.
+
+    Handles minimax-m3/free, stepfun- variants, provider prefixes, etc.
+    via single canonical layer.
+    """
     from .evidence_identity import canonical_key
     if not model_id:
         return ""
@@ -53,15 +57,8 @@ def normalize_store_key(model_id: str) -> str:
 
 
 def normalized_key_with_matcher(model_id: str) -> str:
-    try:
-        from .model_matching import normalize_model_id as _mm_normalize
-    except Exception:
-        return normalize_store_key(model_id)
-    slug = model_id.strip().rsplit("/", 1)[-1]
-    canonical = _mm_normalize(slug)
-    canonical = _normalize_model_id_stepfun(canonical)
-    canonical = re.sub(r"[:/_-]free$", "", canonical)
-    return canonical.strip("-_./:")
+    """Shim: legacy alias for normalize_store_key (kept during expand-contract)."""
+    return normalize_store_key(model_id)
 
 # ---------------------------------------------------------------------------
 # Pricing aggregation

@@ -166,30 +166,28 @@ class BenchmarkDataCache:
     def _rebuild_norm_index(self) -> None:
         idx: dict[str, str] = {}
         try:
-            from .evidence_identity import resolve_canonical_variants
+            from .evidence_identity import canonical_key, resolve_canonical_variants
         except Exception:
+            canonical_key = None  # type: ignore
             resolve_canonical_variants = None  # type: ignore
         for key in self._data:
-            norm = _normalize_model_key(key)
+            # Canonical layer: single source via canonical_key
+            if canonical_key is not None:
+                norm = canonical_key(key)
+            else:
+                norm = _normalize_model_key(key)
             if not norm:
                 continue
+            # Direct canonical + dot/hyphen alts (dot/hyphen already covered by variants but keep for compat)
             for alt in {norm, norm.replace(".", "-"), re.sub(r"(\d)-(\d)", r"\1.\2", norm)}:
                 idx.setdefault(alt, key)
             if resolve_canonical_variants is not None:
                 try:
-                    for var, _, _ in resolve_canonical_variants(norm):
+                    for var, _, reason in resolve_canonical_variants(norm):
+                        # Conservative: do not index dated stripped bases; handled via get() dated fallback only when base exists distinctly
+                        if "dated" in reason:
+                            continue
                         idx.setdefault(var, key)
-                    m = __import__("re").search(r"-(\d{4,8})$", norm)
-                    if m:
-                        base = norm[: m.start()]
-                        if base:
-                            idx.setdefault(base, key)
-                            hv = base.replace(".", "-")
-                            if hv != base:
-                                idx.setdefault(hv, key)
-                            dv = __import__("re").sub(r"(\d)-(\d)", r"\1.\2", base)
-                            if dv != base and dv != hv:
-                                idx.setdefault(dv, key)
                 except Exception:
                     pass
         self._norm_index = idx
@@ -288,30 +286,39 @@ class BenchmarkDataCache:
             return self._data[bare]["benchmarks"]
 
         provider_slug = bare
-        norm_slug = _normalize_model_key(provider_slug)
+        # Canonical layer: single source via canonical_key
+        try:
+            from .evidence_identity import canonical_key
+            norm_slug = canonical_key(provider_slug)
+        except Exception:
+            norm_slug = _normalize_model_key(provider_slug)
         if not norm_slug:
             return None
         for alt in (norm_slug, norm_slug.replace(".", "-"), re.sub(r"(\d)-(\d)", r"\1.\2", norm_slug)):
             key = self._norm_index.get(alt)
             if key is not None and key in self._data:
                 return self._data[key]["benchmarks"]
-        # Evidence-identity variant fallback (dot/hyphen, dated, claude reorder, gemini preview, etc.)
+        # Evidence-identity variant fallback (dot/hyphen, claude reorder, gemini preview, suffix etc. - dated handled conservatively below)
         try:
             from .evidence_identity import resolve_canonical_variants
-            for var, _, _ in resolve_canonical_variants(norm_slug):
+            for var, _, reason in resolve_canonical_variants(norm_slug):
+                if "dated" in reason:
+                    continue
                 key = self._norm_index.get(var)
                 if key is not None and key in self._data:
                     return self._data[key]["benchmarks"]
         except Exception:
             pass
-        # Conservative date-suffix fallback: strip trailing -YYYY or -MMDD if base exists (e.g. deepseek-v4-pro-0813 -> deepseek-v4-pro)
+        # Conservative date-suffix fallback: strip trailing -YYYY / -YYYYMMDD / -YY-MM-DD if base exists as distinct entry
         # Only when direct norm missed and base without date is distinct entry; never collapses two dated variants.
-        date_stripped = re.sub(r"-\d{4}$", "", norm_slug)
-        if date_stripped != norm_slug:
-            for alt in (date_stripped, date_stripped.replace(".", "-"), re.sub(r"(\d)-(\d)", r"\1.\2", date_stripped)):
-                key = self._norm_index.get(alt)
-                if key is not None and key in self._data:
-                    return self._data[key]["benchmarks"]
+        for pat in (r"-\d{4,8}$", r"-\d{4}-\d{2}-\d{2}$"):
+            date_stripped = re.sub(pat, "", norm_slug)
+            if date_stripped != norm_slug:
+                for alt in (date_stripped, date_stripped.replace(".", "-"), re.sub(r"(\d)-(\d)", r"\1.\2", date_stripped)):
+                    key = self._norm_index.get(alt)
+                    if key is not None and key in self._data:
+                        return self._data[key]["benchmarks"]
+                break
         return None
 
     def get_raw(self, model_id: str) -> list:
@@ -327,7 +334,11 @@ class BenchmarkDataCache:
             return self._data[bare].get("raw_benchmarks", [])
 
         provider_slug = bare
-        norm_slug = _normalize_model_key(provider_slug)
+        try:
+            from .evidence_identity import canonical_key
+            norm_slug = canonical_key(provider_slug)
+        except Exception:
+            norm_slug = _normalize_model_key(provider_slug)
         if not norm_slug:
             return []
         for alt in (norm_slug, norm_slug.replace(".", "-"), re.sub(r"(\d)-(\d)", r"\1.\2", norm_slug)):
@@ -336,18 +347,22 @@ class BenchmarkDataCache:
                 return self._data[key].get("raw_benchmarks", [])
         try:
             from .evidence_identity import resolve_canonical_variants
-            for var, _, _ in resolve_canonical_variants(norm_slug):
+            for var, _, reason in resolve_canonical_variants(norm_slug):
+                if "dated" in reason:
+                    continue
                 key = self._norm_index.get(var)
                 if key is not None and key in self._data:
                     return self._data[key].get("raw_benchmarks", [])
         except Exception:
             pass
-        date_stripped = re.sub(r"-\d{4}$", "", norm_slug)
-        if date_stripped != norm_slug:
-            for alt in (date_stripped, date_stripped.replace(".", "-"), re.sub(r"(\d)-(\d)", r"\1.\2", date_stripped)):
-                key = self._norm_index.get(alt)
-                if key is not None and key in self._data:
-                    return self._data[key].get("raw_benchmarks", [])
+        for pat in (r"-\d{4,8}$", r"-\d{4}-\d{2}-\d{2}$"):
+            date_stripped = re.sub(pat, "", norm_slug)
+            if date_stripped != norm_slug:
+                for alt in (date_stripped, date_stripped.replace(".", "-"), re.sub(r"(\d)-(\d)", r"\1.\2", date_stripped)):
+                    key = self._norm_index.get(alt)
+                    if key is not None and key in self._data:
+                        return self._data[key].get("raw_benchmarks", [])
+                break
         return []
 
     def collect_from_web(self, urls: dict[str, str]) -> None:

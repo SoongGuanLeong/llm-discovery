@@ -23,6 +23,7 @@ from typing import Any, Callable
 import yaml
 from collections import Counter
 from .backfill import backfill
+from .candidate_store import CandidateStore  # issue #222: weak/none candidate cache (60-90d TTL)
 from .config import load_config
 from .evaluator import EvaluatorCoordinator  # Ticket 06: deep module seam (per-provider coordinator)
 from .model_info_store import DEFAULT_TTL_DAYS, ModelInfoStore, is_stale, normalize_store_key
@@ -184,6 +185,9 @@ def build_all(
     store_for_discovery = ModelInfoStore(store_path)
     store_for_discovery.load()
     before_keys = set(store_for_discovery.keys())
+    # issue #222: one Candidate store per build, shared across provider threads (weak/none 60-90d TTL)
+    candidate_store_for_discovery = CandidateStore(data_dir / "model_candidate_store.json")
+    candidate_store_for_discovery.load()
 
     # 2a. Catalog freshness gate (issue #140, ADR 0007 rank 6): if either catalog
     # fetched_at is older than catalog_max_age_days, refresh before the pricing
@@ -268,8 +272,10 @@ def build_all(
         def _run_mock_provider(name: str) -> tuple[str, dict[str, list[dict[str, Any]]], Path]:
             result = None
             tried = False
-            # Try signatures in order: (name, config, aa, models_dev, max_workers, store=...), then without store, then (name,)
+            # Try signatures in order: (name, config, aa, models_dev, max_workers, store=..., candidate_store=...),
+            # then without store, then (name,)
             attempts: list[Callable[[], Any]] = [
+                lambda n=name: discover_fn(n, config, aa, models_dev, max_workers, store=store_for_discovery, candidate_store=candidate_store_for_discovery),
                 lambda n=name: discover_fn(n, config, aa, models_dev, max_workers, store=store_for_discovery),
                 lambda n=name: discover_fn(n, config, aa, models_dev, max_workers),
                 lambda n=name: discover_fn(n),
@@ -358,7 +364,7 @@ def build_all(
         def _run_real_provider(name: str) -> tuple[str, dict[str, list[dict[str, Any]]], Path]:
             print(f"\n=== {name} === (build-all)")
             try:
-                result = discover_provider(name, config, _aa_shared, _md_shared, max_workers=max_workers, store=store_for_discovery, catalog_stale=catalog_stale)
+                result = discover_provider(name, config, _aa_shared, _md_shared, max_workers=max_workers, store=store_for_discovery, catalog_stale=catalog_stale, candidate_store=candidate_store_for_discovery)
             except Exception as exc:
                 from .pipeline import provider_error_result
                 result = provider_error_result(name, exc)
@@ -444,7 +450,9 @@ def build_all(
         if prov not in per_provider_raw:
             per_provider_raw[prov] = counts
     build_wall = time.monotonic() - build_start
-    telemetry = {"discovered": total_keep, "unique_discovered": len(live_keys), "reused": reused_unique, "rebuilt": rebuilt_total, "rebuilt_by_reason": {"new_key": rebuilt_new, "identity_bad": rebuilt_identity, "pricing_ttl_reavg": 0}, "gc": gc_count, "store_size": store.size(), "store_size_before": len(before_keys), "duplicate_keys": len(duplicate_keys), "live_keys": len(live_keys), "per_provider": per_provider_raw, "per_provider_post": per_provider_stats, "provider_concurrency": provider_concurrency, "wall_seconds": round(build_wall, 3)}
+    # issue #222 AC4: candidate cache hit/miss/size is how "no-evidence models not
+    # retried each build" is measured (e.g. xkiro's 46 weak models)
+    telemetry = {"discovered": total_keep, "unique_discovered": len(live_keys), "reused": reused_unique, "rebuilt": rebuilt_total, "rebuilt_by_reason": {"new_key": rebuilt_new, "identity_bad": rebuilt_identity, "pricing_ttl_reavg": 0}, "gc": gc_count, "store_size": store.size(), "store_size_before": len(before_keys), "candidate_cache": {**candidate_store_for_discovery.stats.as_dict(), "size": candidate_store_for_discovery.size()}, "duplicate_keys": len(duplicate_keys), "live_keys": len(live_keys), "per_provider": per_provider_raw, "per_provider_post": per_provider_stats, "provider_concurrency": provider_concurrency, "wall_seconds": round(build_wall, 3)}
     print(f"[build-all] telemetry discovered={total_keep} unique={len(live_keys)} reused={reused_unique} rebuilt={rebuilt_total} (new={rebuilt_new} identity={rebuilt_identity}) gc={gc_count} store={store.size()} wall={build_wall:.2f}s conc={provider_concurrency}")
     for prov in sorted(per_provider_raw):
         c = per_provider_raw[prov]

@@ -270,6 +270,7 @@ def discover_provider(
     max_workers: int = 8,
     store: ModelInfoStore | None = None,
     catalog_stale: bool = False,
+    candidate_store: Any = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """T3 path: evaluate every model for a provider in parallel.
 
@@ -278,6 +279,10 @@ def discover_provider(
 
     catalog_stale: when True, cached drops with strong/moderate evidence are
     reused but cached keeps are re-evaluated (catalog fetched_at > 28d TTL).
+
+    candidate_store (issue #222): optional weak/none Candidate cache (60-90d
+    TTL). When provided, weak/none evaluations are cached there and reused on
+    identical evidence_hash; results route to the "uncertain" bucket.
     """
     print(f"[{provider_name}] Starting discovery...")
     from .benchmarks import BenchmarkDataCache
@@ -384,8 +389,10 @@ def discover_provider(
         cache=cache,
         store=store,
         catalog_stale=catalog_stale,
+        candidate_store=candidate_store,
     )
-    result: dict[str, list[dict[str, Any]]] = {"keep": [], "drop": [], "error": []}
+    # issue #220/#222: uncertain bucket for weak/none candidates (gate-failed keeps)
+    result: dict[str, list[dict[str, Any]]] = {"keep": [], "drop": [], "uncertain": [], "error": []}
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
 
         def _evaluate_wrapper(m: dict[str, Any]):
@@ -413,6 +420,9 @@ def discover_provider(
                 result["keep"].append(evaluation)
             elif decision == "drop":
                 result["drop"].append(evaluation)
+            elif decision == "uncertain":
+                # issue #222: weak/none candidates are distinct from drops (no-evidence, cached 60-90d)
+                result["uncertain"].append(evaluation)
             else:
                 result["error"].append(evaluation)
     # Dropped models are completely omitted: no LLM, no YAML (generic) or paid-gated excluded (nararouter)
@@ -448,8 +458,8 @@ def discover_provider(
         # For each keep with uncertain tier and no aa_score/coding_score, check older kept
         # Also check drops that are uncertain? Actually drops with no aa_score due to uncertain tier could be promoted if sibling exists
         # But spec says newer should be keep if older keep exists, so promote drops with sibling
-        # Check all evaluations in keep + drop where aa_score is None and coding_score is None/uncertain
-        for evaluation in list(result.get("keep", [])) + list(result.get("drop", [])):
+        # Check all evaluations in keep + drop + uncertain where aa_score is None and coding_score is None/uncertain
+        for evaluation in list(result.get("keep", [])) + list(result.get("drop", [])) + list(result.get("uncertain", [])):
             if evaluation.get("aa_score") is not None:
                 continue
             if evaluation.get("coding_score") is not None:

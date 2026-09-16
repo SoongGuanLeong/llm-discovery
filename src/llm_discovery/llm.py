@@ -175,6 +175,11 @@ class LocalLLMEvaluator:
         request: ModelEvaluationRequest,
         evidence_packet: EvidencePacket | None = None,
     ) -> ModelEvaluation:
+        # issue #225: record the active model for the search wrapper (thread-local
+        # in CachedSearcher); plain callables without set_model (tests) unaffected.
+        if self.search_web is not None and hasattr(self.search_web, "set_model"):
+            self.search_web.set_model(request.model_id)
+
         messages = [
             {
                 "role": "system",

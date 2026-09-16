@@ -4,7 +4,7 @@ Orchestrates in order:
   1. Parse config/providers.yaml
   2. Refresh catalogs cache-optional (skip when missing, no network required)
   3. Discover all providers (injectable discover_fn for tests; defaults to pipeline.discover_provider)
-     - Bounded parallelism (3-4 concurrent) for provider discovery; intra-provider judge still max_workers=8
+     - Bounded parallelism (2 concurrent) for provider discovery; intra-provider judge max_workers=4
      - Store fcntl+atomic safe under cross-provider concurrent puts
   4. Backfill de-duplicates Ephemeral Reports by normalized key via benchmarks gap-fill + pricing aggregation
   5. GC scans live normalized keys from all keep lists; if key absent from live set and stale (>28d) delete, share-aware
@@ -27,9 +27,10 @@ from .candidate_store import CandidateStore  # issue #222: weak/none candidate c
 from .config import load_config
 from .evaluator import EvaluatorCoordinator  # Ticket 06: deep module seam (per-provider coordinator)
 from .model_info_store import DEFAULT_TTL_DAYS, ModelInfoStore, is_stale, normalize_store_key
+from .search_throttle import get_search_accounting, reset_search_accounting
 
-# Bounded provider concurrency: 3-4 concurrent per acceptance (issue #142)
-PROVIDER_CONCURRENCY = 4
+# Bounded provider concurrency: capped 4 -> 2 after work cut (issue #225)
+PROVIDER_CONCURRENCY = 2
 
 def _collect_live_keys(results_dir: Path) -> tuple[set[str], dict[str, int], int]:
     live: set[str] = set()
@@ -112,7 +113,7 @@ def build_all(
     config_path: str | Path = "config/providers.yaml",
     provider_names: list[str] | None = None,
     discover_fn: Callable[..., dict[str, list[dict[str, Any]]]] | None = None,
-    max_workers: int = 8,
+    max_workers: int = 4,
     catalog_max_age_days: int = 28,
     no_catalog_refresh: bool = False,
     retry_failed: bool = False,
@@ -138,7 +139,7 @@ def build_all(
             - keep and drop both empty (e.g. transient provider error wrote empty keep/drop)
             Useful for CI retries without --providers listing. Ignored when provider_names is empty.
         provider_concurrency: max concurrently executing providers (1-8). None
-            means use default PROVIDER_CONCURRENCY (4).
+            means use default PROVIDER_CONCURRENCY (2).
         judge_timeout: override judge LLM timeout in seconds for this build.
             When set, overrides config.providers.yaml judge_llm.timeout.
 
@@ -146,6 +147,8 @@ def build_all(
         dict with keys: providers_discovered, files_written, backfill stats, store_path, store_size, catalogs
     """
     build_start = time.monotonic()
+    # issue #225: fresh search budget + canonical cache for this build
+    reset_search_accounting()
     data_dir = Path(data_dir)
     config_path = Path(config_path)
     results_dir = data_dir / "results"
@@ -266,7 +269,7 @@ def build_all(
     provider_concurrency = max(1, min(_conc, len(provider_list)))
 
     if discover_fn is not None:
-        # Mocked/injected discovery for tests — bounded parallelism (3-4 concurrent)
+        # Mocked/injected discovery for tests — bounded parallelism (2 concurrent)
         from .results import ProviderBatchWriter
 
         def _run_mock_provider(name: str) -> tuple[str, dict[str, list[dict[str, Any]]], Path]:
@@ -452,7 +455,7 @@ def build_all(
     build_wall = time.monotonic() - build_start
     # issue #222 AC4: candidate cache hit/miss/size is how "no-evidence models not
     # retried each build" is measured (e.g. xkiro's 46 weak models)
-    telemetry = {"discovered": total_keep, "unique_discovered": len(live_keys), "reused": reused_unique, "rebuilt": rebuilt_total, "rebuilt_by_reason": {"new_key": rebuilt_new, "identity_bad": rebuilt_identity, "pricing_ttl_reavg": 0}, "gc": gc_count, "store_size": store.size(), "store_size_before": len(before_keys), "candidate_cache": {**candidate_store_for_discovery.stats.as_dict(), "size": candidate_store_for_discovery.size()}, "duplicate_keys": len(duplicate_keys), "live_keys": len(live_keys), "per_provider": per_provider_raw, "per_provider_post": per_provider_stats, "provider_concurrency": provider_concurrency, "wall_seconds": round(build_wall, 3)}
+    telemetry = {"discovered": total_keep, "unique_discovered": len(live_keys), "reused": reused_unique, "rebuilt": rebuilt_total, "rebuilt_by_reason": {"new_key": rebuilt_new, "identity_bad": rebuilt_identity, "pricing_ttl_reavg": 0}, "gc": gc_count, "store_size": store.size(), "store_size_before": len(before_keys), "candidate_cache": {**candidate_store_for_discovery.stats.as_dict(), "size": candidate_store_for_discovery.size()}, "duplicate_keys": len(duplicate_keys), "live_keys": len(live_keys), "per_provider": per_provider_raw, "per_provider_post": per_provider_stats, "provider_concurrency": provider_concurrency, "search": get_search_accounting()[0].snapshot(), "wall_seconds": round(build_wall, 3)}
     print(f"[build-all] telemetry discovered={total_keep} unique={len(live_keys)} reused={reused_unique} rebuilt={rebuilt_total} (new={rebuilt_new} identity={rebuilt_identity}) gc={gc_count} store={store.size()} wall={build_wall:.2f}s conc={provider_concurrency}")
     for prov in sorted(per_provider_raw):
         c = per_provider_raw[prov]
@@ -505,7 +508,7 @@ def main() -> None:
     parser.add_argument("--providers", nargs="*", help="Optional subset of provider names to build")
     parser.add_argument("--all-providers", action="store_true", help="Build all providers (default, parity with discover.py)")
     parser.add_argument("providers_pos", nargs="*", help=argparse.SUPPRESS)
-    parser.add_argument("--workers", "--max-workers", dest="max_workers", type=int, default=8, help="Workers per provider (alias --workers for discover.py parity)")
+    parser.add_argument("--workers", "--max-workers", dest="max_workers", type=int, default=4, help="Workers per provider (alias --workers for discover.py parity)")
     parser.add_argument("--catalog-max-age-days", type=int, default=28, help="Refresh catalogs before build when fetched_at is older than this (0 disables, default 28)")
     parser.add_argument("--no-catalog-refresh", action="store_true", help="Skip the catalog freshness gate entirely (offline builds)")
     args = parser.parse_args()

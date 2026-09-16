@@ -6,10 +6,13 @@ evaluate_model is now <30 lines coordinating four seamed adapters:
 Other entry points (discover_single, discover_provider, discover_all_providers)
 retain isolation but delegate per-model work to evaluate_model.
 """
+import hashlib
+import json
 import re
 import os
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +26,7 @@ from .model_resolver import ModelResolver, resolve_model
 from .categorize import categorize_model
 from .policy_gate import PolicyGate
 from .secrets import load_all_secrets, load_discovery_secrets, load_shared_secrets  # noqa: keep aliases for patch compat
+from .search_throttle import PROBE_CACHE_DEFAULT_PATH, get_search_accounting, make_cached_search
 
 from .evaluator import EvaluatorCoordinator  # Coordinator for evaluate_model (issue #96)
 
@@ -238,12 +242,13 @@ def discover_single(
         brave_api_key=os.environ.get("BRAVE_API_KEY"),
         disabled=os.environ.get("DISABLE_WEB_SEARCH") == "1",
     )
+    searcher = make_cached_search(*get_search_accounting(), searcher)  # issue #225: budget + canonical cache
     evaluator = LocalLLMEvaluator(
         base_url=config.judge_llm.base_url,
         model=config.judge_llm.model,
         api_key=llm_api_key,
         min_score=config.artificial_analysis.min_score,
-        search_web=searcher.search,
+        search_web=searcher,
         timeout=getattr(config.judge_llm, "timeout", 120) or 120,
     )
     cache = BenchmarkDataCache()
@@ -267,7 +272,7 @@ def discover_provider(
     config: Any,
     aa: Any,
     models_dev: Any,
-    max_workers: int = 8,
+    max_workers: int = 4,
     store: ModelInfoStore | None = None,
     catalog_stale: bool = False,
 ) -> dict[str, list[dict[str, Any]]]:
@@ -359,12 +364,13 @@ def discover_provider(
         brave_api_key=os.environ.get("BRAVE_API_KEY"),
         disabled=os.environ.get("DISABLE_WEB_SEARCH") == "1",
     )
+    searcher = make_cached_search(*get_search_accounting(), searcher)  # issue #225: budget + canonical cache
     evaluator = LocalLLMEvaluator(
         base_url=config.judge_llm.base_url,
         model=config.judge_llm.model,
         api_key=llm_api_key,
         min_score=config.artificial_analysis.min_score,
-        search_web=searcher.search,
+        search_web=searcher,
         timeout=getattr(config.judge_llm, "timeout", 120) or 120,
     )
     cache = BenchmarkDataCache()
@@ -533,7 +539,7 @@ def discover_all_providers(
     config: Any,
     aa: Any,
     models_dev: Any,
-    max_workers: int = 8,
+    max_workers: int = 4,
     output_dir: Path = Path("data/results"),
     store: ModelInfoStore | None = None,
 ) -> dict[str, dict[str, list[dict[str, Any]]]]:
@@ -773,7 +779,107 @@ PROBE_FREE_PROVIDERS = {"bai", "bestvirtualgoods", "nvidia_nim", "ollama_cloud",
 NO_FREE_FILTER_PROVIDERS = {"xkiro"}
 
 
-def _probe_model_is_free(base_url: str, api_key: str, model_id: str, timeout: float = 8.0) -> bool | None:
+PROBE_CACHE_TTL_DAYS = 7
+
+_PROBE_CACHE_MISSING = object()
+
+
+class ProbeCache:
+    """7-day JSON cache of free/paid probe results per (base_url, model_id) (issue #225).
+
+    Store shape: {sha256(base_url + "|" + model_id): {"is_free": true|false|null, "ts": iso}}.
+    Load/save are best-effort (warn-only) so a corrupt or missing cache never fails a build.
+    A fresh entry is served with ZERO httpx calls; after a real probe the result is stored
+    (including None=unknown) so the next build within the TTL skips the probe.
+    """
+
+    def __init__(self, path: str | Path | None = None) -> None:
+        self.path = Path(path) if path is not None else Path(PROBE_CACHE_DEFAULT_PATH)
+        self._lock = threading.Lock()
+        self._data: dict[str, Any] | None = None
+
+    @staticmethod
+    def _key(base_url: str, model_id: str) -> str:
+        return hashlib.sha256(f"{base_url}|{model_id}".encode("utf-8")).hexdigest()
+
+    def _load(self) -> dict[str, Any]:
+        if self._data is None:
+            self._data = {}
+            try:
+                if self.path.exists():
+                    raw = json.loads(self.path.read_text())
+                    if isinstance(raw, dict):
+                        self._data = raw
+            except Exception as exc:  # warn-only, never fail the build
+                print(f"[probe-cache] WARN: load failed ({self.path}): {exc}; continuing without cache")
+        return self._data
+
+    def get_fresh(self, base_url: str, model_id: str, now: datetime | None = None) -> Any:
+        """Cached is_free (True/False/None) when a fresh entry exists, else _PROBE_CACHE_MISSING."""
+        if now is None:
+            now = datetime.now(UTC)
+        with self._lock:
+            entry = self._load().get(self._key(base_url, model_id))
+        if not isinstance(entry, dict):
+            return _PROBE_CACHE_MISSING
+        ts = entry.get("ts")
+        if not isinstance(ts, str):
+            return _PROBE_CACHE_MISSING
+        try:
+            age = now - datetime.fromisoformat(ts)
+        except ValueError:
+            return _PROBE_CACHE_MISSING
+        if age > timedelta(days=PROBE_CACHE_TTL_DAYS):
+            return _PROBE_CACHE_MISSING
+        return entry.get("is_free")
+
+    def put(self, base_url: str, model_id: str, is_free: bool | None, now: datetime | None = None) -> None:
+        ts = (now if now is not None else datetime.now(UTC)).isoformat()
+        with self._lock:
+            data = self._load()
+            data[self._key(base_url, model_id)] = {"is_free": is_free, "ts": ts}
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                self.path.write_text(json.dumps(data, indent=2))
+            except Exception as exc:  # warn-only, never fail the build
+                print(f"[probe-cache] WARN: save failed ({self.path}): {exc}; in-memory entry kept")
+
+
+_default_probe_cache: ProbeCache | None = None
+_default_probe_cache_lock = threading.Lock()
+
+
+def get_default_probe_cache() -> ProbeCache:
+    """Process-wide ProbeCache at PROBE_CACHE_DEFAULT_PATH (lazy singleton)."""
+    global _default_probe_cache
+    with _default_probe_cache_lock:
+        if _default_probe_cache is None:
+            _default_probe_cache = ProbeCache()
+        return _default_probe_cache
+
+
+def _probe_model_is_free(base_url: str, api_key: str, model_id: str, timeout: float = 8.0, probe_cache: ProbeCache | None = None) -> bool | None:
+    """Probe single model via chat completions to infer free vs paid.
+
+    Returns True=free, False=paid, None=unknown.
+    Free: 200 success, 429 rate-limit, 400 with max_tokens validation.
+    Paid: 402/403 with deposit/subscription, 400 with insufficient balance/quota.
+    404/5xx/timeout -> None.
+
+    probe_cache (issue #225): 7-day cache per (base_url, model_id); a fresh entry is
+    returned with zero httpx calls, and real probe results (including None) are stored.
+    """
+    if probe_cache is None:
+        probe_cache = get_default_probe_cache()
+    cached = probe_cache.get_fresh(base_url, model_id)
+    if cached is not _PROBE_CACHE_MISSING:
+        return cached
+    result = _probe_model_is_free_live(base_url, api_key, model_id, timeout)
+    probe_cache.put(base_url, model_id, result)
+    return result
+
+
+def _probe_model_is_free_live(base_url: str, api_key: str, model_id: str, timeout: float = 8.0) -> bool | None:
     """Probe single model via chat completions to infer free vs paid.
 
     Returns True=free, False=paid, None=unknown.
@@ -831,6 +937,7 @@ def _probe_free_models(
     provider_name: str = "",
     max_workers: int = 8,
     timeout: float = 8.0,
+    probe_cache: ProbeCache | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Live probe to split free vs paid when /models gives no signal.
 
@@ -850,7 +957,7 @@ def _probe_free_models(
 
     def _check(m: dict[str, Any]) -> tuple[dict[str, Any], bool | None]:
         mid = str(m.get("id", ""))
-        res = _probe_model_is_free(base_url, api_key, mid, timeout=timeout)
+        res = _probe_model_is_free(base_url, api_key, mid, timeout=timeout, probe_cache=probe_cache)
         return m, res
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:

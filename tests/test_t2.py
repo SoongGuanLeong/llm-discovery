@@ -222,8 +222,10 @@ class TestEvaluateModel:
         rec = evaluate_model(
             {"id": "qwen-72b"}, "groq", aa_catalog, models_dev, ev, 24.0, 45.0
         )
-        assert rec["decision"] == "drop"
-        assert rec["tier"] == "drop"
+        # issue #222: weak evidence (AA 15 < 24) is intercepted by deterministic
+        # screening as uncertain (was drop pre-#222) -- never keep, cached 60-90d
+        assert rec["decision"] == "uncertain"
+        assert rec["tier"] == "uncertain"
         assert rec["aa_score"] == 15.0
 
     def test_coding_false_forced_drop(self, aa_catalog, models_dev):
@@ -281,9 +283,9 @@ class TestEvaluateModel:
         )
         assert rec["aa_model_id"] is None
         assert rec["aa_score"] is None
-        # No benchmark data -> unknown -> DROP for final catalog
-        assert rec["tier"] == "drop"
-        assert rec["decision"] == "drop"
+        # No benchmark data -> weak -> UNCERTAIN for final catalog (issue #222: was drop)
+        assert rec["tier"] == "uncertain"
+        assert rec["decision"] == "uncertain"
         # Check that evidence mentions insufficient evidence
         evidence_str = " ".join(rec.get("evidence", []))
         assert "Insufficient evidence" in evidence_str or "insufficient evidence" in evidence_str.lower()

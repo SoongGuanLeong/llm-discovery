@@ -12,9 +12,11 @@ from .model_info_store import (
     ModelInfoStore,
     PricingSnapshot,
     aggregate_pricing,
+    compute_evidence_hash,
     is_stale,
     normalize_store_key,
 )
+from .candidate_store import CANDIDATE_TTL_DAYS, CandidateRecord
 from .categorize import categorize_model
 from .policy_gate import PolicyGate, _is_router_model
 
@@ -80,6 +82,7 @@ class EvaluatorCoordinator:
     max_score: float
     cache: Any = None
     store: ModelInfoStore = None
+    candidate_store: Any = None  # issue #222: weak/none candidate cache (default None -> no candidate caching)
     catalog_stale: bool = False  # deprecated per-evidence TTL (issue #221) - kept for compat, ignored
 
     @staticmethod
@@ -107,9 +110,14 @@ class EvaluatorCoordinator:
         model_id = model["id"]
         from .pipeline import resolve_model as _resolve
         resolution = _resolve(model_id, self.aa, self.models_dev, self.cache)
+        # Canonical cache identity shared by the Keeper and Candidate stores (issue #222)
+        cache_key: str | None = None
+        try:
+            cache_key = resolve_cache_identity(model_id, resolution) or None
+        except Exception:
+            cache_key = None
         if self.store is not None:
             try:
-                cache_key = resolve_cache_identity(model_id, resolution)
                 if cache_key:
                     cached = self.store.get(cache_key)
                     hit = self.classify_hit(cached)
@@ -135,11 +143,21 @@ class EvaluatorCoordinator:
                         )
                         if self.provider_name == "llm7" and model.get("tier") == "turbo" and result.get("decision") != "drop":
                             result["tier"] = "flash"
+                        # Keeper hit: model evaluates strong -> leave the Candidate store (issue #222)
+                        self._reconcile_candidate_store(model_id, cache_key, resolution, result)
                         return result
             except _SkipCacheHit:
                 pass  # Fall through to re-evaluate (catalog stale + cached keep)
             except Exception:
                 pass
+        # Candidate cache reuse (issue #222): weak/none cached with 60-90d TTL, no LLM on hit
+        if self.candidate_store is not None and cache_key:
+            try:
+                candidate = self._candidate_cache_lookup(model_id, cache_key, resolution)
+            except Exception:
+                candidate = None
+            if candidate is not None:
+                return candidate
         # Fast-path specialized (tts/embedding/rerank/speech/safety) without bench lookup or LLM (spec #219)
         _lower = model_id.lower()
         _spec_patterns = ("tts", "embedding", "embed", "rerank", "reranker", "speech", "whisper", "safety", "guard", "moderation", "text-to-speech", "speech-to-text", "code-embedding", "text-embedding")
@@ -191,6 +209,8 @@ class EvaluatorCoordinator:
                         self.store.put(key, rec)
                 except Exception:
                     pass
+            # issue #222: router records are strong -> leave the Candidate store if present
+            self._reconcile_candidate_store(model_id, cache_key, resolution, result)
             if self.provider_name == "llm7" and model.get("tier") == "turbo" and result.get("decision") != "drop":
                 result["tier"] = "flash"
             return result
@@ -236,22 +256,17 @@ class EvaluatorCoordinator:
                         self.store.put(key, rec)
                 except Exception:
                     pass
+            # issue #222: strong result -> model is (or remains) a Keeper; drop stale candidate entry
+            self._reconcile_candidate_store(model_id, cache_key, resolution, result)
             if self.provider_name == "llm7" and model.get("tier") == "turbo" and result.get("decision") != "drop":
                 result["tier"] = "flash"
             return result
         elif det_level == "weak":
+            # issue #222: weak/none -> uncertain, cached in the Candidate store with long TTL.
+            # No Keeper-store write: weak never passes the Accurate-Enough Gate, and a
+            # judge-less slim record would classify_hit "miss" on every build anyway.
             result = self._deterministic_weak_record(model_id, resolution, _profile, packet)
-            if self.store is not None:
-                try:
-                    from .model_info_store import ModelInfoRecord
-                    rec = ModelInfoRecord.from_provider_record(result, provider=self.provider_name, evaluated_at=datetime.now(UTC).isoformat())
-                    key = resolve_cache_identity(model_id, resolution)
-                    if key:
-                        self.store.put(key, rec)
-                except Exception:
-                    pass
-            if self.provider_name == "llm7" and model.get("tier") == "turbo" and result.get("decision") != "drop":
-                result["tier"] = "flash"
+            self._reconcile_candidate_store(model_id, cache_key, resolution, result)
             return result
         # moderate/ambiguous -> LLM
         judge = Judge(self.evaluator)
@@ -261,7 +276,10 @@ class EvaluatorCoordinator:
             return self._llm_error_record(model_id, exc)
         gate = PolicyGate(self.min_score, self.max_score, self.cache, store=self.store)
         result = gate.apply(llm_result, resolution, model_id, self.provider_name, profile=_profile, packet=packet)
-        if self.store is not None and result.get("decision") == "keep":
+        # issue #222: weak/none LLM results are Candidates, never Keeper-store records.
+        # strong/moderate keep/drop store writes stay exactly as before.
+        _llm_lvl = str(result.get("evidence_level", "")).strip().lower()
+        if self.store is not None and _llm_lvl not in ("weak", "none") and result.get("decision") == "keep":
             try:
                 ok, _ = is_accurate_enough(result)
                 if ok:
@@ -272,7 +290,7 @@ class EvaluatorCoordinator:
                         self.store.put(key, rec)
             except Exception:
                 pass
-        elif self.store is not None and str(result.get("decision", "")).strip().lower() == "drop":
+        elif self.store is not None and _llm_lvl not in ("weak", "none") and str(result.get("decision", "")).strip().lower() == "drop":
             try:
                 from .model_info_store import ModelInfoRecord
                 rec = ModelInfoRecord.from_provider_record(result, provider=self.provider_name, evaluated_at=datetime.now(UTC).isoformat())
@@ -281,6 +299,7 @@ class EvaluatorCoordinator:
                     self.store.put(key, rec)
             except Exception:
                 pass
+        self._reconcile_candidate_store(model_id, cache_key, resolution, result)
         if self.provider_name == "llm7" and model.get("tier") == "turbo":
             result["decision"] = "keep"
             result["tier"] = "flash"
@@ -897,7 +916,12 @@ class EvaluatorCoordinator:
         }
 
     def _deterministic_weak_record(self, model_id: str, resolution: Any, profile: Any, packet: Any) -> dict[str, Any]:
-        """Weak/none evidence deterministic drop/uncertain without LLM (spec #219)."""
+        """Weak/none evidence deterministic uncertain without LLM (spec #219, issue #222).
+
+        issue #222: decision/tier are "uncertain" (insufficient evidence to determine
+        quality) instead of drop; such results are cached in the Candidate store with
+        a 60-90d TTL and never written to the slim v2 Keeper store.
+        """
         from .benchmarks import compute_coding_score
         benchmarks_dict = profile.to_dict() if profile and profile.scores else {}
         coding_score, _, score_reasons = (compute_coding_score(profile) if profile and profile.scores else (None, 0.0, ["No benchmark data"]))
@@ -911,8 +935,8 @@ class EvaluatorCoordinator:
         else:
             aa_model_id = aa_name = aa_slug = verified_score = pricing = None
         evidence: list[str] = [
-            "Weak/none evidence: no AA >=24, no bench >=30, unverified claim -> deterministic drop without LLM",
-            "Insufficient evidence to determine coding quality; defaulted to drop",
+            "Weak/none evidence: no AA >=24, no bench >=30, unverified claim -> deterministic uncertain without LLM",
+            "Insufficient evidence to determine coding quality; marked uncertain (candidate-cached 60-90d, issue #222)",
         ]
         for key, bm in (benchmarks_dict.get("scores") or {}).items():
             if isinstance(bm, dict):
@@ -934,12 +958,117 @@ class EvaluatorCoordinator:
             "pricing": pricing,
             "benchmarks": benchmarks_dict,
             "confidence": 1.0,
-            "decision": "drop",
-            "tier": "drop",
+            "decision": "uncertain",
+            "tier": "uncertain",
             "evidence_level": "weak",
             "evidence": evidence,
             "coding_assessment": {"is_coding": False, "confidence": 1.0, "reason": "deterministic weak/none", "coding_score": coding_score, "aa_score": verified_score},
         }
+
+    # ------------------------------------------------------------------
+    # Candidate cache (weak/none long-TTL reuse, issue #222)
+    # ------------------------------------------------------------------
+    def _candidate_evidence_hash(self, model_id: str, resolution: Any) -> str:
+        """Evidence fingerprint for Candidate-store reuse (issue #222).
+
+        Computed from the deterministic evidence state: AA score, benchmark scores
+        dict, blended pricing, and benchmark source http URLs. Reuses
+        compute_evidence_hash (issue #221). When evidence recovers or changes
+        (AA appears, a bench lands, pricing moves) the hash changes and the
+        cached Candidate no longer matches -> re-evaluate.
+        """
+        from .benchmarks import build_benchmark_profile
+
+        try:
+            profile = build_benchmark_profile(model_id, self.provider_name, self.cache)
+        except Exception:
+            profile = None
+        bench_scores = profile.to_dict().get("scores") if profile is not None and profile.scores else {}
+        aa_model = getattr(resolution, "aa_model", None) if resolution else None
+        aa_score = self._aa_score(aa_model)
+        pricing_blended = None
+        try:
+            if isinstance(aa_model, dict):
+                pricing = aa_model.get("pricing")
+                if isinstance(pricing, dict):
+                    pricing_blended = pricing.get("price_1m_blended_3_to_1", pricing.get("blended"))
+        except Exception:
+            pricing_blended = None
+        urls: list[str] = []
+        for _key, bm in (bench_scores or {}).items():
+            if isinstance(bm, dict):
+                src = str(bm.get("source", "") or "")
+                if "http" in src:
+                    urls.append(src)
+        return compute_evidence_hash(aa_score, bench_scores, pricing_blended, urls)
+
+    def _candidate_cache_lookup(self, model_id: str, cache_key: str, resolution: Any) -> dict[str, Any] | None:
+        """Reuse a cached weak/none result (issue #222) -- or None on miss.
+
+        Hit when an entry exists for the cache identity, the evidence hash is
+        identical, and age <= CANDIDATE_TTL_DAYS. On hit returns a record shaped
+        as a normal evaluation result with source="candidate_cache", cached=True,
+        decision="uncertain", tier="uncertain" and the candidate's evidence_level --
+        with NO LLM call. Misses (absent, hash changed, expired) count as misses.
+        """
+        store = self.candidate_store
+        entry = store.get(cache_key)
+        if entry is None:
+            store.stats.record_miss()
+            return None
+        current_hash = self._candidate_evidence_hash(model_id, resolution)
+        if not entry.last_updated or entry.evidence_hash != current_hash or is_stale(entry.last_updated, CANDIDATE_TTL_DAYS):
+            # evidence changed (recovered/modified) or entry expired -> re-evaluate
+            store.stats.record_miss()
+            return None
+        store.stats.record_hit()
+        from .benchmarks import build_benchmark_profile
+
+        try:
+            profile = build_benchmark_profile(model_id, self.provider_name, self.cache)
+        except Exception:
+            profile = None
+        result = self._deterministic_weak_record(model_id, resolution, profile, None)
+        result["source"] = "candidate_cache"
+        result["cached"] = True
+        result["cache_key"] = cache_key
+        result["evidence_level"] = entry.evidence_level
+        result.setdefault("evidence", []).append(
+            f"Candidate cache hit: {entry.evidence_level} evidence unchanged, {CANDIDATE_TTL_DAYS}d TTL (issue #222), no LLM"
+        )
+        return result
+
+    def _reconcile_candidate_store(self, model_id: str, cache_key: str | None, resolution: Any, result: dict[str, Any]) -> None:
+        """Sync the Candidate store with a fresh evaluation result (issue #222).
+
+        - strong/moderate result: model passed (or remains) cacheable -> delete any
+          stale candidate entry (a model that became a Keeper leaves the Candidate
+          store).
+        - weak/none result (decision uncertain/keep/drop): upsert a candidate entry
+          with the current evidence hash.
+        - error results leave the store untouched (transient failures are retried
+          next build, not cached for 60-90d).
+        """
+        if self.candidate_store is None or not cache_key:
+            return
+        try:
+            lvl = str(result.get("evidence_level", "")).strip().lower()
+            if lvl in ("strong", "moderate"):
+                if cache_key in self.candidate_store:
+                    self.candidate_store.delete(cache_key)
+                return
+            if lvl in ("weak", "none") and str(result.get("decision", "")).strip().lower() in ("uncertain", "keep", "drop"):
+                rec = CandidateRecord(
+                    model_id=model_id,
+                    evidence_hash=self._candidate_evidence_hash(model_id, resolution),
+                    evidence_level=lvl,
+                    decision=str(result.get("decision", "uncertain")).strip().lower(),
+                    tier=str(result.get("tier", "uncertain")).strip().lower(),
+                    last_updated=datetime.now(UTC).isoformat(),
+                )
+                self.candidate_store.put(cache_key, rec)
+        except Exception:
+            pass
 
     def _auto_free_record(self, provider_name: str | None = None) -> dict[str, Any]:
         """Auto-free provider: skip evaluation, return auto:free routing recommendation."""

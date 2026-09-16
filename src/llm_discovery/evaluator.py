@@ -264,6 +264,7 @@ class EvaluatorCoordinator:
         elif det_level == "weak":
             # Recovery before declaring weak/none (phase 4): cheap deterministic + LLM/web
             recovery_attempts: list[str] = []
+            recovery_reason = "recovered_via_canonical_alias"
             # 1. canonical benchmark alias lookup via evidence_identity variants
             rec_profile = _profile
             rec_resolution = resolution
@@ -315,12 +316,63 @@ class EvaluatorCoordinator:
                                 break
                 except Exception:
                     pass
-            # 3. models.dev already handled in EvidenceCollector; skip
+            # 3. models.dev metadata lookup via evidence_identity variants (issue #231): when the
+            #    benchmark profile is empty, build a deterministic profile from the models.dev record's
+            #    benchmark entries (canonical names via BENCHMARK_NAME_MAP) and recompute the level.
+            #    The Artificial Analysis Intelligence Index entry (when present) counts as the
+            #    verified AA score; provider first-party claims still require an allowlisted URL with
+            #    owner matching, so claim-only never promotes beyond moderate (ADR 0008 freeze).
+            if self.models_dev is not None and (rec_profile is None or not rec_profile.scores):
+                try:
+                    from .evidence_identity import resolve_canonical_variants
+                    md_get = getattr(self.models_dev, "get_model", None)
+                    md_model = md_get(model_id) if md_get is not None else None
+                    md_variant = model_id
+                    if md_model is None and md_get is not None:
+                        for var, _, _ in resolve_canonical_variants(model_id)[:5]:
+                            if var == model_id:
+                                continue
+                            recovery_attempts.append(f"models_dev_lookup:{var}")
+                            cand_md = md_get(var)
+                            if cand_md is not None:
+                                md_model = cand_md
+                                md_variant = var
+                                break
+                    if md_model is not None:
+                        from .benchmarks import BENCHMARK_NAME_MAP, BenchmarkProfile, compute_coding_score as _ccs_md
+                        md_scores: dict[str, Any] = {}
+                        for bm in (md_model.get("benchmarks") or []):
+                            if not isinstance(bm, dict):
+                                continue
+                            canon = BENCHMARK_NAME_MAP.get(bm.get("name", ""))
+                            score = bm.get("score")
+                            if canon and isinstance(score, (int, float)):
+                                md_scores[canon] = {"score": score, "metric": bm.get("metric", ""), "source": bm.get("source", "")}
+                        if md_scores:
+                            md_prof = BenchmarkProfile(model_id=md_variant, provider=self.provider_name, scores=md_scores)
+                            md_coding, _, _ = _ccs_md(md_prof)
+                            md_aa = md_scores.get("aa_intelligence")
+                            md_aa_score = md_aa["score"] if isinstance(md_aa, dict) else None
+                            md_level = PolicyGate._deterministic_evidence_level(
+                                md_aa_score, md_coding, md_prof,
+                                provider_claims=getattr(packet, "provider_claims", None),
+                                model_id=model_id,
+                            )
+                            if md_level != "weak":
+                                rec_profile = md_prof
+                                rec_coding = md_coding
+                                rec_verified = md_aa_score
+                                det_level = md_level
+                                recovery_reason = "recovered_via_models_dev"
+                                if md_variant != model_id:
+                                    recovery_attempts.append(f"models_dev_scored:{md_variant}")
+                except Exception:
+                    pass
             # 4. cached evidence already via profile; 5. provider first-party via packet.provider_claims already in det_level
             if det_level == "strong":
                 result = self._deterministic_strong_record(model_id, rec_resolution, rec_profile, packet)
                 result["recovery_attempts"] = recovery_attempts
-                result["evidence_reason"] = "recovered_via_canonical_alias"
+                result["evidence_reason"] = recovery_reason
                 result["evidence_status"] = "recovered"
                 if self.store is not None and result.get("decision") == "keep":
                     try:

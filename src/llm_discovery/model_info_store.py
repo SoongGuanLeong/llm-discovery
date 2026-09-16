@@ -4,7 +4,8 @@ Reusable cross-provider model-info store — slim v2.
 
 Slim Source of Truth holds only benchmarks, pricing, freshness.
 Keys normalized via normalize_store_key.
-File: data/model_info_store.json  {version: 2, models: {key: {benchmarks, pricing, _meta, judge?}}} TTL 28d, strong-only reuse
+File: data/model_info_store.json  {version: 2, models: {key: {benchmarks, pricing, _meta, judge?, facts?, evidence_snapshot_hash?, judgement?}}} TTL 28d, strong-only reuse
+New keys (issue #223 expand) are optional; old readers ignore them. Tier is never persisted (derived on read).
 Atomic tmp+rename, version header 2, compat read for v1 (ignore dropped keys).
 """
 
@@ -306,11 +307,94 @@ class JudgeSnapshot:
 
 
 @dataclass
+class FactsSnapshot:
+    """Raw evaluation inputs kept beside the slim v2 shape (issue #223 expand).
+
+    aa_row_hash: deterministic AA-row identity hash,
+    compute_evidence_hash(aa_score, None, pricing_blended, None) — the same AA
+    row (score + blended pricing) hashes identically regardless of provider or
+    timestamp, so it identifies the AA row, not a specific observation.
+    pricing_observations: per-provider pricing observations
+    [{provider, blended, input, output, ts}] accumulated across merges so a
+    later aggregate_pricing can re-average (the old pricing snapshot
+    collapses history). bench_raw: raw benchmark scores map, union-merged with
+    the same conflict policy as benchmarks.scores.
+    """
+
+    aa_row_hash: str | None = None
+    pricing_observations: list[dict[str, Any]] = field(default_factory=list)
+    bench_raw: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {}
+        if self.aa_row_hash is not None:
+            d["aa_row_hash"] = self.aa_row_hash
+        if self.pricing_observations:
+            d["pricing_observations"] = list(self.pricing_observations)
+        if self.bench_raw:
+            d["bench_raw"] = self.bench_raw
+        return d
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> "FactsSnapshot | None":
+        if not data or not isinstance(data, dict):
+            return None
+        return cls(
+            aa_row_hash=data.get("aa_row_hash"),
+            pricing_observations=[o for o in data.get("pricing_observations", []) if isinstance(o, dict)],
+            bench_raw=dict(data.get("bench_raw", {})),
+        )
+
+
+@dataclass
+class JudgementSnapshot:
+    """What the evaluation concluded (issue #223 expand) — recorded for EVERY
+    record that has an evidence_level, not only strong/moderate. NO tier field:
+    tier is derived on read via derive_tier (categorize) from fresh
+    pricing/coding_score.
+    """
+
+    evidence_level: str = ""
+    decision: str = "keep"
+    confidence: float = 0.0
+    evidence: list[str] = field(default_factory=list)
+    judge_model: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {
+            "evidence_level": self.evidence_level,
+            "decision": self.decision,
+            "confidence": self.confidence,
+            "evidence": list(self.evidence),
+        }
+        if self.judge_model is not None:
+            d["judge_model"] = self.judge_model
+        return d
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> "JudgementSnapshot | None":
+        if not data or not isinstance(data, dict):
+            return None
+        return cls(
+            evidence_level=str(data.get("evidence_level", "")).strip().lower(),
+            decision=str(data.get("decision", "keep")),
+            confidence=float(data.get("confidence", 0.0)) if data.get("confidence") is not None else 0.0,
+            evidence=list(data.get("evidence", [])),
+            judge_model=data.get("judge_model"),
+        )
+
+
+@dataclass
 class ModelInfoRecord:
     benchmarks: BenchmarkSnapshot | None = None
     pricing: PricingSnapshot | None = None
     _meta: StoreMeta = field(default_factory=StoreMeta)
     judge: JudgeSnapshot | None = None
+    # New shape (issue #223 expand): written beside the old keys; None on old
+    # records so they serialize byte-identically.
+    facts: FactsSnapshot | None = None
+    evidence_snapshot_hash: str | None = None
+    judgement: JudgementSnapshot | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -320,18 +404,33 @@ class ModelInfoRecord:
         }
         if self.judge is not None:
             d["judge"] = self.judge.to_dict()
+        # New keys (issue #223 expand) are emitted only when set — a record
+        # without them serializes exactly like the pre-#223 shape.
+        if self.facts is not None:
+            facts_d = self.facts.to_dict()
+            if facts_d:
+                d["facts"] = facts_d
+        if self.evidence_snapshot_hash is not None:
+            d["evidence_snapshot_hash"] = self.evidence_snapshot_hash
+        if self.judgement is not None:
+            d["judgement"] = self.judgement.to_dict()
         return d
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ModelInfoRecord":
         if not isinstance(data, dict):
             data = {}
-        # Compat: ignore dropped v1 keys, only read slim keys
+        # Compat: ignore dropped v1 keys, only read slim keys; new keys
+        # (issue #223) are read when present and absent on old v2 payloads
+        # (fields stay None).
         return cls(
             benchmarks=BenchmarkSnapshot.from_dict(data.get("benchmarks")),
             pricing=PricingSnapshot.from_dict(data.get("pricing")),
             _meta=StoreMeta.from_dict(data.get("_meta")),
             judge=JudgeSnapshot.from_dict(data.get("judge")) if data.get("judge") else None,
+            facts=FactsSnapshot.from_dict(data.get("facts")),
+            evidence_snapshot_hash=data.get("evidence_snapshot_hash"),
+            judgement=JudgementSnapshot.from_dict(data.get("judgement")),
         )
 
     @classmethod
@@ -363,22 +462,30 @@ class ModelInfoRecord:
         now = evaluated_at or datetime.now(UTC).isoformat()
         meta = StoreMeta(first_seen=now, last_updated=now, version=2)
         judge_snap = None
-        # Persist judge_llm result for strong+moderate — include evidence_hash (AA+bench+pricing+URLs) for per-evidence TTL (issue #221)
         lvl = str(rec.get("evidence_level", "")).strip().lower()
+        # Evidence inputs (AA + bench scores + pricing blended + claim URLs) —
+        # shared by the judge snapshot's evidence_hash (issue #221) and the new
+        # evidence_snapshot_hash (issue #223). Same derivation for both, so the
+        # hashes always agree.
+        _aa = None
+        _bench_scores = None
+        _pricing_blended = None
+        _claim_urls: list[str] = []
+        _evidence_hash = None
+        try:
+            _aa = rec.get("aa_score") or (rec.get("aa_model") or {}).get("score" if isinstance(rec.get("aa_model"), dict) else None)
+            _bm = rec.get("benchmarks")
+            _bench_scores = _bm.get("scores") if isinstance(_bm, dict) else rec.get("bench_scores")
+            _pr = rec.get("pricing")
+            if isinstance(_pr, dict):
+                _pricing_blended = _pr.get("blended", _pr.get("price_1m_blended_3_to_1"))
+            _claim_urls = [e for e in rec.get("evidence", []) if isinstance(e, str) and e.startswith("http")]
+            _evidence_hash = compute_evidence_hash(_aa, _bench_scores if isinstance(_bench_scores, dict) else None, _pricing_blended, _claim_urls)
+        except Exception:
+            _evidence_hash = None
+        # Persist judge_llm result for strong+moderate — include evidence_hash (AA+bench+pricing+URLs) for per-evidence TTL (issue #221)
         if lvl in ("strong", "moderate"):
             try:
-                # compute evidence_hash for judgement reuse without LLM
-                try:
-                    _aa = rec.get("aa_score") or (rec.get("aa_model") or {}).get("score" if isinstance(rec.get("aa_model"), dict) else None)
-                    _bench = rec.get("benchmarks", {}).get("scores") if isinstance(rec.get("benchmarks"), dict) else rec.get("bench_scores")
-                    _pricing = None
-                    _pr = rec.get("pricing")
-                    if isinstance(_pr, dict):
-                        _pricing = _pr.get("blended", _pr.get("price_1m_blended_3_to_1"))
-                    _urls = [e for e in rec.get("evidence", []) if isinstance(e, str) and e.startswith("http")]
-                    _eh = compute_evidence_hash(_aa, _bench if isinstance(_bench, dict) else None, _pricing, _urls)
-                except Exception:
-                    _eh = None
                 judge_snap = JudgeSnapshot(
                     evidence_level=lvl,
                     evidence=list(rec.get("evidence", []))[:3],
@@ -388,19 +495,53 @@ class ModelInfoRecord:
                     tier=rec.get("tier"),
                     decision=str(rec.get("decision", "keep")),
                     judge_model=rec.get("judge_model") or rec.get("_judge_model"),
-                    evidence_hash=rec.get("evidence_hash") or _eh,
+                    evidence_hash=rec.get("evidence_hash") or _evidence_hash,
                 )
             except Exception:
                 judge_snap = None
-        return cls(benchmarks=bench, pricing=pricing_snap, _meta=meta, judge=judge_snap)
+        # New shape (issue #223 expand): judgement for EVERY record that has an
+        # evidence_level — it records what the evaluation concluded (weak/none/
+        # uncertain/error included). No tier: derived on read (derive_tier).
+        judgement_snap = None
+        if lvl:
+            try:
+                judgement_snap = JudgementSnapshot(
+                    evidence_level=lvl,
+                    decision=str(rec.get("decision", "keep")),
+                    confidence=float(rec.get("confidence", 0.0)) if rec.get("confidence") is not None else 0.0,
+                    evidence=list(rec.get("evidence", []))[:3],
+                    judge_model=rec.get("judge_model") or rec.get("_judge_model"),
+                )
+            except Exception:
+                judgement_snap = None
+        # facts: raw inputs kept for later re-derivation (per-provider pricing
+        # observations, raw bench scores, deterministic AA-row identity hash)
+        facts_snap = None
+        try:
+            _obs: list[dict[str, Any]] = []
+            if pricing_snap is not None and any(v is not None for v in (pricing_snap.blended, pricing_snap.input, pricing_snap.output)):
+                _obs = [{"provider": provider, "blended": pricing_snap.blended, "input": pricing_snap.input, "output": pricing_snap.output, "ts": now}]
+            _bench_raw = dict(bench.scores) if bench is not None and bench.scores else {}
+            _aa_row_hash = None
+            if _aa is not None:
+                try:
+                    _aa_row_hash = compute_evidence_hash(_aa, None, _pricing_blended, None)
+                except Exception:
+                    _aa_row_hash = None
+            if _obs or _bench_raw or _aa_row_hash is not None:
+                facts_snap = FactsSnapshot(aa_row_hash=_aa_row_hash, pricing_observations=_obs, bench_raw=_bench_raw)
+        except Exception:
+            facts_snap = None
+        return cls(benchmarks=bench, pricing=pricing_snap, _meta=meta, judge=judge_snap, facts=facts_snap, evidence_snapshot_hash=_evidence_hash, judgement=judgement_snap)
 
-def _benchmark_union_max(existing: BenchmarkSnapshot | None, incoming: BenchmarkSnapshot | None) -> BenchmarkSnapshot:
-    if not existing:
-        return incoming or BenchmarkSnapshot()
-    if not incoming:
-        return existing
-    merged_scores: dict[str, Any] = dict(existing.scores)
-    for k, v in (incoming.scores or {}).items():
+def _scores_union_max(existing_scores: dict[str, Any], incoming_scores: dict[str, Any]) -> dict[str, Any]:
+    """Union two benchmark score maps; on conflict keep the higher score.
+
+    Same conflict policy for benchmarks.scores (old shape) and
+    facts.bench_raw (issue #223 expand).
+    """
+    merged_scores: dict[str, Any] = dict(existing_scores or {})
+    for k, v in (incoming_scores or {}).items():
         if k not in merged_scores:
             merged_scores[k] = v
         else:
@@ -412,6 +553,15 @@ def _benchmark_union_max(existing: BenchmarkSnapshot | None, incoming: Benchmark
                     merged_scores[k] = v
             except Exception:
                 pass
+    return merged_scores
+
+
+def _benchmark_union_max(existing: BenchmarkSnapshot | None, incoming: BenchmarkSnapshot | None) -> BenchmarkSnapshot:
+    if not existing:
+        return incoming or BenchmarkSnapshot()
+    if not incoming:
+        return existing
+    merged_scores = _scores_union_max(existing.scores, incoming.scores)
     seen = {str(b) for b in (existing.raw_benchmarks or [])}
     merged_raw = list(existing.raw_benchmarks or [])
     for b in (incoming.raw_benchmarks or []):
@@ -427,6 +577,48 @@ def _benchmark_union_max(existing: BenchmarkSnapshot | None, incoming: Benchmark
         vals = [v for v in [existing.coverage_with_supplements, incoming.coverage_with_supplements] if v is not None]
         cws = max(vals) if vals else None  # type: ignore
     return BenchmarkSnapshot(scores=merged_scores, raw_benchmarks=merged_raw, benchmark_coverage=bc, coverage_with_supplements=cws)  # type: ignore
+
+
+def _freshest(existing_val: Any, incoming_val: Any, existing_ts: str | None, incoming_ts: str | None) -> Any:
+    """Freshest-wins selection for snapshot fields (judge/judgement/hashes):
+    incoming wins when present, unless existing is strictly fresher."""
+    if incoming_val is None:
+        return existing_val
+    if existing_val is None:
+        return incoming_val
+    try:
+        if (existing_ts or "") > (incoming_ts or ""):
+            return existing_val
+    except Exception:
+        return incoming_val
+    return incoming_val
+
+
+def _pricing_observations_union(existing_obs: list[dict[str, Any]], incoming_obs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Union per-provider pricing observations; same provider -> latest ts wins."""
+    merged: dict[str | None, dict[str, Any]] = {}
+    for o in list(existing_obs or []) + list(incoming_obs or []):
+        if not isinstance(o, dict):
+            continue
+        key = o.get("provider")
+        prev = merged.get(key)
+        if prev is None or str(o.get("ts", "")) >= str(prev.get("ts", "")):
+            merged[key] = dict(o)
+    return list(merged.values())
+
+
+def _facts_union(existing: FactsSnapshot | None, incoming: FactsSnapshot | None, existing_ts: str | None, incoming_ts: str | None) -> FactsSnapshot | None:
+    """Merge facts (issue #223): per-provider obs union, bench_raw union-max,
+    aa_row_hash freshest."""
+    if existing is None:
+        return incoming
+    if incoming is None:
+        return existing
+    return FactsSnapshot(
+        aa_row_hash=_freshest(existing.aa_row_hash, incoming.aa_row_hash, existing_ts, incoming_ts),
+        pricing_observations=_pricing_observations_union(existing.pricing_observations, incoming.pricing_observations),
+        bench_raw=_scores_union_max(existing.bench_raw, incoming.bench_raw),
+    )
 
 
 def merge_records(existing: ModelInfoRecord | None, incoming: ModelInfoRecord) -> ModelInfoRecord:
@@ -458,26 +650,73 @@ def merge_records(existing: ModelInfoRecord | None, incoming: ModelInfoRecord) -
         last_updated=max(last_vals) if last_vals else (incoming._meta.last_updated or existing._meta.last_updated),
         version=2,
     )
-    # Judge: keep most recent strong (incoming wins if present, else keep existing)
-    merged_judge = incoming.judge if incoming.judge is not None else existing.judge
-    # If both have judge, prefer fresher last_updated
-    if existing.judge is not None and incoming.judge is not None:
-        try:
-            if (existing._meta.last_updated or "") > (incoming._meta.last_updated or ""):
-                merged_judge = existing.judge
-        except Exception:
-            merged_judge = incoming.judge
+    # Judge: keep most recent strong (incoming wins if present, else keep
+    # existing); prefer fresher last_updated when both have judge
+    merged_judge = _freshest(existing.judge, incoming.judge, existing._meta.last_updated, incoming._meta.last_updated)
+    # New shape (issue #223 expand): merge beside the old keys, same freshness policy
+    merged_facts = _facts_union(existing.facts, incoming.facts, existing._meta.last_updated, incoming._meta.last_updated)
+    merged_judgement = _freshest(existing.judgement, incoming.judgement, existing._meta.last_updated, incoming._meta.last_updated)
+    merged_evidence_hash = _freshest(existing.evidence_snapshot_hash, incoming.evidence_snapshot_hash, existing._meta.last_updated, incoming._meta.last_updated)
     return ModelInfoRecord(
         benchmarks=_benchmark_union_max(existing.benchmarks, incoming.benchmarks),
         pricing=merged_pricing,
         _meta=merged_meta,
         judge=merged_judge,
+        facts=merged_facts,
+        evidence_snapshot_hash=merged_evidence_hash,
+        judgement=merged_judgement,
     )
+
+
+def derive_tier(
+    record: ModelInfoRecord,
+    *,
+    min_score: float = 24.0,
+    max_score: float = 45.0,
+    model_id: str | None = None,
+    coding_score: float | None = None,
+    aa_score: float | None = None,
+) -> str:
+    """Derive the tier token for a stored record on read — tier is not persisted
+    in the new shape (issue #223 expand).
+
+    Inputs derived from the record: pricing blended from record.pricing,
+    judge decision from record.judgement (falling back to the legacy
+    record.judge), coding from record.judge (the new judgement shape does not
+    persist coding). *coding_score*/*aa_score* come from the caller (fresh
+    catalog row) because they are not part of the slim store. Returns the
+    categorize.categorize_model band ("max" | "flash" | "contributor_free" |
+    "drop" | "uncertain" | "error"); "uncertain" when score inputs are missing.
+    """
+    from .categorize import categorize_model  # lazy import to avoid a cycle
+
+    decision = "keep"
+    if record.judgement is not None and record.judgement.decision:
+        decision = str(record.judgement.decision)
+    elif record.judge is not None and record.judge.decision:
+        decision = str(record.judge.decision)
+    coding = True
+    if record.judge is not None:
+        coding = bool(record.judge.coding)
+    pricing_blended = record.pricing.blended if record.pricing is not None else None
+    return categorize_model(
+        coding,
+        aa_score,
+        min_score=min_score,
+        max_score=max_score,
+        judge_decision=decision,
+        model_id=model_id,
+        coding_score=coding_score,
+        pricing_blended=pricing_blended,
+    )
+
 
 STORE_SCHEMA_DOC = """
 # data/model_info_store.json — committed snapshot (JSON, atomic write)
-# Key: normalize_store_key(provider model_id)  -> {benchmarks, pricing, _meta}
-# Slim v2: only benchmarks, pricing, _meta {first_seen, last_updated, version:2}
+# Key: normalize_store_key(provider model_id)
+#     -> {benchmarks, pricing, _meta, judge?, facts?, evidence_snapshot_hash?, judgement?}
+# Slim v2: benchmarks, pricing, _meta {first_seen, last_updated, version:2}; optional
+# new keys (issue #223 expand) are ignored by old readers; tier never persisted (derived on read)
 """
 
 __all__ = [
@@ -490,6 +729,9 @@ __all__ = [
     "BenchmarkSnapshot",
     "PricingSnapshot",
     "StoreMeta",
+    "FactsSnapshot",
+    "JudgementSnapshot",
+    "derive_tier",
     "ModelInfoStore",
     "STORE_FILE_VERSION",
     "RECOMMENDED_STORE_PATH_OBJ",

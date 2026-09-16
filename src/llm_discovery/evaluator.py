@@ -80,7 +80,7 @@ class EvaluatorCoordinator:
     max_score: float
     cache: Any = None
     store: ModelInfoStore = None
-    catalog_stale: bool = False  # True when catalog fetched_at > 28d TTL
+    catalog_stale: bool = False  # deprecated per-evidence TTL (issue #221) - kept for compat, ignored
 
     @staticmethod
     def _cached_decision(record: Any | None) -> str | None:
@@ -115,11 +115,9 @@ class EvaluatorCoordinator:
                     hit = self.classify_hit(cached)
                     if hit == "strong_hit":
                         assert cached is not None
-                        # When catalog is stale (>28d TTL), drop results with strong/moderate evidence
-                        # are reused without re-evaluation, but keep results are re-evaluated.
-                        if self.catalog_stale and self._cached_decision(cached) == "keep":
-                            # Keep + stale catalog -> fall through to re-evaluate (skip cache hit)
-                            raise _SkipCacheHit
+                        # Per-evidence TTL (issue #221): global catalog_stale removed.
+                        # Judgement reused when evidence_hash unchanged and pricing within 7d TTL,
+                        # even if catalog fetched_at >14d. Only re-evaluate when evidence_hash changed.
                         fresh_bm = None
                         if self.cache is not None:
                             try:
@@ -324,12 +322,13 @@ class EvaluatorCoordinator:
 
     @staticmethod
     def _pricing_is_stale(record: Any) -> bool:
-        """Pricing TTL 28d via _meta.last_updated (is_stale)."""
+        """Pricing TTL 7d (3-7d) via _meta.last_updated (is_stale). Per-evidence split (issue #221)."""
         try:
             last = getattr(record._meta, "last_updated", None) if hasattr(record, "_meta") else None
             if last is None and isinstance(record, dict):
                 last = record.get("_meta", {}).get("last_updated") if isinstance(record.get("_meta"), dict) else None
-            return is_stale(last, TTL_DAYS)
+            from .model_info_store import PRICING_TTL_DAYS as _PTTL
+            return is_stale(last, _PTTL)
         except Exception:
             return False
 
@@ -366,7 +365,7 @@ class EvaluatorCoordinator:
     cached_bm: dict[str, Any],
     fresh_bm: dict[str, Any] | None,
     ) -> dict[str, Any]:
-        """Immutable benchmarks: null->fill only. No delta rebuild per #91 Q3.
+        """Immutable benchmarks: null->fill only. No delta rebuild per #91 Q3. Per-evidence TTL (issue #221) gap-fill 60-90d, not re-derived each TTL expiry.
 
         Fresh profile scores fill only when cached score missing/None.
         raw_benchmarks union deduped by string repr.

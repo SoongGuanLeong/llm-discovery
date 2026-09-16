@@ -24,6 +24,13 @@ RECOMMENDED_STORE_PATH = "data/model_info_store.json"
 RECOMMENDED_STORE_PATH_OBJ: Path = Path(RECOMMENDED_STORE_PATH)
 STORE_FILE_VERSION: int = 2
 DEFAULT_TTL_DAYS: int = 28
+# Per-evidence TTL split (issue #221 supersedes ADR 0007 single 14d TTL)
+PRICING_TTL_DAYS: int = 7
+PRICING_TTL_MIN_DAYS: int = 3
+CATALOG_ROW_TTL_DAYS: int = 14
+CATALOG_ROW_TTL_MIN_DAYS: int = 7
+BENCHMARK_TTL_DAYS: int = 90
+BENCHMARK_TTL_MIN_DAYS: int = 60
 
 # ---------------------------------------------------------------------------
 # Key normalization
@@ -259,6 +266,7 @@ class JudgeSnapshot:
     tier: str | None = None
     decision: str = "keep"
     judge_model: str | None = None
+    evidence_hash: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -274,6 +282,8 @@ class JudgeSnapshot:
             d["tier"] = self.tier
         if self.judge_model is not None:
             d["judge_model"] = self.judge_model
+        if self.evidence_hash is not None:
+            d["evidence_hash"] = self.evidence_hash
         return d
 
     @classmethod
@@ -290,6 +300,7 @@ class JudgeSnapshot:
             tier=data.get("tier"),
             decision=str(data.get("decision", "keep")),
             judge_model=data.get("judge_model"),
+            evidence_hash=data.get("evidence_hash"),
         )
 
 
@@ -352,10 +363,22 @@ class ModelInfoRecord:
         now = evaluated_at or datetime.now(UTC).isoformat()
         meta = StoreMeta(first_seen=now, last_updated=now, version=2)
         judge_snap = None
-        # Persist judge_llm result for strong+moderate (28d TTL reuse) — weak/none dropped
+        # Persist judge_llm result for strong+moderate — include evidence_hash (AA+bench+pricing+URLs) for per-evidence TTL (issue #221)
         lvl = str(rec.get("evidence_level", "")).strip().lower()
         if lvl in ("strong", "moderate"):
             try:
+                # compute evidence_hash for judgement reuse without LLM
+                try:
+                    _aa = rec.get("aa_score") or (rec.get("aa_model") or {}).get("score" if isinstance(rec.get("aa_model"), dict) else None)
+                    _bench = rec.get("benchmarks", {}).get("scores") if isinstance(rec.get("benchmarks"), dict) else rec.get("bench_scores")
+                    _pricing = None
+                    _pr = rec.get("pricing")
+                    if isinstance(_pr, dict):
+                        _pricing = _pr.get("blended", _pr.get("price_1m_blended_3_to_1"))
+                    _urls = [e for e in rec.get("evidence", []) if isinstance(e, str) and e.startswith("http")]
+                    _eh = compute_evidence_hash(_aa, _bench if isinstance(_bench, dict) else None, _pricing, _urls)
+                except Exception:
+                    _eh = None
                 judge_snap = JudgeSnapshot(
                     evidence_level=lvl,
                     evidence=list(rec.get("evidence", []))[:3],
@@ -365,6 +388,7 @@ class ModelInfoRecord:
                     tier=rec.get("tier"),
                     decision=str(rec.get("decision", "keep")),
                     judge_model=rec.get("judge_model") or rec.get("_judge_model"),
+                    evidence_hash=rec.get("evidence_hash") or _eh,
                 )
             except Exception:
                 judge_snap = None
@@ -476,6 +500,31 @@ __all__ = [
 STORE_FILE_VERSION: int = 2
 DEFAULT_TTL_DAYS: int = 28
 RECOMMENDED_STORE_PATH_OBJ: Path = Path(RECOMMENDED_STORE_PATH)
+
+def compute_evidence_hash(aa_score: float | None, bench_scores: dict | None, pricing_blended: float | None, claim_urls: list | None) -> str:
+    import hashlib, json
+    payload = {
+        "aa_score": round(float(aa_score), 2) if aa_score is not None else None,
+        "bench_scores": {k: round(float(v.get("score", v) if isinstance(v, dict) else float(v)), 2) for k, v in (bench_scores or {}).items()} if bench_scores else {},
+        "pricing_blended": round(float(pricing_blended), 4) if pricing_blended is not None else None,
+        "claim_urls": sorted([str(u) for u in (claim_urls or []) if u]),
+    }
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+def is_pricing_stale(last_updated: str | None) -> bool:
+    return is_stale(last_updated, PRICING_TTL_DAYS)
+
+def is_benchmark_stale(last_updated: str | None) -> bool:
+    return is_stale(last_updated, BENCHMARK_TTL_DAYS)
+
+def is_catalog_row_stale(last_updated: str | None) -> bool:
+    return is_stale(last_updated, CATALOG_ROW_TTL_DAYS)
+
+def is_judgement_stale(cached_hash: str | None, current_hash: str | None) -> bool:
+    if not cached_hash or not current_hash:
+        return True
+    return cached_hash != current_hash
 
 def is_stale(last_updated: str | None, ttl_days: int | None = None) -> bool:
     if ttl_days is None or ttl_days <= 0:

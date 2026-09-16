@@ -275,15 +275,16 @@ def test_ac3_stored_observations_usable_for_reaverage():
 
 def test_ac4_evidence_snapshot_hash_matches_and_changes_with_aa():
     rec = ModelInfoRecord.from_provider_record(_strong_rec(), provider="openrouter", evaluated_at=NOW_A)
-    expected = compute_evidence_hash(60.0, dict(BENCH_SCORES), 1.0, list(EVIDENCE_URLS))
+    # Issue #224 contract: evidence_snapshot_hash excludes pricing_blended (pricing re-average keeps hash unchanged)
+    expected = compute_evidence_hash(60.0, dict(BENCH_SCORES), None, list(EVIDENCE_URLS))
     assert rec.evidence_snapshot_hash == expected
-    # Same input derivation as the existing judge.evidence_hash
+    # judge.evidence_hash also excludes pricing after contract (tier derived, no pricing staleness on judgement)
     assert rec.judge is not None
     assert rec.judge.evidence_hash == expected
     # Changes when aa_score changes
     rec2 = ModelInfoRecord.from_provider_record(_strong_rec(aa_score=61.0), provider="openrouter", evaluated_at=NOW_A)
     assert rec2.evidence_snapshot_hash != rec.evidence_snapshot_hash
-    assert rec2.evidence_snapshot_hash == compute_evidence_hash(61.0, dict(BENCH_SCORES), 1.0, list(EVIDENCE_URLS))
+    assert rec2.evidence_snapshot_hash == compute_evidence_hash(61.0, dict(BENCH_SCORES), None, list(EVIDENCE_URLS))
 
 
 # ---------------------------------------------------------------------------
@@ -309,13 +310,13 @@ def test_no_tier_key_in_new_shapes():
     assert "tier" not in d["facts"]
     assert not hasattr(rec.judgement, "tier")
     assert not hasattr(rec.facts, "tier")
-    # Old judge snapshot keeps persisting tier (unchanged behavior)
-    assert d["judge"]["tier"] == "max"
-    # Round trip: tier does not leak into the new shapes
+    # Contract #224: tier never persisted, not even in legacy judge (derived on read)
+    assert "tier" not in d["judge"]
+    # Round trip: tier does not leak into any shape
     d2 = ModelInfoRecord.from_dict(d).to_dict()
     assert "tier" not in d2["judgement"]
     assert "tier" not in d2["facts"]
-    assert d2["judge"]["tier"] == "max"
+    assert "tier" not in d2.get("judge", {})
 
 
 def test_judgement_recorded_for_all_evidence_levels():

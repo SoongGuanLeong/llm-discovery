@@ -4,8 +4,8 @@ Reusable cross-provider model-info store — slim v2.
 
 Slim Source of Truth holds only benchmarks, pricing, freshness.
 Keys normalized via normalize_store_key.
-File: data/model_info_store.json  {version: 2, models: {key: {benchmarks, pricing, _meta, judge?, facts?, evidence_snapshot_hash?, judgement?}}} TTL 28d, strong-only reuse
-New keys (issue #223 expand) are optional; old readers ignore them. Tier is never persisted (derived on read).
+File: data/model_info_store.json  {version: 2, models: {key: {benchmarks, pricing, _meta, facts, evidence_snapshot_hash, judgement, _meta}}} TTL 14d, pricing via facts re-average, Tier derived on read.
+New shape (issue #224 contract) is canonical; legacy judge? is compat-read only (no tier). Tier is never persisted (derived on read).
 Atomic tmp+rename, version header 2, compat read for v1 (ignore dropped keys).
 """
 
@@ -24,8 +24,8 @@ from typing import Any
 RECOMMENDED_STORE_PATH = "data/model_info_store.json"
 RECOMMENDED_STORE_PATH_OBJ: Path = Path(RECOMMENDED_STORE_PATH)
 STORE_FILE_VERSION: int = 2
-DEFAULT_TTL_DAYS: int = 28
-# Per-evidence TTL split (issue #221 supersedes ADR 0007 single 14d TTL)
+DEFAULT_TTL_DAYS: int = 14
+# Per-evidence TTL split (issue #221 supersedes ADR 0007 single 14d TTL; DEFAULT 14d for GC live-set scan - issue #224)
 PRICING_TTL_DAYS: int = 7
 PRICING_TTL_MIN_DAYS: int = 3
 CATALOG_ROW_TTL_DAYS: int = 14
@@ -279,8 +279,7 @@ class JudgeSnapshot:
         }
         if self.canonical_name is not None:
             d["canonical_name"] = self.canonical_name
-        if self.tier is not None:
-            d["tier"] = self.tier
+        # tier is derived on read (issue #224 contract) — never persisted
         if self.judge_model is not None:
             d["judge_model"] = self.judge_model
         if self.evidence_hash is not None:
@@ -389,9 +388,8 @@ class ModelInfoRecord:
     benchmarks: BenchmarkSnapshot | None = None
     pricing: PricingSnapshot | None = None
     _meta: StoreMeta = field(default_factory=StoreMeta)
-    judge: JudgeSnapshot | None = None
-    # New shape (issue #223 expand): written beside the old keys; None on old
-    # records so they serialize byte-identically.
+    judge: JudgeSnapshot | None = None  # legacy compat (no tier, contract #224)
+    # New shape (issue #224 contract): canonical; None only on very old v2 payloads
     facts: FactsSnapshot | None = None
     evidence_snapshot_hash: str | None = None
     judgement: JudgementSnapshot | None = None
@@ -402,10 +400,12 @@ class ModelInfoRecord:
             "pricing": self.pricing.to_dict() if self.pricing else {"per_provider_overrides": {}},
             "_meta": self._meta.to_dict(),
         }
+        # Legacy judge is compat-read only (no tier, issue #224 contract); new code prefers judgement
         if self.judge is not None:
-            d["judge"] = self.judge.to_dict()
-        # New keys (issue #223 expand) are emitted only when set — a record
-        # without them serializes exactly like the pre-#223 shape.
+            jd = self.judge.to_dict()
+            jd.pop("tier", None)
+            d["judge"] = jd
+        # New shape (issue #224 contract) is canonical
         if self.facts is not None:
             facts_d = self.facts.to_dict()
             if facts_d:
@@ -480,7 +480,8 @@ class ModelInfoRecord:
             if isinstance(_pr, dict):
                 _pricing_blended = _pr.get("blended", _pr.get("price_1m_blended_3_to_1"))
             _claim_urls = [e for e in rec.get("evidence", []) if isinstance(e, str) and e.startswith("http")]
-            _evidence_hash = compute_evidence_hash(_aa, _bench_scores if isinstance(_bench_scores, dict) else None, _pricing_blended, _claim_urls)
+            # Issue #224 contract: evidence_snapshot_hash excludes pricing_blended so pricing re-average updates tier without LLM (hash unchanged)
+            _evidence_hash = compute_evidence_hash(_aa, _bench_scores if isinstance(_bench_scores, dict) else None, None, _claim_urls)
         except Exception:
             _evidence_hash = None
         # Persist judge_llm result for strong+moderate — include evidence_hash (AA+bench+pricing+URLs) for per-evidence TTL (issue #221)
@@ -492,7 +493,6 @@ class ModelInfoRecord:
                     confidence=float(rec.get("confidence", 0.0)) if rec.get("confidence") is not None else 0.0,
                     coding=bool(rec.get("coding", rec.get("is_coding", True))),
                     canonical_name=rec.get("canonical_name"),
-                    tier=rec.get("tier"),
                     decision=str(rec.get("decision", "keep")),
                     judge_model=rec.get("judge_model") or rec.get("_judge_model"),
                     evidence_hash=rec.get("evidence_hash") or _evidence_hash,
@@ -624,13 +624,13 @@ def _facts_union(existing: FactsSnapshot | None, incoming: FactsSnapshot | None,
 def merge_records(existing: ModelInfoRecord | None, incoming: ModelInfoRecord) -> ModelInfoRecord:
     if existing is None:
         return incoming
+    # Pricing: prefer facts pricing_observations (per-provider history) for re-average; fallback to snapshots
     merged_pricing = None
-    obs_list = []
-    for snap in (existing.pricing, incoming.pricing):
-        if snap:
-            obs = snap.to_dict() if hasattr(snap, 'to_dict') else dict(snap)
-            obs_list.append(obs)
-    if len(obs_list) >= 2:
+    obs_list: list[dict[str, Any]] = []
+    for facts_snap in (existing.facts, incoming.facts):
+        if facts_snap is not None and facts_snap.pricing_observations:
+            obs_list.extend(list(facts_snap.pricing_observations))
+    if obs_list:
         try:
             agg = aggregate_pricing(obs_list)
             if agg:
@@ -639,10 +639,25 @@ def merge_records(existing: ModelInfoRecord | None, incoming: ModelInfoRecord) -
                 merged_pricing = existing.pricing
         except Exception:
             merged_pricing = existing.pricing or incoming.pricing
-    elif len(obs_list) == 1:
-        merged_pricing = existing.pricing or incoming.pricing
     else:
-        merged_pricing = None
+        snap_obs = []
+        for snap in (existing.pricing, incoming.pricing):
+            if snap:
+                obs = snap.to_dict() if hasattr(snap, 'to_dict') else dict(snap)
+                snap_obs.append(obs)
+        if len(snap_obs) >= 2:
+            try:
+                agg = aggregate_pricing(snap_obs)
+                if agg:
+                    merged_pricing = PricingSnapshot(blended=agg.get('blended'), input=agg.get('input'), output=agg.get('output'), per_provider_overrides=agg.get('per_provider_overrides', {}))
+                else:
+                    merged_pricing = existing.pricing
+            except Exception:
+                merged_pricing = existing.pricing or incoming.pricing
+        elif len(snap_obs) == 1:
+            merged_pricing = existing.pricing or incoming.pricing
+        else:
+            merged_pricing = None
     first_seen_vals = [t for t in [existing._meta.first_seen, incoming._meta.first_seen] if t]
     last_vals = [t for t in [existing._meta.last_updated, incoming._meta.last_updated] if t]
     merged_meta = StoreMeta(
@@ -714,9 +729,8 @@ def derive_tier(
 STORE_SCHEMA_DOC = """
 # data/model_info_store.json — committed snapshot (JSON, atomic write)
 # Key: normalize_store_key(provider model_id)
-#     -> {benchmarks, pricing, _meta, judge?, facts?, evidence_snapshot_hash?, judgement?}
-# Slim v2: benchmarks, pricing, _meta {first_seen, last_updated, version:2}; optional
-# new keys (issue #223 expand) are ignored by old readers; tier never persisted (derived on read)
+#     -> {benchmarks, pricing, _meta, facts, evidence_snapshot_hash, judgement, _meta}  (judge? legacy compat only, no tier)
+# Contract shape (#224): facts + evidence_snapshot_hash (AA+bench+URLs, no pricing) + judgement (no tier); tier derived on read via derive_tier; GC 14d share-aware
 """
 
 __all__ = [
@@ -740,7 +754,7 @@ __all__ = [
 ]
 
 STORE_FILE_VERSION: int = 2
-DEFAULT_TTL_DAYS: int = 28
+DEFAULT_TTL_DAYS: int = 14
 RECOMMENDED_STORE_PATH_OBJ: Path = Path(RECOMMENDED_STORE_PATH)
 
 def compute_evidence_hash(aa_score: float | None, bench_scores: dict | None, pricing_blended: float | None, claim_urls: list | None) -> str:

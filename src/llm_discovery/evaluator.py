@@ -318,7 +318,16 @@ class EvaluatorCoordinator:
         """
         if record is None:
             return "miss"
-        # Prefer judge snapshot (new) over legacy top-level
+        # Prefer judgement snapshot (contract #224) then judge legacy over top-level
+        judgement = getattr(record, "judgement", None)
+        if judgement is not None:
+            lvl = getattr(judgement, "evidence_level", None)
+            if lvl is None and isinstance(judgement, dict):
+                lvl = judgement.get("evidence_level")
+            if lvl is not None and str(lvl).strip() != "":
+                lvl_norm = str(lvl).strip().lower()
+                return "strong_hit" if lvl_norm in ("strong", "moderate") else "miss"
+            return "miss"
         judge = getattr(record, "judge", None)
         if judge is not None:
             lvl = getattr(judge, "evidence_level", None)
@@ -537,7 +546,6 @@ class EvaluatorCoordinator:
         judge_conf: float | None = None
         judge_coding: bool | None = None
         judge_canonical: str | None = None
-        judge_tier: str | None = None
         if cached_judge is not None:
             if isinstance(cached_judge, dict):
                 jl = str(cached_judge.get("evidence_level", "strong")).strip().lower()
@@ -545,14 +553,12 @@ class EvaluatorCoordinator:
                 judge_conf = cached_judge.get("confidence")
                 judge_coding = cached_judge.get("coding")
                 judge_canonical = cached_judge.get("canonical_name")
-                judge_tier = cached_judge.get("tier")
             else:
                 jl = str(getattr(cached_judge, "evidence_level", "strong")).strip().lower()
                 judge_evidence = list(getattr(cached_judge, "evidence", []) or [])
                 judge_conf = getattr(cached_judge, "confidence", None)
                 judge_coding = getattr(cached_judge, "coding", None)
                 judge_canonical = getattr(cached_judge, "canonical_name", None)
-                judge_tier = getattr(cached_judge, "tier", None)
             if jl in ("strong", "moderate") and judge_evidence:
                 use_judge = True
 
@@ -586,7 +592,7 @@ class EvaluatorCoordinator:
         det_level = PolicyGate._deterministic_evidence_level(verified_score, coding_score, profile)
         evidence_level = PolicyGate._max_evidence_level(base_evidence_level, det_level)  # strong wins if base strong, otherwise moderate may be promoted or stay
 
-        # Tier via categorize_model (pricing-aware)
+        # Tier via categorize_model (pricing-aware) — issue #224 contract: always derived, never persisted
         has_weakness = False
         weakness_reason = None
         try:
@@ -594,30 +600,7 @@ class EvaluatorCoordinator:
             has_weakness, weakness_reason = has_critical_weakness(profile) if profile.scores else (False, None)
         except Exception:
             pass
-        # Tier: reuse judge tier when present and pricing unchanged, else recompute (pricing-aware)
-        if use_judge and judge_tier:
-            tier = judge_tier  # type: ignore
-            # If pricing drifted, recompute tier deterministically (pricing influences flash vs max)
-            try:
-                recomputed = categorize_model(
-                    coding=deterministic_coding,
-                    aa_score=verified_score,
-                    min_score=min_score,
-                    max_score=max_score,
-                    judge_decision="keep",
-                    model_id=raw_model_id,
-                    coding_score=coding_score,
-                    has_critical_weakness=has_weakness,
-                    pricing_blended=pricing_blended,
-                    has_older_kept_sibling=has_sibling,
-                )
-                # Only override if pricing influence changes tier; keep judge tier otherwise
-                if recomputed != judge_tier and pricing_blended is not None:
-                    tier = recomputed
-            except Exception:
-                pass
-        else:
-            tier = categorize_model(
+        tier = categorize_model(
                 coding=deterministic_coding,
                 aa_score=verified_score,
                 min_score=min_score,

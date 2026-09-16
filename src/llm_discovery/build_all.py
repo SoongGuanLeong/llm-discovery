@@ -7,7 +7,7 @@ Orchestrates in order:
      - Bounded parallelism (2 concurrent) for provider discovery; intra-provider judge max_workers=4
      - Store fcntl+atomic safe under cross-provider concurrent puts
   4. Backfill de-duplicates Ephemeral Reports by normalized key via benchmarks gap-fill + pricing aggregation
-  5. GC scans live normalized keys from all keep lists; if key absent from live set and stale (>28d) delete, share-aware
+  5. GC scans live normalized keys from all keep lists; if key absent from live set and stale (>14d) delete, share-aware (issue #224)
   6. Atomic pretty store with version header (via ModelInfoStore) + telemetry
 
 Demoable with tmp data-dir and 2 mocked providers, no network/LLM.

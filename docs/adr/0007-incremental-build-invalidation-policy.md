@@ -1,6 +1,9 @@
 # ADR 0007: Incremental build invalidation policy (per-record TTL and signals) — slim v2
 
 ## Status
+Superseded by ADR 0009 (per-evidence TTL split, 2026-09-16) — see 0009-per-evidence-ttl-split.md. Kept for history.
+
+## Superseded Status (original)
 Accepted — Issue #85 grilling (part of #80 Wayfinder), 2026-09-04. Extends ADR 0006 per-record TTL with ranked invalidation signals. Updated by #91/#95/#98 to slim v2 (Evidence Delta disabled, Pricing TTL 14d only).
 
 ## Context

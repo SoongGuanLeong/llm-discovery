@@ -352,8 +352,8 @@ def build_all(
         else:
             _aa_shared, _md_shared = aa, models_dev
 
-        # Determine if catalog is stale: any catalog older than TTL triggers re-eval of keeps
-        catalog_stale = any(catalog_status["stale"].values())
+        # Per-evidence TTL (issue #221): global catalog_stale removed; per-model diff prevents broad rebuild
+        catalog_stale = False  # deprecated, per-model evidence_hash + pricing 7d / catalog row 14d / benchmark 90d
 
         def _run_real_provider(name: str) -> tuple[str, dict[str, list[dict[str, Any]]], Path]:
             print(f"\n=== {name} === (build-all)")

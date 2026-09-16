@@ -19,40 +19,11 @@ from difflib import SequenceMatcher
 
 
 def normalize_model_id(value: str) -> str:
-    """Normalize a model ID or slug to a comparable canonical form.
-
-    Public API for model ID normalization. Tests and external callers should
-    use this instead of the private _normalize helper.
-    """
-    value = value.lower().strip()
-    value = value.rsplit("/", 1)[-1]
-    # Strip free markers (:free, -free, _free, /free) before normalization
-    value = re.sub(r"[:/_-]free$", "", value)
-    # Strip vendor-specific prefixes added by providers:
-    # - "coding-" prefix added by AiHubMix to tag coding-capable models (e.g., coding-glm-5.3 -> glm-5.3)
-    # - "xiaomi-" prefix added by AiHubMix for Xiaomi models (e.g., xiaomi-mimo-v2-pro -> mimo-v2-pro)
-    # These prefixes are provider-side tags not present in AA catalog slugs
-    for _prefix in ("coding-", "xiaomi-"):
-        if value.startswith(_prefix):
-            value = value[len(_prefix):]
-            break
-    # Strip nvidia- hyphen prefix to match AA slugs (nvidia/nemotron vs nvidia-nemotron)
-    # Other providers (llama, minimax) keep their family prefix; only nvidia AA uses provider hyphen
-    if value.startswith("nvidia-"):
-        value = value[len("nvidia-"):]
-    # Insert hyphen between letter and digit for multi-letter families (gemma4 -> gemma-4, not v2)
-    value = re.sub(r"([a-z]{2,})(\d)", r"\1-\2", value)
-    # Preserve dots inside version numbers: 2.5 -> zzzdotzzz -> restore after
-    value = re.sub(r"(\d)\.(\d)", r"\1zzzdotzzz\2", value)
-    value = re.sub(r"[^a-z0-9.]+", "-", value)
-    value = value.replace("zzzdotzzz", ".")
-    # Convert stray dots (not between digits) to hyphen - keep 2.5 dots only
-    value = re.sub(r"(?<!\d)\.", "-", value)
-    value = re.sub(r"\.(?!\d)", "-", value)
-    value = re.sub(r"-+", "-", value)
-    value = re.sub(r"-\.", ".", value)
-    value = re.sub(r"\.-", ".", value)
-    return value.strip("-.")
+    """Normalize via shared canonical layer."""
+    from .evidence_identity import canonical_key
+    base = canonical_key(value)
+    base = re.sub(r"([a-z]{2,})(\d)", r"\1-\2", base)
+    return base.strip("-.")
 
 
 # Backward compatibility alias
@@ -60,56 +31,38 @@ _normalize = normalize_model_id
 
 
 def _generate_match_variants(normalized: str) -> list[tuple[str, float, str]]:
-    """Generate safe matching variants with confidence.
-    Keeps original untouched, generates alternatives:
-    - exact normalized (1.0)
-    - version-format hyphen<->dot (0.95)
-    - token reorder for claude families (0.90)
-    """
+    """Delegate to shared canonical layer."""
+    from .evidence_identity import resolve_canonical_variants, canonical_key
+    # normalized already canonical, but re-derive via canonical_key to ensure consistency
+    # Use resolve_canonical_variants on the normalized key directly
+    # To avoid double normalizing, treat normalized as already canonical and generate variants
+    from .evidence_identity import dot_hyphen_variants, suffix_stripped_variants, dated_variants, claude_token_reorder_variants, gemini_preview_variants
     variants: list[tuple[str, float, str]] = []
     seen: set[str] = set()
     def add(v: str, conf: float, reason: str):
         if v not in seen:
             seen.add(v)
             variants.append((v, conf, reason))
+    # exact already
     add(normalized, 1.0, "exact_normalized")
-    # Vendor suffix stripping (muse contributor, qwen -next) for versioned vendor aliases (issue #50)
-    for suffix in ("-contributor", "-next"):
-        if normalized.endswith(suffix):
-            base = normalized[: -len(suffix)]
-            add(base, 0.95, f"suffix_strip_{suffix[1:]}")
-            # Also handle dot/hyphen version for stripped base (e.g., muse-spark-1.2 -> muse-spark-1-2)
-            hyphen_variant = base.replace(".", "-")
-            if hyphen_variant != base:
-                add(hyphen_variant, 0.95, f"suffix_strip_{suffix[1:]}+version_format")
-            dot_variant = re.sub(r"(\d)-(\d)", r"\1.\2", base)
-            if dot_variant != base and dot_variant != hyphen_variant:
-                add(dot_variant, 0.95, f"suffix_strip_{suffix[1:]}+version_format")
-    hyphen_to_dot = re.sub(r"(\d)-(\d)", r"\1.\2", normalized)
-    if hyphen_to_dot != normalized:
-        add(hyphen_to_dot, 0.95, "version_format_variant")
-    dot_to_hyphen = normalized.replace(".", "-")
-    if dot_to_hyphen != normalized and dot_to_hyphen != hyphen_to_dot:
-        add(dot_to_hyphen, 0.95, "version_format_variant")
-    m = re.match(r"^(claude-(?:haiku|sonnet|opus))-(.+)$", normalized)
-    if m:
-        family = m.group(1)
-        rest = m.group(2)
-        suffix = family.split("-", 1)[1]
-        reordered = f"claude-{rest}-{suffix}"
-        add(reordered, 0.90, "token_reorder")
-        reordered_dot = re.sub(r"(\d)-(\d)", r"\1.\2", reordered)
-        if reordered_dot != reordered:
-            add(reordered_dot, 0.90, "token_reorder+version_format")
-    m2 = re.match(r"^claude-((?:\d+[.-]\d+).*?)-(haiku|sonnet|opus)$", normalized)
-    if m2:
-        version_part = m2.group(1)
-        suffix = m2.group(2)
-        reordered2 = f"claude-{suffix}-{version_part}"
-        add(reordered2, 0.90, "token_reorder")
-        r2_dot = re.sub(r"(\d)-(\d)", r"\1.\2", reordered2)
-        if r2_dot != reordered2:
-            add(r2_dot, 0.90, "token_reorder+version_format")
+    for v,c,r in dot_hyphen_variants(normalized):
+        add(v,c,r)
+    for v,c,r in suffix_stripped_variants(normalized):
+        add(v,c,r)
+    for v,c,r in dated_variants(normalized):
+        add(v,c,r)
+    for v,c,r in claude_token_reorder_variants(normalized):
+        add(v,c,r)
+    for v,c,r in gemini_preview_variants(normalized):
+        add(v,c,r)
+    # dated on suffix bases
+    extra = []
+    for v,c,r in list(variants):
+        for dv,dc,dr in dated_variants(v):
+            if dv not in seen:
+                extra.append((dv, dc*0.98, dr+"+suffix"))
+    for v,c,r in extra:
+        add(v,c,r)
     return variants
 
 

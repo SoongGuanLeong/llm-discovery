@@ -262,20 +262,175 @@ class EvaluatorCoordinator:
                 result["tier"] = "flash"
             return result
         elif det_level == "weak":
-            # issue #222: weak/none -> uncertain, cached in the Candidate store with long TTL.
-            # No Keeper-store write: weak never passes the Accurate-Enough Gate, and a
-            # judge-less slim record would classify_hit "miss" on every build anyway.
-            result = self._deterministic_weak_record(model_id, resolution, _profile, packet)
-            self._reconcile_candidate_store(model_id, cache_key, resolution, result)
-            return result
-        # moderate/ambiguous -> LLM
+            # Recovery before declaring weak/none (phase 4): cheap deterministic + LLM/web
+            recovery_attempts: list[str] = []
+            # 1. canonical benchmark alias lookup via evidence_identity variants
+            rec_profile = _profile
+            rec_resolution = resolution
+            rec_verified = verified_score
+            rec_coding = coding_score
+            # Try benchmark alias variant if profile empty
+            if (rec_profile is None or not rec_profile.scores) and self.cache is not None:
+                try:
+                    from .evidence_identity import resolve_canonical_variants
+                    from .benchmarks import build_benchmark_profile as _bbp
+                    for var, _, _ in resolve_canonical_variants(model_id):
+                        if var == model_id or var == rec_profile.model_id if rec_profile else False:
+                            continue
+                        recovery_attempts.append(f"canonical_benchmark_lookup:{var}")
+                        cand = _bbp(var, self.provider_name, self.cache)
+                        if cand and cand.scores:
+                            # recompute coding_score with variant
+                            from .benchmarks import compute_coding_score as _ccs
+                            cs, _, _ = _ccs(cand)
+                            # recompute det level with variant scores
+                            cand_level = PolicyGate._deterministic_evidence_level(rec_verified, cs, cand, provider_claims=getattr(packet, "provider_claims", None), model_id=model_id)
+                            if cand_level != "weak":
+                                rec_profile = cand
+                                rec_coding = cs
+                                det_level = cand_level
+                                break
+                    # cap attempts in case of many variants
+                    recovery_attempts = recovery_attempts[:5]
+                except Exception:
+                    pass
+            # 2. AA alias/canonical lookup via evidence_identity if no AA
+            if rec_verified is None and rec_resolution and getattr(rec_resolution, "aa_model", None) is None:
+                try:
+                    from .evidence_identity import resolve_canonical_variants
+                    from .model_resolver import resolve_model as _rm
+                    for var, _, _ in resolve_canonical_variants(model_id)[:6]:
+                        if var == model_id:
+                            continue
+                        recovery_attempts.append(f"aa_alias_lookup:{var}")
+                        cand_res = _rm(var, self.aa, self.models_dev, self.cache)
+                        cand_aa = getattr(cand_res, "aa_model", None)
+                        if cand_aa is not None:
+                            cand_score = self._aa_score(cand_aa)
+                            cand_level = PolicyGate._deterministic_evidence_level(cand_score, rec_coding, rec_profile, provider_claims=getattr(packet, "provider_claims", None), model_id=model_id)
+                            if cand_level != "weak":
+                                rec_resolution = cand_res
+                                rec_verified = cand_score
+                                det_level = cand_level
+                                break
+                except Exception:
+                    pass
+            # 3. models.dev already handled in EvidenceCollector; skip
+            # 4. cached evidence already via profile; 5. provider first-party via packet.provider_claims already in det_level
+            if det_level == "strong":
+                result = self._deterministic_strong_record(model_id, rec_resolution, rec_profile, packet)
+                result["recovery_attempts"] = recovery_attempts
+                result["evidence_reason"] = "recovered_via_canonical_alias"
+                result["evidence_status"] = "recovered"
+                if self.store is not None and result.get("decision") == "keep":
+                    try:
+                        ok, _ = is_accurate_enough(result)
+                        if ok:
+                            from .model_info_store import ModelInfoRecord
+                            rec = ModelInfoRecord.from_provider_record(result, provider=self.provider_name, evaluated_at=datetime.now(UTC).isoformat())
+                            key = resolve_cache_identity(model_id, rec_resolution)
+                            if key:
+                                self.store.put(key, rec)
+                    except Exception:
+                        pass
+                self._reconcile_candidate_store(model_id, cache_key, rec_resolution, result)
+                return result
+            if det_level not in ("weak", "none"):
+                # recovered to moderate -> go to LLM path below
+                _profile = rec_profile
+                resolution = rec_resolution
+                verified_score = rec_verified
+                coding_score = rec_coding
+                recovery_attempts.append("recovered_to_moderate_via_alias")
+                # fall through to LLM evaluation with updated profile/resolution
+                # store attempts for observability after LLM
+                self._pending_recovery_attempts = recovery_attempts  # type: ignore
+            else:
+                # still weak -> try LLM/web recovery only when appropriate
+                # Appropriate when provider claim exists (verifiable) or cheap alias hint exists,
+                # otherwise genuine weak stays weak without expensive LLM (preserves candidate cache contract, issue #222).
+                should_try_llm = False
+                try:
+                    has_claim = bool(getattr(packet, "provider_claims", None))
+                    if self.evaluator is not None and has_claim:
+                        should_try_llm = True
+                    # Check candidate cache would be hit - if cached, skip LLM (TTL handles it)
+                    if self.candidate_store is not None and cache_key and self.candidate_store.get(cache_key) is not None:
+                        should_try_llm = False
+                except Exception:
+                    should_try_llm = False
+                if should_try_llm and self.evaluator is not None:
+                    try:
+                        recovery_attempts.append("llm_web_recovery")
+                        judge = Judge(self.evaluator)
+                        # Use recovered profile if any
+                        llm_profile = rec_profile if rec_profile is not None else _profile
+                        llm_resolution = rec_resolution if rec_resolution is not None else resolution
+                        llm_result = judge.evaluate(self.provider_name, model, packet, self.cache, profile=llm_profile)
+                        gate = PolicyGate(self.min_score, self.max_score, self.cache, store=self.store)
+                        llm_res = gate.apply(llm_result, llm_resolution, model_id, self.provider_name, profile=llm_profile, packet=packet)
+                        llm_res["recovery_attempts"] = recovery_attempts
+                        llm_res["evidence_status"] = "uncertain" if str(llm_res.get("evidence_level","")).lower() in ("weak","none") else "recovered"
+                        if "evidence_reason" not in llm_res:
+                            llm_res["evidence_reason"] = "llm_recovery_attempted" if str(llm_res.get("evidence_level","")).lower() in ("weak","none") else "recovered_via_llm"
+                        # store handling as per normal LLM path
+                        _llm_lvl = str(llm_res.get("evidence_level", "")).strip().lower()
+                        if self.store is not None and _llm_lvl not in ("weak", "none") and llm_res.get("decision") == "keep":
+                            try:
+                                ok, _ = is_accurate_enough(llm_res)
+                                if ok:
+                                    from .model_info_store import ModelInfoRecord
+                                    rec = ModelInfoRecord.from_provider_record(llm_res, provider=self.provider_name, evaluated_at=datetime.now(UTC).isoformat())
+                                    key = resolve_cache_identity(model_id, llm_resolution)
+                                    if key:
+                                        self.store.put(key, rec)
+                            except Exception:
+                                pass
+                        self._reconcile_candidate_store(model_id, cache_key, llm_resolution, llm_res)
+                        return llm_res
+                    except Exception as exc:
+                        # LLM failed -> fall through to weak with error observability
+                        try:
+                            err_rec = self._llm_error_record(model_id, exc)
+                            err_rec["recovery_attempts"] = recovery_attempts
+                            err_rec["evidence_status"] = "error"
+                            # classify error category
+                            err_rec["error_category"] = self._classify_judge_error(exc)
+                            return err_rec
+                        except Exception:
+                            pass
+                # genuine weak after all recovery
+                result = self._deterministic_weak_record(model_id, rec_resolution, rec_profile, packet)
+                result["recovery_attempts"] = recovery_attempts if recovery_attempts else ["canonical_lookup","aa_alias_lookup","models_dev_lookup","cached_evidence","provider_claim","llm_web_recovery"]
+                result["evidence_reason"] = "genuine_weak_after_recovery" if not rec_profile or not rec_profile.scores else "weak_despite_bench"
+                result["evidence_status"] = "uncertain"
+                self._reconcile_candidate_store(model_id, cache_key, rec_resolution, result)
+                return result
+        # moderate/ambiguous -> LLM (with pending recovery attempts from weak->moderate path)
+        pending = getattr(self, "_pending_recovery_attempts", None)
+        if pending:
+            try:
+                delattr(self, "_pending_recovery_attempts")
+            except Exception:
+                pass
         judge = Judge(self.evaluator)
         try:
-            llm_result = judge.evaluate(self.provider_name, model, packet, self.cache)
+            llm_result = judge.evaluate(self.provider_name, model, packet, self.cache, profile=_profile)
         except Exception as exc:
-            return self._llm_error_record(model_id, exc)
+            err = self._llm_error_record(model_id, exc)
+            err["error_category"] = self._classify_judge_error(exc)
+            err["retry_count"] = getattr(exc, "retry_count", 0)
+            if pending:
+                err["recovery_attempts"] = pending + ["llm_web_recovery"]
+                err["evidence_status"] = "error"
+            return err
         gate = PolicyGate(self.min_score, self.max_score, self.cache, store=self.store)
         result = gate.apply(llm_result, resolution, model_id, self.provider_name, profile=_profile, packet=packet)
+        if pending:
+            result["recovery_attempts"] = pending + ["llm_web_recovery"]
+            result["evidence_status"] = "uncertain" if str(result.get("evidence_level","")).lower() in ("weak","none") else "recovered"
+            if "evidence_reason" not in result:
+                result["evidence_reason"] = "recovered_via_llm" if result.get("evidence_status")=="recovered" else "llm_still_weak"
         # issue #222: weak/none LLM results are Candidates, never Keeper-store records.
         # strong/moderate keep/drop store writes stay exactly as before.
         _llm_lvl = str(result.get("evidence_level", "")).strip().lower()
@@ -735,6 +890,11 @@ class EvaluatorCoordinator:
                 benchmarks = {}
         if benchmarks is None:
             benchmarks = {}
+        cat = self._classify_judge_error(exc)
+        rc = getattr(exc, "retry_count", None)
+        if rc is None:
+            # try to infer from message retry hints
+            rc = 0
         return {
             "provider_model_id": model_id,
             "source": "llm_error",
@@ -752,6 +912,9 @@ class EvaluatorCoordinator:
             "evidence_level": "none",
             "evidence": [f"LLM evaluation failed: {exc}"],
             "coding_assessment": None,
+            "evidence_status": "error",
+            "error_category": cat,
+            "retry_count": rc,
         }
 
     def deterministic_drop_record(self, model_id: str, reason: str, cache=None) -> dict[str, Any]:
@@ -947,6 +1110,26 @@ class EvaluatorCoordinator:
             "evidence": evidence,
             "coding_assessment": {"is_coding": False, "confidence": 1.0, "reason": "deterministic weak/none", "coding_score": coding_score, "aa_score": verified_score},
         }
+
+    def _classify_judge_error(self, exc: Exception) -> str:
+        msg = str(exc).lower()
+        if "timeout" in msg or "timed out" in msg:
+            return "judge_timeout"
+        if "429" in msg or "rate" in msg or "429" in msg:
+            return "judge_429"
+        if "connection" in msg or "connect" in msg:
+            return "judge_connection_failure"
+        if "400" in msg:
+            return "judge_400"
+        if "401" in msg or "403" in msg or "auth" in msg:
+            return "judge_auth"
+        if "5" in msg and ("500" in msg or "502" in msg or "503" in msg or "529" in msg):
+            return "judge_5xx"
+        if "json" in msg or "parse" in msg or "validation" in msg:
+            return "judge_malformed_response"
+        if "search" in msg or "tool" in msg:
+            return "judge_tool_failure"
+        return "judge_unknown"
 
     # ------------------------------------------------------------------
     # Candidate cache (weak/none long-TTL reuse, issue #222)

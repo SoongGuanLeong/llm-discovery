@@ -46,21 +46,10 @@ def _normalize_model_id_stepfun(model_id: str) -> str:
 
 
 def normalize_store_key(model_id: str) -> str:
+    from .evidence_identity import canonical_key
     if not model_id:
         return ""
-    raw = model_id.strip().lower()
-    raw = re.sub(r"[:/_-]free$", "", raw)
-    raw = _normalize_model_id_stepfun(raw)
-    raw = re.sub(r"[:/_-]free$", "", raw)
-    slug = raw.rsplit("/", 1)[-1]
-    if ":" in slug:
-        parts = slug.split(":")
-        if parts[-1] == "free":
-            slug = ":".join(parts[:-1])
-    slug = _normalize_model_id_stepfun(slug)
-    slug = re.sub(r"[:/_-]free$", "", slug)
-    slug = slug.strip("-_./:")
-    return slug
+    return canonical_key(model_id)
 
 
 def normalized_key_with_matcher(model_id: str) -> str:

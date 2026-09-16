@@ -165,12 +165,33 @@ class BenchmarkDataCache:
 
     def _rebuild_norm_index(self) -> None:
         idx: dict[str, str] = {}
+        try:
+            from .evidence_identity import resolve_canonical_variants
+        except Exception:
+            resolve_canonical_variants = None  # type: ignore
         for key in self._data:
             norm = _normalize_model_key(key)
             if not norm:
                 continue
             for alt in {norm, norm.replace(".", "-"), re.sub(r"(\d)-(\d)", r"\1.\2", norm)}:
                 idx.setdefault(alt, key)
+            if resolve_canonical_variants is not None:
+                try:
+                    for var, _, _ in resolve_canonical_variants(norm):
+                        idx.setdefault(var, key)
+                    m = __import__("re").search(r"-(\d{4,8})$", norm)
+                    if m:
+                        base = norm[: m.start()]
+                        if base:
+                            idx.setdefault(base, key)
+                            hv = base.replace(".", "-")
+                            if hv != base:
+                                idx.setdefault(hv, key)
+                            dv = __import__("re").sub(r"(\d)-(\d)", r"\1.\2", base)
+                            if dv != base and dv != hv:
+                                idx.setdefault(dv, key)
+                except Exception:
+                    pass
         self._norm_index = idx
 
     def load(self) -> None:
@@ -274,6 +295,15 @@ class BenchmarkDataCache:
             key = self._norm_index.get(alt)
             if key is not None and key in self._data:
                 return self._data[key]["benchmarks"]
+        # Evidence-identity variant fallback (dot/hyphen, dated, claude reorder, gemini preview, etc.)
+        try:
+            from .evidence_identity import resolve_canonical_variants
+            for var, _, _ in resolve_canonical_variants(norm_slug):
+                key = self._norm_index.get(var)
+                if key is not None and key in self._data:
+                    return self._data[key]["benchmarks"]
+        except Exception:
+            pass
         # Conservative date-suffix fallback: strip trailing -YYYY or -MMDD if base exists (e.g. deepseek-v4-pro-0813 -> deepseek-v4-pro)
         # Only when direct norm missed and base without date is distinct entry; never collapses two dated variants.
         date_stripped = re.sub(r"-\d{4}$", "", norm_slug)
@@ -304,6 +334,14 @@ class BenchmarkDataCache:
             key = self._norm_index.get(alt)
             if key is not None and key in self._data:
                 return self._data[key].get("raw_benchmarks", [])
+        try:
+            from .evidence_identity import resolve_canonical_variants
+            for var, _, _ in resolve_canonical_variants(norm_slug):
+                key = self._norm_index.get(var)
+                if key is not None and key in self._data:
+                    return self._data[key].get("raw_benchmarks", [])
+        except Exception:
+            pass
         date_stripped = re.sub(r"-\d{4}$", "", norm_slug)
         if date_stripped != norm_slug:
             for alt in (date_stripped, date_stripped.replace(".", "-"), re.sub(r"(\d)-(\d)", r"\1.\2", date_stripped)):
@@ -381,52 +419,9 @@ class BenchmarkDataCache:
 
 
 def _normalize_model_key(name: str) -> str:
-    """Normalize a model name to a key for matching. Preserves version dots (2.5 stays 2.5)."""
-    name = name.lower().strip()
-    # Remove provider prefix (everything before last /)
-    name = re.sub(r"^.+?/", "", name)
-    # Strip AiHubMix vendor prefixes (coding-, xiaomi-) before other prefixes — provider-tag only, same base model
-    for _prefix in ("coding-", "xiaomi-"):
-        if name.startswith(_prefix):
-            name = name[len(_prefix):]
-            break
-    # Also remove common provider prefixes from start if no / present
-    for prefix in ("nvidia-", "llama-", "minimax-", "poolside-", "stepfun-", "thinkingmachines-"):
-        if name.startswith(prefix):
-            name = name[len(prefix):]
-            break
-    # Remove version suffixes (unified free handling: :free/-free/_free//free)
-    name = re.sub(r":(free|paid|beta|rc\d*)$", "", name)
-    name = re.sub(r"-(preview|beta|rc\d+)$", "", name)
-    name = re.sub(r"[:/_-]free$", "", name)
-    # Strip vendor suffixes that break AA/benchmark lookup (muse contributor, qwen -next)
-    name = re.sub(r"-contributor$", "", name)
-    name = re.sub(r"-next$", "", name)
-    # Date suffix preserved for benchmark cache distinctness (issue #42); resolver handles dated alias separately
-    # Remove parenthetical content
-    name = re.sub(r"\s*\(.*?\)\s*", "", name)
-    # Handle common naming variations
-    name = name.replace("minimax", "mm")
-    name = name.replace("nemotron", "nemo")
-    name = name.replace("laguna-s", "laguna")
-    name = name.replace("laguna-xs", "laguna")
-    # Insert hyphen between letter and digit (gemma4 -> gemma-4)
-    name = re.sub(r"([a-z]{2,})(\d)", r"\1-\2", name)
-    # Preserve dots inside versions: 2.5 -> zzzdotzzz -> restore
-    name = re.sub(r"(\d)\.(\d)", r"\1zzzdotzzz\2", name)
-    # Replace whitespace with hyphens
-    name = re.sub(r"\s+", "-", name)
-    # Remove non-alphanumeric (keep hyphens and dots)
-    name = re.sub(r"[^a-z0-9-.]+", "-", name)
-    name = name.replace("zzzdotzzz", ".")
-    # Convert stray dots (not between digits) to hyphen
-    name = re.sub(r"(?<!\d)\.", "-", name)
-    name = re.sub(r"\.(?!\d)", "-", name)
-    # Collapse multiple hyphens, clean dot-hyphen
-    name = re.sub(r"-+", "-", name)
-    name = re.sub(r"-\.", ".", name)
-    name = re.sub(r"\.-", ".", name)
-    return name.strip("-.")
+    """Delegate to shared canonical layer (evidence_identity)."""
+    from .evidence_identity import canonical_key
+    return canonical_key(name)
 
 
 def build_benchmark_profile(provider_model_id, provider_name, cache=None):

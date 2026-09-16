@@ -145,6 +145,7 @@ class ProviderBatchWriter:
             "coding_score": rec.get("coding_score"),
             "pricing": rec.get("pricing"),
             "benchmarks": benchmarks,
+            "benchmark_coverage": rec.get("benchmark_coverage"),
             "confidence": rec.get("confidence"),
             "evidence_level": rec.get("evidence_level"),
             "evidence": clean_evidence(rec.get("evidence", [])),

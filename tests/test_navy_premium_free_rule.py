@@ -5,6 +5,7 @@ Vertical slices, one test -> one impl already green (ba4c3cd). Permanent tests.
 """
 from llm_discovery.discovery import _normalize_models
 from llm_discovery.pipeline import _apply_free_model_rule, _has_free_name, _is_free_model, _split_by_free_rule
+from llm_discovery.evaluator import EvaluatorCoordinator
 
 
 def _stub_provider_env(monkeypatch, raw_models):
@@ -289,14 +290,14 @@ class TestProviderWiringAndNaraRouter:
             {"id": "paid-no-premium", "name": "paid-no-premium", "object": "model"},
         ]
         _stub_provider_env(monkeypatch, navy_raw)
-        # stub LLM to avoid real calls - evaluate_model will be called for keep only (1 model)
-        # we need to stub evaluate_model to return keep directly without LLM
+        # stub LLM to avoid real calls - Coordinator.evaluate is called for keep only (1 model)
+        # we need to stub EvaluatorCoordinator.evaluate to return keep directly without LLM
         called_ids = []
-        def fake_evaluate(model, provider_name, aa, models_dev, evaluator, min_score, max_score, cache=None):
+        def fake_evaluate(self, model):
             called_ids.append(model["id"])
             return {"provider_model_id": model["id"], "decision": "keep", "tier": "low", "aa_score": 30}
 
-        monkeypatch.setattr("llm_discovery.pipeline.evaluate_model", fake_evaluate)
+        monkeypatch.setattr(EvaluatorCoordinator, "evaluate", fake_evaluate)
         monkeypatch.setattr("llm_discovery.benchmarks.BenchmarkDataCache", lambda: type("C", (), {"collect_from_local": lambda s,a,b: None, "_data": {}})())
         monkeypatch.setattr("llm_discovery.llm.LocalLLMEvaluator", lambda **kw: object())
         monkeypatch.setenv("NAVY_AI_API_KEY", "fake-navy")
@@ -319,10 +320,10 @@ class TestProviderWiringAndNaraRouter:
         ]
         _stub_provider_env(monkeypatch, generic_raw)
         called = []
-        def fake_evaluate(model, provider_name, aa, models_dev, evaluator, min_score, max_score, cache=None):
+        def fake_evaluate(self, model):
             called.append(model["id"])
             return {"provider_model_id": model["id"], "decision": "keep", "tier": "low"}
-        monkeypatch.setattr("llm_discovery.pipeline.evaluate_model", fake_evaluate)
+        monkeypatch.setattr(EvaluatorCoordinator, "evaluate", fake_evaluate)
         monkeypatch.setattr("llm_discovery.benchmarks.BenchmarkDataCache", lambda: type("C", (), {"collect_from_local": lambda s,a,b: None, "_data": {}})())
         monkeypatch.setattr("llm_discovery.llm.LocalLLMEvaluator", lambda **kw: object())
         monkeypatch.setenv("GROQ_API_KEY", "fake-groq")
@@ -345,10 +346,10 @@ class TestProviderWiringAndNaraRouter:
         ]
         _stub_provider_env(monkeypatch, llm7_raw)
         called = []
-        def fake_evaluate(model, provider_name, aa, models_dev, evaluator, min_score, max_score, cache=None):
+        def fake_evaluate(self, model):
             called.append(model["id"])
             return {"provider_model_id": model["id"], "decision": "keep", "tier": "low"}
-        monkeypatch.setattr("llm_discovery.pipeline.evaluate_model", fake_evaluate)
+        monkeypatch.setattr(EvaluatorCoordinator, "evaluate", fake_evaluate)
         monkeypatch.setattr("llm_discovery.benchmarks.BenchmarkDataCache", lambda: type("C", (), {"collect_from_local": lambda s,a,b: None, "_data": {}})())
         monkeypatch.setattr("llm_discovery.llm.LocalLLMEvaluator", lambda **kw: object())
         monkeypatch.setenv("LLM7_API_KEY", "fake-llm7")

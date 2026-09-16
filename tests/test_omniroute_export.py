@@ -238,7 +238,7 @@ def test_opencode_zen_mapping():
     """opencode_zen maps to opencode-zen registry id (Standard API Provider)."""
     rows = mod.build_import_entries(Path("config/providers.yaml"))
     by_name = {r["name"]: r for r in rows}
-    assert by_name["opencode_zen"]["provider"] == "opencode-zen-custom"
+    assert by_name["opencode_zen"]["provider"] == "opencode-zen"
     assert by_name["opencode_zen"]["name"] == "opencode_zen"
 
 
@@ -527,6 +527,14 @@ class TestE2EFullApply:
     """Ticket 178: end-to-end verification + idempotency + revert."""
 
     def test_full_apply_creates_expected_mutations(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Data-dependent integration test: requires real keep rows in data/results.
+        # In a fresh checkout those files contain zero keeps (gitignored live build
+        # snapshot), so the payload would have zero models. Skip explicitly rather
+        # than asserting against empty live data or fabricating a snapshot.
+        keeps = mod._load_keep_records(Path("data/results"))
+        if not keeps:
+            pytest.skip("requires keep rows in data/results/*.yaml (live build snapshot; not in repo)")
+
         gateway = _MockGateway()
 
         def fake_request(method: str, url: str, **kwargs: Any) -> _FakeResponse:

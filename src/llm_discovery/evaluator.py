@@ -722,7 +722,7 @@ class EvaluatorCoordinator:
             "coding": deterministic_coding,
             "cached": True,
             "cache_hit_level": "strong",
-            "reason": "cache_hit:strong:pricing_ttl_28d" if stale else "cache_hit:strong",
+            "reason": "cache_hit:strong:pricing_ttl_7d" if stale else "cache_hit:strong",
             "provider": self.provider_name,
             "source": "cache",
         }

@@ -540,7 +540,7 @@ class TestEvaluatorCoordinatorDirect:
         )
         assert EvaluatorCoordinator.classify_hit(rec_weak) == "miss"
 
-    def test_coordinator_pricing_ttl_28d_via_direct(self):
+    def test_coordinator_pricing_ttl_7d_via_direct(self):
         from llm_discovery.evaluator import EvaluatorCoordinator
         stale_rec = ModelInfoRecord(
             benchmarks=BenchmarkSnapshot(scores={"aa_intelligence": {"score": 50}}, raw_benchmarks=[]),
@@ -554,12 +554,12 @@ class TestEvaluatorCoordinatorDirect:
             _meta=StoreMeta(first_seen=_fresh_ts(), last_updated=_fresh_ts(), version=2),
         )
         assert EvaluatorCoordinator._pricing_is_stale(fresh_rec) is False
-        rec_20d = ModelInfoRecord(
+        rec_5d = ModelInfoRecord(
             benchmarks=BenchmarkSnapshot(scores={"a": {"score": 50}}),
             pricing=PricingSnapshot(blended=0.5),
-            _meta=StoreMeta(first_seen=_stale_ts(20), last_updated=_stale_ts(20), version=2),
+            _meta=StoreMeta(first_seen=_stale_ts(5), last_updated=_stale_ts(5), version=2),
         )
-        assert EvaluatorCoordinator._pricing_is_stale(rec_20d) is False
+        assert EvaluatorCoordinator._pricing_is_stale(rec_5d) is False
         out = EvaluatorCoordinator._refresh_pricing_if_stale(stale_rec, [{"blended": 0.9, "provider": "prov"}])
         blended = out.blended if hasattr(out, "blended") else out.get("blended")
         assert blended == 0.9
@@ -708,8 +708,15 @@ class TestCatalogStaleBehavior:
         # Should have used cache (drop decision reused)
         assert result["decision"] == "drop"
 
-    def test_stale_catalog_keep_cache_miss_forces_llm(self, tmp_path):
-        """Keep with stale catalog should force LLM re-evaluation."""
+    def test_stale_catalog_strong_keep_uses_cache_not_llm(self, tmp_path):
+        """Strong cached keep is served from cache (no LLM), even with a stale date
+        and even if catalog_stale=True.
+
+        Per issue #221 the global catalog_stale force-re-eval was removed; a
+        strong judge snapshot is reused whenever evidence_hash is unchanged and
+        pricing is gap-filled from fresh observations (or kept verbatim on a
+        catalog miss). Nothing here reaches the LLM.
+        """
         from llm_discovery.benchmarks import BenchmarkDataCache
         from llm_discovery.model_info_store import ModelInfoStore, ModelInfoRecord, PricingSnapshot, BenchmarkSnapshot, StoreMeta, JudgeSnapshot
         from llm_discovery.evaluator import EvaluatorCoordinator
@@ -767,6 +774,9 @@ class TestCatalogStaleBehavior:
                 )
 
         evaluator = TrackingEvaluator()
+        # Stale-dated strong keep record (pricing TTL 7d expired, evidence strong).
+        # catalog_stale=True is now a no-op (#221): the strong keep must still be
+        # served from the Keeper cache WITHOUT invoking the LLM judge.
         coordinator = EvaluatorCoordinator(
             provider_name="test-provider",
             aa=FakeAA(),
@@ -782,9 +792,10 @@ class TestCatalogStaleBehavior:
         with patch("llm_discovery.pipeline.resolve_model", return_value=fake_res):
             result = coordinator.evaluate({"id": "keeper-direct"})
 
-        # LLM should have been called (cache was skipped)
-        assert evaluator.was_called, "LLM should have been called when catalog_stale=True and cached decision is keep"
+        # LLM must NOT be called: strong cached keep is reused even though stale.
+        assert not evaluator.was_called, "LLM should NOT be called on a strong cached keep, even with catalog_stale=True"
         assert result["decision"] == "keep"
+        assert result.get("cached") is True
 
     def test_non_stale_catalog_keep_uses_cache(self, tmp_path):
         """Keep with non-stale catalog should use cache (not re-evaluate)."""

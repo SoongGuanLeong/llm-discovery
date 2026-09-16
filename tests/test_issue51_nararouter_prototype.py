@@ -3,7 +3,10 @@
 Pins the invariants the issue demands and guards the #50/#52 fixes against
 regression. Runs on captured data (no network, no secrets).
 """
+import json
 import yaml
+
+import pytest
 
 from llm_discovery.discovery import NARAROUTER_FREE_SNAPSHOT
 from llm_discovery.model_matching import normalize_model_id
@@ -16,6 +19,15 @@ from scripts.nararouter_issue51_prototype import (
     before_filter,
     build_caches,
     write_after_yaml,
+    RAW_PATH,
+    PLANS_PATH,
+)
+
+# data/ is gitignored: the Nararouter raw capture is not committed, so the
+# snapshot-pinned tests below are skipped on a fresh checkout/CI.
+requires_raw = pytest.mark.skipif(
+    not RAW_PATH.exists(),
+    reason="requires untracked capture data/nararouter_raw.json (Nararouter live API); not in repo",
 )
 
 EXPECTED_TRUE_FREE = {
@@ -56,18 +68,36 @@ class TestNormalizeStripsVendorSuffixes:
 
 
 class TestNaraRouterFreeFilter:
-    def test_allowlist_equals_free_plan(self):
+    def test_allowlist_falls_back_to_snapshot_without_plans(self, monkeypatch, tmp_path):
+        # When no plans capture is present, the allowlist falls back to the
+        # in-code NARAROUTER_FREE_SNAPSHOT constant (== EXPECTED_TRUE_FREE).
+        monkeypatch.setattr("scripts.nararouter_issue51_prototype.PLANS_PATH", tmp_path / "does_not_exist.json")
         assert allowlist_from_plans() == EXPECTED_TRUE_FREE
+
+    def test_allowlist_parses_free_plan_models(self, monkeypatch, tmp_path):
+        # Parsing logic, deterministically exercised with a synthetic plans file:
+        # allowlist_from_plans picks the plan whose code == "free" and takes its models.
+        plans = tmp_path / "plans.json"
+        plans.write_text(json.dumps({
+            "data": [
+                {"code": "plus", "models": ["plus-model"]},
+                {"code": "free", "models": ["foo-free", "bar-free"]},
+            ]
+        }))
+        monkeypatch.setattr("scripts.nararouter_issue51_prototype.PLANS_PATH", plans)
+        assert allowlist_from_plans() == {"foo-free", "bar-free"}
 
     def test_snapshot_matches_free_plan(self):
         assert NARAROUTER_FREE_SNAPSHOT == EXPECTED_TRUE_FREE
 
+    @requires_raw
     def test_raw_has_59_models_8_free_suffixed(self):
         raw = load_captured_raw()
         assert len(raw) == 59
         free = [m["id"] for m in raw if m["id"].endswith("-free")]
         assert len(free) == 8  # 2 true-free + 6 paid-gated
 
+    @requires_raw
     def test_corrected_filter_keeps_9_true_free_excludes_6_paid_gated(self):
         raw = load_captured_raw()
         allow = allowlist_from_plans()
@@ -76,6 +106,7 @@ class TestNaraRouterFreeFilter:
         excluded = {m["id"] for m in raw if m["id"].endswith("-free") and m["id"] not in allow}
         assert excluded == PAID_GATED
 
+    @requires_raw
     def test_legacy_filter_keeps_paid_gated_included(self):
         """Before #52, _split_by_free_rule kept ALL free-marker ids (incl paid-gated)."""
         raw = load_captured_raw()
@@ -84,6 +115,7 @@ class TestNaraRouterFreeFilter:
         assert {"agnes-2.0-flash", "laguna-s-2.1", "mistral-large", "qwen3.8-27b"}.issubset(set(dropped))
 
 
+@requires_raw
 class TestNaraRouterResolution:
     def test_resolution_matrix(self):
         aa, md, cache = build_caches()
@@ -114,6 +146,7 @@ class TestNaraRouterResolution:
                 assert r["provider_id"].startswith("agnes") or r["provider_id"].startswith("stepfun")
 
 
+@requires_raw
 class TestPipelineEndToEndDeterministic:
     def test_run_produces_9_buckets(self):
         raw = load_captured_raw()

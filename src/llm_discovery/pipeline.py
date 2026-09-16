@@ -700,10 +700,10 @@ def _is_free_model(model: dict[str, Any] | str, provider_name: str | None = None
     """
     if provider_name == "xkiro":
         return False
-    # kilo: isFree flag is authoritative
-    if model.get("isFree") is True:
-        return True
     if isinstance(model, dict):
+        # kilo: isFree flag is authoritative when a real model descriptor is given
+        if model.get("isFree") is True:
+            return True
         model_id = str(model.get("id", ""))
         is_marker = any(marker in model_id for marker in FREE_MARKERS)
         if is_marker:

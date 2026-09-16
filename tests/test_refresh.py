@@ -1,5 +1,6 @@
 """Tests for catalog refresh (issue #2 T6): atomic write + backup + all 3 JSONs."""
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -191,8 +192,10 @@ def test_cli_refresh_help():
 def test_catalog_fetched_age_days_fresh(tmp_path: Path):
     from llm_discovery.refresh import catalog_fetched_age_days
     p = tmp_path / "aa.json"
-    p.write_text(json.dumps({"fetched_at": "2026-09-06T00:00:00+00:00", "models": []}))
-    # age vs real now: a few days (fixture predates the test clock)
+    # Deterministic fix (issue #140): a timestamp ~2 days in the past is always
+    # fresh against the real clock, regardless of when the suite is run.
+    fresh = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+    p.write_text(json.dumps({"fetched_at": fresh, "models": []}))
     age = catalog_fetched_age_days(p)
     assert age is not None
     assert 0 <= age <= 7

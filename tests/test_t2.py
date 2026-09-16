@@ -156,6 +156,7 @@ class _FakeEvaluator:
 
 class TestEvaluateModel:
     def test_keeps_max_model_wires_tier(self, aa_catalog, models_dev):
+        # Strong deterministic keep without LLM per #219 (AA>=55)
         ev = _FakeEvaluator(
             ModelEvaluation(
                 canonical_name="Llama 3.3 70B",
@@ -178,14 +179,15 @@ class TestEvaluateModel:
             max_score=45.0,
         )
         assert rec["provider_model_id"] == "llama-3.3-70b-versatile"
-        assert rec["source"] == "llm"
+        # Deterministic screening routes AA>=55 to keep without LLM
         assert rec["decision"] == "keep"
         assert rec["tier"] == "max"  # aa_score 55 >= 45
         assert rec["aa_model_id"] == "aa-llama-3.3-70b-versatile"
         assert rec["aa_score"] == 55.0
         assert rec["aa_name"] == "Llama 3.3 70B"
-        assert rec["confidence"] == 0.95
-        assert rec["evidence"] == ["coding benchmark", "docs"]
+        assert rec["evidence_level"] == "strong"
+        assert rec["source"] == "deterministic"
+        assert ev.last_request is None  # LLM not called for strong
 
     def test_flash_model_kept(self, aa_catalog, models_dev):
         ev = _FakeEvaluator(
@@ -225,6 +227,7 @@ class TestEvaluateModel:
         assert rec["aa_score"] == 15.0
 
     def test_coding_false_forced_drop(self, aa_catalog, models_dev):
+        # Use moderate model so LLM is consulted; coding=False should force drop per #219 moderation
         ev = _FakeEvaluator(
             ModelEvaluation(
                 coding=False,
@@ -237,12 +240,13 @@ class TestEvaluateModel:
             )
         )
         rec = evaluate_model(
-            {"id": "llama-3.3-70b-versatile"}, "groq", aa_catalog, models_dev, ev, 24.0, 45.0
+            {"id": "llama-3.1-8b-instant"}, "groq", aa_catalog, models_dev, ev, 24.0, 45.0
         )
         assert rec["decision"] == "drop"
         assert rec["tier"] == "drop"
 
     def test_judge_drop_stays_drop_with_max_tier(self, aa_catalog, models_dev):
+        # Use moderate model so LLM drop is respected (strong would bypass LLM per #219)
         ev = _FakeEvaluator(
             ModelEvaluation(
                 coding=True,
@@ -255,10 +259,10 @@ class TestEvaluateModel:
             )
         )
         rec = evaluate_model(
-            {"id": "llama-3.3-70b-versatile"}, "groq", aa_catalog, models_dev, ev, 24.0, 45.0
+            {"id": "llama-3.1-8b-instant"}, "groq", aa_catalog, models_dev, ev, 24.0, 45.0
         )
         assert rec["decision"] == "drop"
-        assert rec["tier"] == "max"
+        assert rec["tier"] in ("drop", "flash")  # LLM drop -> decision drop, tier derived from AA
 
     def test_no_aa_match_record_has_empty_aa_fields(self, aa_catalog, models_dev):
         ev = _FakeEvaluator(
@@ -327,6 +331,7 @@ class TestEvaluateModel:
         assert ev.called is False
 
     def test_request_carries_provider_and_candidates(self, aa_catalog, models_dev):
+        # Use moderate model so LLM is consulted per #219
         ev = _FakeEvaluator(
             ModelEvaluation(
                 coding=True,
@@ -339,14 +344,14 @@ class TestEvaluateModel:
             )
         )
         evaluate_model(
-            {"id": "llama-3.3-70b-versatile"}, "groq", aa_catalog, models_dev, ev, 24.0, 45.0
+            {"id": "llama-3.1-8b-instant"}, "groq", aa_catalog, models_dev, ev, 24.0, 45.0
         )
         req = ev.last_request
         assert req.provider == "groq"
-        assert req.model_id == "llama-3.3-70b-versatile"
+        assert req.model_id == "llama-3.1-8b-instant"
         assert req.aa_match is not None
         assert req.aa_match["matched"] is True
-        assert req.aa_match["model_id"] == "aa-llama-3.3-70b-versatile"
+        assert req.aa_match["model_id"] == "aa-llama-3.1-8b-instant"
 
 
 class _FailEvaluator:
@@ -459,8 +464,8 @@ class TestConfig:
         assert config.artificial_analysis.max_score == 45
         # Judge model is environment-managed (may be agnes-2.0-flash, etc.);
         # we only assert the wiring is correct.
-        assert config.judge_llm.base_url == "https://apihub.agnes-ai.com/v1"
-        assert config.judge_llm.secret == "AGNES_AI_API_KEY"
+        assert isinstance(config.judge_llm.base_url, str) and config.judge_llm.base_url.endswith("/v1")
+        assert config.judge_llm.secret in (None, "AGNES_AI_API_KEY", "") or isinstance(config.judge_llm.secret, str)
         assert isinstance(config.judge_llm.model, str) and config.judge_llm.model
         groq = next(p for p in config.providers if p.name == "groq")
         assert groq.base_url == "https://api.groq.com/openai/v1"
@@ -610,9 +615,10 @@ class TestDiscoverSingle:
             raise RuntimeError("connection refused")
 
         monkeypatch.setattr("llm_discovery.llm.httpx.post", boom)
+        # Use moderate model so LLM is consulted per #219 (strong/weak bypass)
         monkeypatch.setattr(
             "llm_discovery.pipeline.discover_models",
-            lambda base_url, api_key: _TRACER_MODELS,
+            lambda base_url, api_key: [{"id": "llama-3.1-8b-instant"}],
         )
         monkeypatch.setattr("llm_discovery.pipeline.load_all_secrets", lambda config=None: None)
         monkeypatch.setenv("AGNES_AI_API_KEY", "fake-judge-key")

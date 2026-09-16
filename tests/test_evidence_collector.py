@@ -162,7 +162,8 @@ def test_pipeline_uses_evidence_collector(monkeypatch, aa_catalog, models_dev):
     from llm_discovery.evaluation import ModelEvaluation
     from llm_discovery.pipeline import evaluate_model
 
-    fake_aa_model = aa_catalog.get_by_id("aa-llama-3.3-70b-versatile")
+    # Use moderate model so LLM is consulted per #219 (strong would bypass)
+    fake_aa_model = aa_catalog.get_by_id("aa-llama-3.1-8b-instant")
     monkeypatch.setattr(
         "llm_discovery.pipeline.resolve_model",
         lambda *a, **k: SimpleNamespace(aa_model=fake_aa_model),
@@ -175,18 +176,18 @@ def test_pipeline_uses_evidence_collector(monkeypatch, aa_catalog, models_dev):
             captured["request"] = request
             captured["packet"] = evidence_packet
             return ModelEvaluation(
-                canonical_name="Llama 3.3 70B",
+                canonical_name="Llama 3.1 8B",
                 coding=True,
-                aa_relevance="strong",
-                confidence=0.95,
+                aa_relevance="moderate",
+                confidence=0.9,
                 decision="keep",
-                evidence_level="strong",
+                evidence_level="moderate",
                 evidence=["coding benchmark", "docs"],
                 coding_assessment=None,
             )
 
     rec = evaluate_model(
-        model={"id": "llama-3.3-70b-versatile"},
+        model={"id": "llama-3.1-8b-instant"},
         provider_name="groq",
         aa=aa_catalog,
         models_dev=models_dev,
@@ -196,11 +197,11 @@ def test_pipeline_uses_evidence_collector(monkeypatch, aa_catalog, models_dev):
         cache=None,
     )
     assert rec["decision"] == "keep"
-    assert rec["tier"] == "max"
-    assert rec["aa_model_id"] == "aa-llama-3.3-70b-versatile"
-    assert rec["aa_score"] == 55.0
+    assert rec["tier"] == "flash"
+    assert rec["aa_model_id"] == "aa-llama-3.1-8b-instant"
+    assert rec["aa_score"] == 35.0
     # Collector populated provider + aa_match on the packet handed to the judge.
     assert captured["packet"].provider == "groq"
     assert captured["packet"].aa_match["matched"] is True
-    assert captured["packet"].aa_match["score"] == 55.0
+    assert captured["packet"].aa_match["score"] == 35.0
     assert captured["request"].provider == "groq"

@@ -107,7 +107,7 @@ def test_evaluate_vision_coding_cheap_bypasses_drop():
         md = _FakeModelsDev({"qwen3.8-27b": {"id": "qwen3.8-27b", "name": "Qwen", "description": "vision-language model for coding"}})
         rec = evaluate_model({"id": "Qwen/Qwen3.8-27B"}, "modelscope", None, md, _FakeEval(), 24.0, 45.0, cache=None)
         assert rec["decision"] == "keep"
-        assert rec["source"] == "llm"
+        assert rec["source"] in ("llm", "deterministic")  # strong via AA 68 may be deterministic keep per #219
 
 
 def test_evaluate_vision_coding_expensive_stays_dropped():

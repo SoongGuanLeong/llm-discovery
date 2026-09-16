@@ -16,7 +16,7 @@ from .model_info_store import (
     normalize_store_key,
 )
 from .categorize import categorize_model
-from .policy_gate import PolicyGate
+from .policy_gate import PolicyGate, _is_router_model
 
 TTL_DAYS = 28
 
@@ -142,6 +142,31 @@ class EvaluatorCoordinator:
                 pass  # Fall through to re-evaluate (catalog stale + cached keep)
             except Exception:
                 pass
+        # Fast-path specialized (tts/embedding/rerank/speech/safety) without bench lookup or LLM (spec #219)
+        _lower = model_id.lower()
+        _spec_patterns = ("tts", "embedding", "embed", "rerank", "reranker", "speech", "whisper", "safety", "guard", "moderation", "text-to-speech", "speech-to-text", "code-embedding", "text-embedding")
+        if any(pt in _lower for pt in _spec_patterns) and "vision" not in _lower:
+            for _pt in _spec_patterns:
+                if _pt in _lower:
+                    return {
+                        "provider_model_id": model_id,
+                        "source": "deterministic",
+                        "coding": False,
+                        "canonical_name": None,
+                        "aa_model_id": None,
+                        "aa_name": None,
+                        "aa_slug": None,
+                        "aa_score": None,
+                        "coding_score": None,
+                        "pricing": None,
+                        "benchmarks": {},
+                        "confidence": 1.0,
+                        "decision": "drop",
+                        "tier": "drop",
+                        "evidence_level": "strong",
+                        "evidence": [f"specialized_model:{_pt}"],
+                        "coding_assessment": None,
+                    }
         from .evidence_collector import EvidenceCollector
         # keep pipeline imports for test patch compat (patched in tests)
         from .pipeline import _is_vision_only as _pipeline_is_vision_only  # noqa: F401
@@ -155,18 +180,88 @@ class EvaluatorCoordinator:
             else:
                 reason = packet.deterministic_flags[0] if packet.deterministic_flags else "specialized"
                 return self.deterministic_drop_record(model_id, reason, self.cache)
+        # --- Router deterministic keep before Judge (spec #219) ---
+        if _is_router_model(model_id):
+            result = self._deterministic_router_record(model_id, resolution, packet)
+            # store drop/keep mirroring post-Judge path
+            if self.store is not None:
+                try:
+                    from .model_info_store import ModelInfoRecord
+                    rec = ModelInfoRecord.from_provider_record(result, provider=self.provider_name, evaluated_at=datetime.now(UTC).isoformat())
+                    key = resolve_cache_identity(model_id, resolution)
+                    if key:
+                        self.store.put(key, rec)
+                except Exception:
+                    pass
+            if self.provider_name == "llm7" and model.get("tier") == "turbo" and result.get("decision") != "drop":
+                result["tier"] = "flash"
+            return result
+        # --- Deterministic screening before Judge (spec #219) ---
+        # Compute evidence strength via same PolicyGate floors as ADR 0008
+        try:
+            from .benchmarks import build_benchmark_profile, compute_coding_score
+            _profile = build_benchmark_profile(model_id, self.provider_name, self.cache)
+        except Exception:
+            _profile = None
+        # Derive scores for screening
+        coding_score = None
+        try:
+            if _profile is not None and _profile.scores:
+                coding_score, _, _ = compute_coding_score(_profile)
+        except Exception:
+            coding_score = None
+        verified_score = self._aa_score(getattr(resolution, "aa_model", None) if resolution else None)
+        det_level = PolicyGate._deterministic_evidence_level(
+            verified_score, coding_score, _profile,
+            provider_claims=getattr(packet, "provider_claims", None),
+            model_id=model_id,
+        )
+        if det_level == "strong":
+            result = self._deterministic_strong_record(model_id, resolution, _profile, packet)
+            if self.store is not None and result.get("decision") == "keep":
+                try:
+                    ok, _ = is_accurate_enough(result)
+                    if ok:
+                        from .model_info_store import ModelInfoRecord
+                        rec = ModelInfoRecord.from_provider_record(result, provider=self.provider_name, evaluated_at=datetime.now(UTC).isoformat())
+                        key = resolve_cache_identity(model_id, resolution)
+                        if key:
+                            self.store.put(key, rec)
+                except Exception:
+                    pass
+            elif self.store is not None and str(result.get("decision", "")).strip().lower() == "drop":
+                try:
+                    from .model_info_store import ModelInfoRecord
+                    rec = ModelInfoRecord.from_provider_record(result, provider=self.provider_name, evaluated_at=datetime.now(UTC).isoformat())
+                    key = resolve_cache_identity(model_id, resolution)
+                    if key:
+                        self.store.put(key, rec)
+                except Exception:
+                    pass
+            if self.provider_name == "llm7" and model.get("tier") == "turbo" and result.get("decision") != "drop":
+                result["tier"] = "flash"
+            return result
+        elif det_level == "weak":
+            result = self._deterministic_weak_record(model_id, resolution, _profile, packet)
+            if self.store is not None:
+                try:
+                    from .model_info_store import ModelInfoRecord
+                    rec = ModelInfoRecord.from_provider_record(result, provider=self.provider_name, evaluated_at=datetime.now(UTC).isoformat())
+                    key = resolve_cache_identity(model_id, resolution)
+                    if key:
+                        self.store.put(key, rec)
+                except Exception:
+                    pass
+            if self.provider_name == "llm7" and model.get("tier") == "turbo" and result.get("decision") != "drop":
+                result["tier"] = "flash"
+            return result
+        # moderate/ambiguous -> LLM
         judge = Judge(self.evaluator)
         try:
             llm_result = judge.evaluate(self.provider_name, model, packet, self.cache)
         except Exception as exc:
             return self._llm_error_record(model_id, exc)
         gate = PolicyGate(self.min_score, self.max_score, self.cache, store=self.store)
-        # Build profile for gate (dedup) and pass packet for verified-claim promotion (#213)
-        try:
-            from .benchmarks import build_benchmark_profile
-            _profile = build_benchmark_profile(model_id, self.provider_name, self.cache)
-        except Exception:
-            _profile = None
         result = gate.apply(llm_result, resolution, model_id, self.provider_name, profile=_profile, packet=packet)
         if self.store is not None and result.get("decision") == "keep":
             try:
@@ -687,6 +782,165 @@ class EvaluatorCoordinator:
 
     # alias for pipeline compat (underscore prefix)
     _deterministic_drop_record = deterministic_drop_record
+
+    def _deterministic_router_record(self, model_id: str, resolution: Any, packet: Any) -> dict[str, Any]:
+        """Router models deterministic keep flash strong without LLM (spec #219)."""
+        aa_model = getattr(resolution, "aa_model", None) if resolution else None
+        verified_score = self._aa_score(aa_model)
+        aa_model_id = aa_model.get("id") if aa_model else None
+        aa_name = aa_model.get("name") if aa_model else None
+        aa_slug = aa_model.get("slug") if aa_model else None
+        # benchmarks from profile for completeness (no LLM)
+        try:
+            from .benchmarks import build_benchmark_profile
+            profile = build_benchmark_profile(model_id, self.provider_name, self.cache)
+            benchmarks_dict = profile.to_dict() if profile.scores else {}
+            from .benchmarks import compute_coding_score
+            coding_score, _, _ = compute_coding_score(profile) if profile.scores else (None, 0.0, [])
+        except Exception:
+            benchmarks_dict = {}
+            coding_score = None
+        return {
+            "provider_model_id": model_id,
+            "source": "deterministic",
+            "coding": True,
+            "canonical_name": aa_name,
+            "aa_model_id": aa_model_id,
+            "aa_name": aa_name,
+            "aa_slug": aa_slug,
+            "aa_score": verified_score,
+            "coding_score": coding_score,
+            "pricing": (aa_model.get("pricing") if aa_model else None),
+            "benchmarks": benchmarks_dict,
+            "confidence": 1.0,
+            "decision": "keep",
+            "tier": "flash",
+            "evidence_level": "strong",
+            "evidence": ["Router model: always keep (routing meta-model)"],
+            "coding_assessment": {"is_coding": True, "confidence": 1.0, "reason": "router deterministic", "coding_score": coding_score, "aa_score": verified_score},
+        }
+
+    def _deterministic_strong_record(self, model_id: str, resolution: Any, profile: Any, packet: Any) -> dict[str, Any]:
+        """Strong evidence deterministic keep without LLM (spec #219)."""
+        from .benchmarks import compute_coding_score, has_critical_weakness
+        benchmarks_dict = profile.to_dict() if profile and profile.scores else {}
+        coding_score, score_conf, score_reasons = (compute_coding_score(profile) if profile and profile.scores else (None, 0.0, ["No benchmark data"]))
+        has_weakness, weakness_reason = (has_critical_weakness(profile) if profile and profile.scores else (False, None))
+        aa_model = getattr(resolution, "aa_model", None) if resolution else None
+        if aa_model is not None:
+            aa_model_id = aa_model.get("id")
+            aa_name = aa_model.get("name")
+            aa_slug = aa_model.get("slug")
+            verified_score = self._aa_score(aa_model)
+            pricing = aa_model.get("pricing")
+        else:
+            aa_model_id = aa_name = aa_slug = verified_score = pricing = None
+        pricing_blended = pricing.get("price_1m_blended_3_to_1") if isinstance(pricing, dict) else None
+        # sibling heuristic
+        has_sibling = False
+        try:
+            if verified_score is None and coding_score is None:
+                from .policy_gate import _has_older_kept_sibling
+                has_sibling = _has_older_kept_sibling(model_id, self.store)
+        except Exception:
+            has_sibling = False
+        tier = categorize_model(
+            coding=True,
+            aa_score=verified_score,
+            min_score=self.min_score,
+            max_score=self.max_score,
+            judge_decision="keep",
+            model_id=model_id,
+            coding_score=coding_score if profile and profile.scores else None,
+            has_critical_weakness=has_weakness,
+            pricing_blended=pricing_blended,
+            has_older_kept_sibling=has_sibling,
+        )
+        # force drop if critical weakness
+        if has_weakness:
+            tier = "drop"
+        evidence: list[str] = []
+        for key, bm in (benchmarks_dict.get("scores") or {}).items():
+            if isinstance(bm, dict):
+                src = bm.get("source", "")
+                score = bm.get("score")
+                if src and "http" in str(src):
+                    evidence.append(f"{key} {score} via {src}")
+                elif src:
+                    evidence.append(f"{key} {score} via https://example.com/{key}")
+        if aa_model_id and verified_score is not None:
+            evidence.append(f"AA Intelligence Index {verified_score} for {aa_model_id} via https://artificialanalysis.ai/models/{aa_slug or aa_model_id}")
+        if pricing_blended is not None:
+            evidence.append(f"Pricing blended ${pricing_blended:.2f}/1M via AA catalog")
+        evidence.append("Deterministic strong evidence -> keep without LLM (screening)")
+        decision = "keep" if tier not in ("drop", "error") else "drop"
+        # if tier drop due to weakness, decision drop
+        if has_weakness:
+            decision = "drop"
+        return {
+            "provider_model_id": model_id,
+            "source": "deterministic",
+            "coding": True if tier != "drop" else False,
+            "canonical_name": aa_name,
+            "aa_model_id": aa_model_id,
+            "aa_name": aa_name,
+            "aa_slug": aa_slug,
+            "aa_score": verified_score,
+            "coding_score": coding_score,
+            "pricing": pricing,
+            "benchmarks": benchmarks_dict,
+            "confidence": score_conf if score_conf and score_conf > 0 else 0.95,
+            "decision": decision,
+            "tier": tier,
+            "evidence_level": "strong",
+            "evidence": evidence,
+            "coding_assessment": {"is_coding": True, "confidence": score_conf or 0.95, "reason": "; ".join(score_reasons) if score_reasons else "deterministic strong", "coding_score": coding_score, "aa_score": verified_score},
+        }
+
+    def _deterministic_weak_record(self, model_id: str, resolution: Any, profile: Any, packet: Any) -> dict[str, Any]:
+        """Weak/none evidence deterministic drop/uncertain without LLM (spec #219)."""
+        from .benchmarks import compute_coding_score
+        benchmarks_dict = profile.to_dict() if profile and profile.scores else {}
+        coding_score, _, score_reasons = (compute_coding_score(profile) if profile and profile.scores else (None, 0.0, ["No benchmark data"]))
+        aa_model = getattr(resolution, "aa_model", None) if resolution else None
+        if aa_model is not None:
+            aa_model_id = aa_model.get("id")
+            aa_name = aa_model.get("name")
+            aa_slug = aa_model.get("slug")
+            verified_score = self._aa_score(aa_model)
+            pricing = aa_model.get("pricing")
+        else:
+            aa_model_id = aa_name = aa_slug = verified_score = pricing = None
+        evidence: list[str] = [
+            "Weak/none evidence: no AA >=24, no bench >=30, unverified claim -> deterministic drop without LLM",
+            "Insufficient evidence to determine coding quality; defaulted to drop",
+        ]
+        for key, bm in (benchmarks_dict.get("scores") or {}).items():
+            if isinstance(bm, dict):
+                src = bm.get("source", "")
+                score = bm.get("score")
+                evidence.append(f"{key} {score} via {src}" if src else f"{key} {score}")
+        if verified_score is not None:
+            evidence.append(f"AA Intelligence Index {verified_score} for {aa_model_id}")
+        return {
+            "provider_model_id": model_id,
+            "source": "deterministic",
+            "coding": False,
+            "canonical_name": aa_name,
+            "aa_model_id": aa_model_id,
+            "aa_name": aa_name,
+            "aa_slug": aa_slug,
+            "aa_score": verified_score,
+            "coding_score": coding_score if profile and profile.scores else None,
+            "pricing": pricing,
+            "benchmarks": benchmarks_dict,
+            "confidence": 1.0,
+            "decision": "drop",
+            "tier": "drop",
+            "evidence_level": "weak",
+            "evidence": evidence,
+            "coding_assessment": {"is_coding": False, "confidence": 1.0, "reason": "deterministic weak/none", "coding_score": coding_score, "aa_score": verified_score},
+        }
 
     def _auto_free_record(self, provider_name: str | None = None) -> dict[str, Any]:
         """Auto-free provider: skip evaluation, return auto:free routing recommendation."""

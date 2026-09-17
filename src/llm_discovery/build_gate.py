@@ -476,8 +476,15 @@ def gate(
     }
 
 
+VERDICT_DOC = "docs/research/237-verdict.md"
+
+
 def format_report(baseline: dict[str, Any], current: dict[str, Any], gate_result: dict[str, Any] | None = None) -> str:
-    """Markdown report for before/after metrics."""
+    """Markdown report for before/after metrics.
+
+    Cites verdict doc docs/research/237-verdict.md (issue #241) which defines
+    proper vs improper methods and irreducible floor; see ADR 0006/0007/0008/0009.
+    """
     deltas = diff_metrics(baseline, current)
     lines = [
         "| Metric | Baseline | Current | Delta |",
@@ -520,6 +527,11 @@ def format_report(baseline: dict[str, Any], current: dict[str, Any], gate_result
         if not gate_result.get("evidence_backed", {}).get("ok", True):
             ub = gate_result["evidence_backed"]["unbacked"]
             lines.append(f"- unbacked promotions: {len(ub)}")
+        lines.append("")
+        lines.append(f"Verdict: {VERDICT_DOC} — proper methods (alias recovery, verified-claim promotion, bounded 2-search, transport retry) vs improper (threshold lowering, broad fuzzy, claim-only without URL, error→weak conflation). Irreducible floor quantified there; literal zero uncertain not proper destination (see ADR 0006/0008).")
+    else:
+        lines.append("")
+        lines.append(f"Verdict: {VERDICT_DOC}")
     return "\n".join(lines)
 
 

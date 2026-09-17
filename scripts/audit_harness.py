@@ -172,6 +172,8 @@ def main() -> None:
             print(f"Unbacked promotions: {len(gate_result['evidence_backed']['unbacked'])}")
             for u in gate_result["evidence_backed"]["unbacked"][:10]:
                 print(f"  - {u}")
+        print("")
+        print("Verdict: docs/research/237-verdict.md — proper methods (alias recovery, verified-claim promotion, bounded 2-search, transport retry) vs improper (threshold lowering, broad fuzzy, claim-only without URL, error→weak conflation). Irreducible floor quantified there; literal zero uncertain not proper destination (see ADR 0006/0008).")
 
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)

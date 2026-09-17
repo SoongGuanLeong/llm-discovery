@@ -52,6 +52,8 @@ from .build_gate import (
 # Fixed catalog snapshot (issue #240: comparable deltas on same snapshot)
 # ---------------------------------------------------------------------------
 
+VERDICT_DOC = "docs/research/237-verdict.md"
+
 FIXED_CATALOG_FILES = [
     Path("data/artificial_analysis_models.json"),
     Path("data/models_dev_catalog.json"),
@@ -375,6 +377,7 @@ def run_fixed_snapshot_audit_harness(
 
 
 __all__ = [
+    "VERDICT_DOC",
     "FIXED_CATALOG_FILES",
     "fixed_snapshot_fingerprint",
     "check_fixed_catalogs_match",

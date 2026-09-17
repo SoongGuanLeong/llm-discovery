@@ -645,11 +645,12 @@ def build_all(
     for prov in sorted(per_provider_raw):
         c = per_provider_raw[prov]
         print(f"[build-all] provider {prov}: keep={c.get('keep',0)} uncertain={c.get('uncertain',0)} drop={c.get('drop',0)} error={c.get('error',0)}")
-    # residual taxonomy one-liner for operators (sums to uncertain+error)
+    # residual taxonomy one-liner for operators (sums to uncertain+error); cite verdict per #241
     try:
         rt = telemetry.get("residual_taxonomy") or {}
         if rt:
             print(f"[build-all] residual split total={sum(rt.values())} " + " ".join(f"{k}={rt.get(k,0)}" for k in sorted(rt)))
+            print(f"[build-all] verdict: docs/research/237-verdict.md — proper vs improper methods and irreducible floor (see ADR 0006/0008)")
     except Exception:
         pass
 

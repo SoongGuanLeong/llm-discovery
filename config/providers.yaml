@@ -99,10 +99,6 @@ providers:
     base_url: https://ollama.com/v1
     secret: OLLAMA_CLOUD_API_KEY
 
-  - name: opencode_zen
-    base_url: https://opencode.ai/zen/v1
-    secret: OPENCODE_ZEN_API_KEY
-
   - name: openrouter
     base_url: https://openrouter.ai/api/v1
     secret: OPENROUTER_API_KEY

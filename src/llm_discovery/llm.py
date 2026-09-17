@@ -1,13 +1,20 @@
 import json
-import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
+from pydantic import ValidationError as PydanticValidationError
 
 from .evaluation import ModelEvaluation, ModelEvaluationRequest
 from .evidence import EvidencePacket
-from .judge_transport import JudgeTransport
+from .judge_transport import (
+    CAT_MALFORMED_JSON,
+    CAT_TOOL,
+    CAT_VALIDATION,
+    JudgeError,
+    JudgeTransport,
+)
 from .json_repair import extract_and_validate
 
 
@@ -145,6 +152,21 @@ TOOLS = [
 ]
 
 
+@dataclass
+class JudgeRoute:
+    """A judge LLM route (primary or alternate) - issue #233.
+
+    The alternate route, when configured, is tried once if the primary
+    judge fails with a categorized JudgeError, so a single broken judge
+    endpoint does not turn the whole build into error records.
+    """
+
+    base_url: str
+    model: str
+    api_key: str | None = None
+    timeout: int = 120
+
+
 class LocalLLMEvaluator:
     def __init__(
         self,
@@ -155,6 +177,7 @@ class LocalLLMEvaluator:
         search_web: Callable[[str], list[dict[str, Any]]] | None = None,
         max_searches: int = 2,
         timeout: int = 120,
+        alternate: JudgeRoute | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.model = model
@@ -163,6 +186,7 @@ class LocalLLMEvaluator:
         self.search_web = search_web
         self.max_searches = max_searches
         self.timeout = timeout
+        self.alternate = alternate
         self.transport = JudgeTransport(
             base_url=self.base_url,
             model=self.model,
@@ -175,10 +199,76 @@ class LocalLLMEvaluator:
         request: ModelEvaluationRequest,
         evidence_packet: EvidencePacket | None = None,
     ) -> ModelEvaluation:
+        """Evaluate a model via the judge LLM with categorized failure handling.
+
+        issue #233: the primary judge runs through self.transport (bounded
+        retry/backoff for transient HTTP failures).  On a JudgeError, a
+        configured alternate judge route (self.alternate) is tried exactly
+        once.  The failure that escapes is a categorized JudgeError carrying
+        error_category-compatible fields (category, retry_count, retryable),
+        so callers persist an explicit error record (decision=error,
+        tier=error, evidence_level=none) rather than a weak verdict.
+        """
         # issue #225: record the active model for the search wrapper (thread-local
         # in CachedSearcher); plain callables without set_model (tests) unaffected.
         if self.search_web is not None and hasattr(self.search_web, "set_model"):
             self.search_web.set_model(request.model_id)
+
+        try:
+            # Primary pass goes through self._post so test overrides of
+            # LocalLLMEvaluator._post keep working (seam used by tests).
+            return self._evaluate_with(self.transport, request, evidence_packet, self._post)
+        except JudgeError as exc:
+            alternate_transport = self._alternate_transport()
+            if alternate_transport is None:
+                raise
+            # issue #233: consider alternate judge route when configured.
+            # One full pass on the alternate route; its own transport retries
+            # and JSON-only retry stay bounded (no retry storms).
+            print(
+                "[judge] primary judge failed (%s); trying alternate route %s"
+                % (exc.category, alternate_transport.model)
+            )
+            try:
+                return self._evaluate_with(
+                    alternate_transport, request, evidence_packet,
+                    alternate_transport.post_chat,
+                )
+            except JudgeError as alt_exc:
+                # Annotate the primary failure with the alternate attempt and
+                # surface the PRIMARY error (not the alternate one): the
+                # primary is the configured route of record.
+                exc.alternate_attempted = True
+                exc.alternate_category = alt_exc.category
+                raise exc
+            except Exception as alt_exc:  # noqa: BLE001 - unexpected; keep primary failure
+                exc.alternate_attempted = True
+                exc.alternate_category = CAT_MALFORMED_JSON
+                raise exc
+
+    def _evaluate_with(
+        self,
+        transport: JudgeTransport,
+        request: ModelEvaluationRequest,
+        evidence_packet: EvidencePacket | None,
+        post_fn: Callable[[list[dict[str, Any]], bool], httpx.Response] | None = None,
+    ) -> ModelEvaluation:
+        """One bounded judge pass on a given transport (primary or alternate).
+
+        post_fn issues the chat POST (defaults to transport.post_chat).  The
+        primary route passes self._post so the evaluator seam stays testable.
+
+        - HTTP transient failures (429/408/5xx) and timeouts are retried with
+          bounded backoff inside JudgeTransport.post_chat; persistent ones
+          surface as a JudgeError with category + retry_count.
+        - Malformed JSON (after json_repair) gets exactly ONE JSON-only
+          retry (tools disabled, response_format=json_object), per issue #233.
+        - Schema-invalid (parsed but wrong shape) is a validation failure -
+          no retry, raised immediately.
+        - Tool/search failures are categorized tool failures - no retry.
+        """
+        if post_fn is None:
+            post_fn = transport.post_chat
 
         messages = [
             {
@@ -194,61 +284,84 @@ class LocalLLMEvaluator:
         search_count = 0
         max_iterations = self.max_searches + 4
         disable_next = False
+        json_retry_used = False
 
         for _ in range(max_iterations):
-            for attempt in range(3):
-                response = self._post(messages, disable_tools=disable_next)
-                if response.status_code not in (429, 503):
-                    break
-                retry_after = response.headers.get("retry-after")
-                wait = int(retry_after) if retry_after and retry_after.isdigit() else 10 * (2 ** attempt)
-                if attempt < 2:
-                    time.sleep(min(wait, 60))
-            else:
-                raise RuntimeError(f"Judge transport failed after retries: HTTP {response.status_code}")
-            # reset after use
-            disable_next = False
+            # Transient HTTP failures are retried with bounded backoff inside
+            # the transport; a JudgeError escapes here (no duplicate retry
+            # loops at this layer).
+            response = post_fn(messages, disable_tools=disable_next)
 
-            response.raise_for_status()
+            try:
+                message = response.json()["choices"][0]["message"]
+            except Exception as exc:
+                # Unreadable response body (truncated / non-JSON payload).
+                if not json_retry_used:
+                    json_retry_used = True
+                    disable_next = True
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "Your previous response was not valid JSON. "
+                                "Return ONLY a JSON object with exactly these keys: "
+                                "canonical_name, coding, aa_relevance, evidence_level, "
+                                "confidence, decision, evidence. "
+                                "No prose, no markdown fences."
+                            ),
+                        }
+                    )
+                    continue
+                raise JudgeError(
+                    "Judge returned an unreadable response body: %s" % exc,
+                    category=CAT_MALFORMED_JSON,
+                    retry_count=1,
+                    retryable=False,
+                ) from exc
 
-            message = response.json()["choices"][0]["message"]
             tool_calls = message.get("tool_calls", [])
 
             if not tool_calls:
                 raw_content = _extract_message_text(message)
                 try:
                     result = extract_and_validate(raw_content)
-                    result.judge_model = self.model
+                    result.judge_model = transport.model
                     return result
-                except ValueError:
-                    messages.append(message)
-                    messages.append({
-                        "role": "user",
-                        "content": (
-                            "Return ONLY a JSON object with exactly these keys: "
-                            'canonical_name, coding (bool), aa_relevance (strong|moderate|weak|none), evidence_level (strong|moderate|weak|none), '
-                            'confidence (0-1 float), decision ("keep"|"drop"), '
-                            'evidence (list of at most 2 short strings). '
-                            "No prose, no markdown fences."
-                        ),
-                    })
-                    disable_next = True
-                    continue
-                except Exception:
-                    messages.append(message)
-                    messages.append({
-                        "role": "user",
-                        "content": (
-                            "Your previous response was not valid JSON. "
-                            "Return ONLY a JSON object with exactly these keys: "
-                            'canonical_name, coding (bool), aa_relevance (strong|moderate|weak|none), evidence_level (strong|moderate|weak|none), '
-                            'confidence (0-1 float), decision ("keep"|"drop"), '
-                            'evidence (list of at most 2 short strings). '
-                            "Do not include reasoning, prose, or markdown fences."
-                        ),
-                    })
-                    disable_next = True
-                    continue
+                except PydanticValidationError as exc:
+                    # Parsed JSON but wrong shape - a validation failure,
+                    # not malformed JSON: no retry (issue #233).
+                    raise JudgeError(
+                        "Judge response failed schema validation: %s" % exc,
+                        category=CAT_VALIDATION,
+                        retry_count=0,
+                        retryable=False,
+                    ) from exc
+                except ValueError as exc:
+                    # Malformed JSON after json_repair: exactly ONE JSON-only
+                    # retry (issue #233), then an explicit error.
+                    if not json_retry_used:
+                        json_retry_used = True
+                        disable_next = True
+                        messages.append(message)
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    "Your previous response was not valid JSON. "
+                                    "Return ONLY a JSON object with exactly these keys: "
+                                    "canonical_name, coding, aa_relevance, evidence_level, "
+                                    "confidence, decision, evidence. "
+                                    "No prose, no markdown fences."
+                                ),
+                            }
+                        )
+                        continue
+                    raise JudgeError(
+                        "LLM failed to return a final evaluation: invalid JSON after one JSON-only retry",
+                        category=CAT_MALFORMED_JSON,
+                        retry_count=1,
+                        retryable=False,
+                    ) from exc
 
             messages.append(message)
 
@@ -258,23 +371,33 @@ class LocalLLMEvaluator:
             for tool_call in tool_calls:
                 if search_count >= self.max_searches:
                     break
-                result = self._execute_tool(tool_call)
+                try:
+                    tool_result = self._execute_tool(tool_call)
+                except Exception as exc:
+                    # Tool/search backend failure - categorized, no retry
+                    # (issue #233): the evaluation itself was not attempted.
+                    raise JudgeError(
+                        "Judge web-search tool failed: %s" % exc,
+                        category=CAT_TOOL,
+                        retry_count=0,
+                        retryable=False,
+                    ) from exc
                 search_count += 1
 
-                result = [
+                tool_result = [
                     {
                         "title": item.get("title", ""),
                         "url": item.get("url", ""),
                         "snippet": item.get("snippet", "")[:800],
                     }
-                    for item in result
+                    for item in tool_result
                 ]
 
                 messages.append(
                     {
                         "role": "tool",
                         "tool_call_id": tool_call["id"],
-                        "content": json.dumps(result),
+                        "content": json.dumps(tool_result),
                     }
                 )
 
@@ -290,7 +413,23 @@ class LocalLLMEvaluator:
                     }
                 )
 
-        raise RuntimeError("LLM failed to return a final evaluation: invalid JSON after retries")
+        raise JudgeError(
+            "LLM failed to return a final evaluation: invalid JSON after retries",
+            category=CAT_MALFORMED_JSON,
+            retry_count=1 if json_retry_used else 0,
+            retryable=False,
+        )
+
+    def _alternate_transport(self) -> JudgeTransport | None:
+        """JudgeTransport for the configured alternate route, or None."""
+        if self.alternate is None:
+            return None
+        return JudgeTransport(
+            base_url=self.alternate.base_url,
+            model=self.alternate.model,
+            api_key=self.alternate.api_key,
+            timeout=self.alternate.timeout,
+        )
 
     def _post(
         self,

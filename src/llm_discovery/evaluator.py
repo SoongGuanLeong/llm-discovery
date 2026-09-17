@@ -19,6 +19,7 @@ from .model_info_store import (
 )
 from .candidate_store import CANDIDATE_TTL_DAYS, CandidateRecord
 from .categorize import categorize_model
+from .judge_transport import JudgeError
 from .policy_gate import PolicyGate, _is_router_model
 
 TTL_DAYS = 28
@@ -443,7 +444,8 @@ class EvaluatorCoordinator:
                         self._reconcile_candidate_store(model_id, cache_key, llm_resolution, llm_res)
                         return llm_res
                     except Exception as exc:
-                        # LLM failed -> fall through to weak with error observability
+                        # LLM failed -> explicit error record (never conflated
+                        # with weak, issue #233).
                         try:
                             err_rec = self._llm_error_record(model_id, exc)
                             err_rec["recovery_attempts"] = recovery_attempts
@@ -452,6 +454,12 @@ class EvaluatorCoordinator:
                             err_rec["error_category"] = self._classify_judge_error(exc)
                             return err_rec
                         except Exception:
+                            # issue #233: a categorized judge failure must not
+                            # be masked as a genuine weak verdict - let it
+                            # escape to the pipeline thread-boundary handler,
+                            # which builds the error record.
+                            if isinstance(exc, JudgeError):
+                                raise
                             pass
                 # genuine weak after all recovery
                 result = self._deterministic_weak_record(model_id, rec_resolution, rec_profile, packet)
@@ -958,6 +966,12 @@ class EvaluatorCoordinator:
         if rc is None:
             # try to infer from message retry hints
             rc = 0
+        evidence_msg = f"LLM evaluation failed: {exc}"
+        # issue #233: make alternate-route attempts explicit in the persisted
+        # evidence line (never conflated with weak/uncertain verdicts).
+        if getattr(exc, "alternate_attempted", False):
+            alt_cat = getattr(exc, "alternate_category", None) or "unknown"
+            evidence_msg += f" (alternate judge route also failed: {alt_cat})"
         return {
             "provider_model_id": model_id,
             "source": "llm_error",
@@ -973,7 +987,7 @@ class EvaluatorCoordinator:
             "decision": "error",
             "tier": "error",
             "evidence_level": "none",
-            "evidence": [f"LLM evaluation failed: {exc}"],
+            "evidence": [evidence_msg],
             "coding_assessment": None,
             "evidence_status": "error",
             "error_category": cat,
@@ -1175,10 +1189,20 @@ class EvaluatorCoordinator:
         }
 
     def _classify_judge_error(self, exc: Exception) -> str:
+        """Per-category classification of judge failures (issue #233).
+
+        Prefers the machine-readable category attached by JudgeError
+        (judge_transport / llm) so the persisted error_category is stable
+        and not re-derived from message string matching. Falls back to the
+        legacy message heuristics for non-JudgeError exceptions.
+        """
+        cat = getattr(exc, "category", None)
+        if isinstance(cat, str) and cat:
+            return cat
         msg = str(exc).lower()
         if "timeout" in msg or "timed out" in msg:
             return "judge_timeout"
-        if "429" in msg or "rate" in msg or "429" in msg:
+        if "429" in msg or "rate" in msg:
             return "judge_429"
         if "connection" in msg or "connect" in msg:
             return "judge_connection_failure"

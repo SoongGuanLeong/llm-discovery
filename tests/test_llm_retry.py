@@ -5,17 +5,25 @@ mock JudgeTransport + time.sleep to assert retry/backoff behavior offline.
 import httpx
 import json
 
-from llm_discovery.judge_transport import JudgeTransport
+import pytest
+
+from llm_discovery.judge_transport import (
+    CAT_MALFORMED_JSON,
+    CAT_RATE_LIMIT,
+    JudgeError,
+    JudgeTransport,
+)
 from llm_discovery.json_repair import extract_json, repair_json
 from llm_discovery.llm import LocalLLMEvaluator
 from llm_discovery.search import NoopSearcher
 
 
 class _Resp:
-    def __init__(self, status_code, headers=None, json_data=None):
+    def __init__(self, status_code, headers=None, json_data=None, text=None):
         self.status_code = status_code
         self.headers = headers or {}
         self._json = json_data or {}
+        self.text = text if text is not None else json.dumps(self._json)
 
     def raise_for_status(self):
         if self.status_code >= 400:
@@ -60,7 +68,8 @@ def test_post_retries_429_then_succeeds(monkeypatch):
     assert calls["n"] == 3
 
 
-def test_post_exhausts_retries_and_returns_final(monkeypatch):
+def test_post_exhausts_retries_raises_judge_error(monkeypatch):
+    """issue #233: persistent 429 -> categorized JudgeError, not a returned 429."""
     calls = {"n": 0}
 
     def post(*a, **k):
@@ -70,12 +79,18 @@ def test_post_exhausts_retries_and_returns_final(monkeypatch):
     monkeypatch.setattr("llm_discovery.judge_transport.httpx.post", post)
     monkeypatch.setattr("llm_discovery.judge_transport.time.sleep", lambda s: None)
 
-    resp = _transport().post_chat([{"role": "user", "content": "hi"}])
-    assert resp.status_code == 429
+    with pytest.raises(JudgeError) as ei:
+        _transport().post_chat([{"role": "user", "content": "hi"}])
+    exc = ei.value
+    assert exc.category == CAT_RATE_LIMIT
+    assert exc.retry_count == 3
+    assert exc.retryable is True
+    assert exc.status_code == 429
     assert calls["n"] == 4  # initial + 3 retries
 
 
 def test_post_honors_retry_after_header(monkeypatch):
+    """issue #233: numeric Retry-After is honored exactly (no jitter)."""
     slept = []
 
     def post(*a, **k):
@@ -84,12 +99,13 @@ def test_post_honors_retry_after_header(monkeypatch):
     monkeypatch.setattr("llm_discovery.judge_transport.httpx.post", post)
     monkeypatch.setattr("llm_discovery.judge_transport.time.sleep", lambda s: slept.append(s))
 
-    resp = _transport().post_chat([{"role": "user", "content": "hi"}])
-    assert resp.status_code == 429
-    assert slept[0] == 3  # Retry-After honored, not the exponential default
+    with pytest.raises(JudgeError):
+        _transport().post_chat([{"role": "user", "content": "hi"}])
+    assert slept == [3.0, 3.0, 3.0]  # Retry-After honored, not the exponential default
 
 
 def test_post_backs_off_exponentially_without_header(monkeypatch):
+    """issue #233: exponential backoff 10->20->40s (capped 60s) with jitter."""
     slept = []
 
     def post(*a, **k):
@@ -98,8 +114,14 @@ def test_post_backs_off_exponentially_without_header(monkeypatch):
     monkeypatch.setattr("llm_discovery.judge_transport.httpx.post", post)
     monkeypatch.setattr("llm_discovery.judge_transport.time.sleep", lambda s: slept.append(s))
 
-    _transport().post_chat([{"role": "user", "content": "hi"}])
-    assert slept == [10, 20, 40]  # exponential backoff, capped
+    with pytest.raises(JudgeError) as ei:
+        _transport().post_chat([{"role": "user", "content": "hi"}])
+    assert ei.value.retry_count == 3
+    assert len(slept) == 3  # no sleep after the final attempt
+    # +/-10% jitter bounds around 10 -> 20 -> 40
+    assert 9.0 <= slept[0] <= 11.0
+    assert 18.0 <= slept[1] <= 22.0
+    assert 36.0 <= slept[2] <= 44.0
 
 
 def test_post_delegates_to_transport(monkeypatch):
@@ -217,10 +239,13 @@ def test_evaluate_retries_on_invalid_json_then_succeeds(monkeypatch):
 
 
 def test_evaluate_raises_after_one_invalid_json_retry(monkeypatch):
-    """Two consecutive invalid JSON responses -> RuntimeError (-> error record)."""
+    """issue #233: two consecutive invalid JSON responses -> categorized
+    JudgeError (malformed JSON after the single JSON-only retry)."""
     bad = {"choices": [{"message": {"content": "still garbage"}}]}
+    calls = {"n": 0}
 
     def fake_post_chat(self, messages, disable_tools=False):
+        calls["n"] += 1
         return _Resp(200, json_data=bad)
 
     monkeypatch.setattr(JudgeTransport, "post_chat", fake_post_chat)
@@ -232,8 +257,12 @@ def test_evaluate_raises_after_one_invalid_json_retry(monkeypatch):
     try:
         ev.evaluate(req)
         assert False, "should have raised"
-    except RuntimeError as exc:
+    except JudgeError as exc:
         assert "invalid JSON" in str(exc)
+        assert exc.category == CAT_MALFORMED_JSON
+        assert exc.retry_count == 1  # exactly one JSON-only retry
+        assert exc.retryable is False
+    assert calls["n"] == 2  # initial + one JSON-only retry
 
 
 def test_evaluate_truncation_respects_search_results(monkeypatch):
@@ -275,7 +304,6 @@ def test_evaluate_truncation_respects_search_results(monkeypatch):
         return _Resp(200, json_data={"choices": [{"message": {"content": json.dumps(_valid_body)}}]})
 
     monkeypatch.setattr(JudgeTransport, "post_chat", mock_post_chat)
-    monkeypatch.setattr("llm_discovery.llm.time.sleep", lambda s: None)
 
     ev = LocalLLMEvaluator(
         base_url="https://apihub.agnes-ai.com/v1",

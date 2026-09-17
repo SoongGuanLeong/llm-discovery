@@ -56,6 +56,10 @@ class JudgeLLMConfig(BaseModel):
     # judges (local and remote); transport retries transient timeouts with
     # exponential backoff before surfacing as error.
     timeout: int = 120
+    # issue #233: optional alternate judge route. When set, a judge failure on
+    # the primary route retries the evaluation once on this route before the
+    # model is recorded as decision=error.
+    alternate: "JudgeLLMConfig | None" = None
 
     @field_validator("secret", mode="before")
     @classmethod
@@ -65,6 +69,9 @@ class JudgeLLMConfig(BaseModel):
         if isinstance(v, str) and v.strip() == "":
             return None
         return v
+
+
+JudgeLLMConfig.model_rebuild()
 
 
 class AppConfig(BaseModel):

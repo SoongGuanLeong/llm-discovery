@@ -64,6 +64,27 @@ def _is_coding_capable(resolution: Any, cache: Any, model_id: str, provider_name
     return EvaluatorCoordinator._is_coding_capable(resolution, cache, model_id, provider_name)
 
 
+def _build_alternate_judge_route(config: Any) -> Any:
+    """issue #233: optional alternate judge route from config.judge_llm.alternate.
+
+    Returns a JudgeRoute (llm.JudgeRoute) or None when no alternate route is
+    configured. The alternate secret env var is resolved at build start, like
+    the primary judge secret (load_all_secrets already ran).
+    """
+    from .llm import JudgeRoute
+
+    alt_cfg = getattr(config.judge_llm, "alternate", None)
+    if alt_cfg is None:
+        return None
+    alt_key = os.environ.get(alt_cfg.secret) if alt_cfg.secret else None
+    return JudgeRoute(
+        base_url=os.path.expandvars(alt_cfg.base_url),
+        model=alt_cfg.model,
+        api_key=alt_key,
+        timeout=getattr(alt_cfg, "timeout", 120) or 120,
+    )
+
+
 def evaluate_model(
     model: dict[str, Any],
     provider_name: str,
@@ -255,6 +276,7 @@ def discover_single(
         search_web=searcher,
         max_searches=JUDGE_MAX_SEARCHES,  # issue #232: bounded recovery — at most 2 targeted web searches
         timeout=getattr(config.judge_llm, "timeout", 120) or 120,
+        alternate=_build_alternate_judge_route(config),
     )
     cache = BenchmarkDataCache()
     cache.collect_from_local(aa, models_dev)
@@ -383,6 +405,7 @@ def discover_provider(
         search_web=searcher,
         max_searches=JUDGE_MAX_SEARCHES,  # issue #232: bounded recovery — at most 2 targeted web searches
         timeout=getattr(config.judge_llm, "timeout", 120) or 120,
+        alternate=_build_alternate_judge_route(config),
     )
     cache = BenchmarkDataCache()
     cache.collect_from_local(aa, models_dev)

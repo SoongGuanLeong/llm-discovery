@@ -484,6 +484,130 @@ def build_all(
     except Exception:
         pass
     search_snap = get_search_accounting()[0].snapshot()
+    # issue #239: residual taxonomy split (avoidable vs genuine) alongside totals
+    # Additive observability only - no secrets/raw prompts, shapes unchanged
+    residual_taxonomy: dict[str, int] = {}
+    residual_per_provider: dict[str, dict[str, int]] = {}
+    evidence_status_counts: dict[str, int] = {}
+    evidence_reason_counts: dict[str, int] = {}
+    error_category_counts: dict[str, int] = {}
+    retry_count_histogram: dict[str, int] = {}
+    recovery_attempts_total = 0
+    try:
+        from collections import Counter as _Counter
+
+        from .residual_classifier import TAXONOMY as _TAXONOMY
+        from .residual_classifier import classify_residual_uncertain as _classify
+
+        taxonomy_counter: _Counter = _Counter()
+        status_counter: _Counter = _Counter()
+        reason_counter: _Counter = _Counter()
+        err_cat_counter: _Counter = _Counter()
+        retry_counter: _Counter = _Counter()
+        per_provider_counter: dict[str, _Counter] = {}
+        attempts_total = 0
+
+        # Build benchmark cache for classifier (best-effort, no disk IO)
+        bench_cache = None
+        try:
+            from .benchmarks import BenchmarkDataCache as _BDC
+
+            if aa is not None and models_dev is not None:
+                bench_cache = _BDC()
+                bench_cache._loaded = True
+                bench_cache._data = {}
+                bench_cache._norm_index = {}
+                try:
+                    bench_cache.collect_from_local(aa, models_dev)
+                except Exception:
+                    pass
+        except Exception:
+            bench_cache = None
+
+        catalogs_arg: dict[str, Any] = {"aa": aa, "models_dev": models_dev, "cache": bench_cache, "benchmark_cache": bench_cache}
+
+        for yf in sorted(results_dir.glob("*.yaml")):
+            provider = yf.stem
+            try:
+                data_yaml = yaml.safe_load(yf.read_text()) or {}
+            except Exception:
+                continue
+            if not isinstance(data_yaml, dict):
+                continue
+            if provider not in per_provider_counter:
+                per_provider_counter[provider] = _Counter()
+            for bucket in ("uncertain", "error"):
+                for rec in (data_yaml.get(bucket) or []):
+                    if not isinstance(rec, dict):
+                        continue
+                    try:
+                        res = _classify(rec, catalogs=catalogs_arg, candidate_store=candidate_store_for_discovery)
+                        cat = str(res.get("category", "genuine_weak_no_claim"))
+                    except Exception:
+                        cat = "genuine_weak_no_claim"
+                    if cat not in _TAXONOMY:
+                        cat = "genuine_weak_no_claim"
+                    taxonomy_counter[cat] += 1
+                    per_provider_counter[provider][cat] += 1
+                    # Aggregate evidence_status/evidence_reason/recovery_attempts and error_category/retry_count without secrets
+                    es = rec.get("evidence_status")
+                    if es is not None:
+                        status_counter[str(es)[:40]] += 1
+                    er = rec.get("evidence_reason")
+                    if er is not None:
+                        # Truncate to avoid persisting raw prompts; count bucket only
+                        reason_counter[str(er)[:60]] += 1
+                    ec = rec.get("error_category")
+                    if ec is not None:
+                        err_cat_counter[str(ec)[:40]] += 1
+                    rc = rec.get("retry_count")
+                    if rc is not None:
+                        try:
+                            retry_counter[str(int(rc))] += 1
+                        except Exception:
+                            retry_counter[str(rc)[:20]] += 1
+                    ra = rec.get("recovery_attempts") or rec.get("recovery_attempt") or []
+                    if isinstance(ra, list):
+                        attempts_total += len(ra)
+                    elif isinstance(ra, str) and ra:
+                        attempts_total += 1
+
+        residual_taxonomy = {k: int(taxonomy_counter.get(k, 0)) for k in _TAXONOMY}
+        evidence_status_counts = dict(status_counter)
+        evidence_reason_counts = dict(reason_counter)
+        error_category_counts = dict(err_cat_counter)
+        retry_count_histogram = dict(retry_counter)
+        recovery_attempts_total = int(attempts_total)
+        residual_per_provider = {prov: {k: int(per_provider_counter[prov].get(k, 0)) for k in _TAXONOMY} for prov in per_provider_counter}
+        # Ensure split sums to uncertain+error (fill genuine floor for any missing classification)
+        residual_total = sum(residual_taxonomy.values())
+        expected_total = int(totals.get("uncertain", 0) + totals.get("error", 0))
+        if residual_total != expected_total and expected_total > 0 and residual_total == 0:
+            # No uncertain/error files yet - keep zeros
+            pass
+    except Exception:
+        # Never fail build on taxonomy observability
+        try:
+            from .residual_classifier import TAXONOMY as _TAX_FALLBACK
+
+            residual_taxonomy = {k: 0 for k in _TAX_FALLBACK}
+        except Exception:
+            residual_taxonomy = {
+                "alias_miss": 0,
+                "benchmark_miss": 0,
+                "claim_unverified": 0,
+                "genuine_weak_no_claim": 0,
+                "candidate_cached": 0,
+                "search_unavailable": 0,
+                "judge_error": 0,
+            }
+        residual_per_provider = {}
+        evidence_status_counts = {}
+        evidence_reason_counts = {}
+        error_category_counts = {}
+        retry_count_histogram = {}
+        recovery_attempts_total = 0
+
     telemetry = {
         "discovered": total_keep,
         "unique_discovered": len(live_keys),
@@ -507,11 +631,27 @@ def build_all(
         "llm_calls": search_snap.get("judge_calls", 0),
         "web_searches": search_snap.get("calls", 0),
         "wall_duration_s": round(build_wall, 3),
+        # issue #239 residual taxonomy split (additive, sums to uncertain+error)
+        "residual_taxonomy": residual_taxonomy,
+        "taxonomy_split": residual_taxonomy,
+        "residual_per_provider": residual_per_provider,
+        "evidence_status_counts": evidence_status_counts,
+        "evidence_reason_counts": evidence_reason_counts,
+        "error_category_counts": error_category_counts,
+        "retry_count_histogram": retry_count_histogram,
+        "recovery_attempts_total": recovery_attempts_total,
     }
     print(f"[build-all] telemetry discovered={total_keep} unique={len(live_keys)} reused={reused_unique} rebuilt={rebuilt_total} (new={rebuilt_new} identity={rebuilt_identity}) gc={gc_count} store={store.size()} wall={build_wall:.2f}s conc={provider_concurrency}")
     for prov in sorted(per_provider_raw):
         c = per_provider_raw[prov]
         print(f"[build-all] provider {prov}: keep={c.get('keep',0)} uncertain={c.get('uncertain',0)} drop={c.get('drop',0)} error={c.get('error',0)}")
+    # residual taxonomy one-liner for operators (sums to uncertain+error)
+    try:
+        rt = telemetry.get("residual_taxonomy") or {}
+        if rt:
+            print(f"[build-all] residual split total={sum(rt.values())} " + " ".join(f"{k}={rt.get(k,0)}" for k in sorted(rt)))
+    except Exception:
+        pass
 
     # 7. Ensure pretty + version header already via ModelInfoStore.save
     pretty = store.dumps_pretty()

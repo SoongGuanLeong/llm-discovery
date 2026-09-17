@@ -335,6 +335,30 @@ class TestAlternateJudgeRoute:
         except JudgeError as exc:
             assert exc.alternate_attempted is False
 
+    def test_non_retryable_validation_skips_alternate(self, monkeypatch):
+        """issue #233: schema-invalid JSON is a non-retryable validation failure -
+        the alternate route is NOT consulted (would not fix a schema mismatch)."""
+        alt_calls = {"n": 0}
+
+        def fake_post_chat(self, messages, disable_tools=False):
+            if self.model == "alt-x":
+                alt_calls["n"] += 1
+            # Primary returns schema-invalid JSON (parsed, wrong shape).
+            return _Resp(
+                200,
+                json_data={
+                    "choices": [{"message": {"content": json.dumps({"decision": "keep"})}}]
+                },
+            )
+
+        monkeypatch.setattr(JudgeTransport, "post_chat", fake_post_chat)
+        ev = _evaluator(alternate=JudgeRoute(base_url="https://alt.test/v1", model="alt-x"))
+        with pytest.raises(JudgeError) as ei:
+            ev.evaluate(_req())
+        assert ei.value.category == CAT_VALIDATION
+        assert alt_calls["n"] == 0  # alternate route not consulted for non-retryable failure
+        assert ei.value.alternate_attempted is False
+
 
 # ---------------------------------------------------------------------------
 # AC3: persistent failure is error not weak, with error_category/retry_count

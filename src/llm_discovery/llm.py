@@ -219,12 +219,15 @@ class LocalLLMEvaluator:
             # LocalLLMEvaluator._post keep working (seam used by tests).
             return self._evaluate_with(self.transport, request, evidence_packet, self._post)
         except JudgeError as exc:
-            alternate_transport = self._alternate_transport()
+            # issue #233: only transient (retryable) failures are worth an
+            # alternate route. An auth bad token, schema validation failure, or
+            # tool failure would not be fixed by a different endpoint, so it is
+            # persisted as-is as decision=error instead of re-spun.
+            alternate_transport = (
+                self._alternate_transport() if exc.retryable else None
+            )
             if alternate_transport is None:
                 raise
-            # issue #233: consider alternate judge route when configured.
-            # One full pass on the alternate route; its own transport retries
-            # and JSON-only retry stay bounded (no retry storms).
             print(
                 "[judge] primary judge failed (%s); trying alternate route %s"
                 % (exc.category, alternate_transport.model)

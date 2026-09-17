@@ -455,7 +455,59 @@ def build_all(
     build_wall = time.monotonic() - build_start
     # issue #222 AC4: candidate cache hit/miss/size is how "no-evidence models not
     # retried each build" is measured (e.g. xkiro's 46 weak models)
-    telemetry = {"discovered": total_keep, "unique_discovered": len(live_keys), "reused": reused_unique, "rebuilt": rebuilt_total, "rebuilt_by_reason": {"new_key": rebuilt_new, "identity_bad": rebuilt_identity, "pricing_ttl_reavg": 0}, "gc": gc_count, "store_size": store.size(), "store_size_before": len(before_keys), "candidate_cache": {**candidate_store_for_discovery.stats.as_dict(), "size": candidate_store_for_discovery.size()}, "duplicate_keys": len(duplicate_keys), "live_keys": len(live_keys), "per_provider": per_provider_raw, "per_provider_post": per_provider_stats, "provider_concurrency": provider_concurrency, "search": get_search_accounting()[0].snapshot(), "wall_seconds": round(build_wall, 3)}
+    # issue #234: additive observability — weak/none (uncertain), error, strong/moderate, LLM calls, web searches
+    totals = {
+        "keep": sum(v.get("keep", 0) for v in per_provider_raw.values()),
+        "uncertain": sum(v.get("uncertain", 0) for v in per_provider_raw.values()),
+        "drop": sum(v.get("drop", 0) for v in per_provider_raw.values()),
+        "error": sum(v.get("error", 0) for v in per_provider_raw.values()),
+    }
+    # evidence_level distribution best-effort from YAML (backfill-compatible, no secrets)
+    evidence_levels: dict[str, int] = {"strong": 0, "moderate": 0, "weak": 0, "none": 0}
+    try:
+        for yf in sorted(results_dir.glob("*.yaml")):
+            try:
+                data = yaml.safe_load(yf.read_text()) or {}
+            except Exception:
+                continue
+            for bucket in ("keep", "uncertain", "drop", "drop_llm", "error"):
+                for rec in (data.get(bucket) or []):
+                    if not isinstance(rec, dict):
+                        continue
+                    lvl = str(rec.get("evidence_level", "")).strip().lower()
+                    if lvl in evidence_levels:
+                        evidence_levels[lvl] += 1
+                    elif lvl == "":
+                        # error records use evidence_level none or missing
+                        if str(rec.get("decision", "")).strip().lower() == "error":
+                            evidence_levels["none"] += 1
+    except Exception:
+        pass
+    search_snap = get_search_accounting()[0].snapshot()
+    telemetry = {
+        "discovered": total_keep,
+        "unique_discovered": len(live_keys),
+        "reused": reused_unique,
+        "rebuilt": rebuilt_total,
+        "rebuilt_by_reason": {"new_key": rebuilt_new, "identity_bad": rebuilt_identity, "pricing_ttl_reavg": 0},
+        "gc": gc_count,
+        "store_size": store.size(),
+        "store_size_before": len(before_keys),
+        "candidate_cache": {**candidate_store_for_discovery.stats.as_dict(), "size": candidate_store_for_discovery.size()},
+        "duplicate_keys": len(duplicate_keys),
+        "live_keys": len(live_keys),
+        "per_provider": per_provider_raw,
+        "per_provider_post": per_provider_stats,
+        "provider_concurrency": provider_concurrency,
+        "search": search_snap,
+        "wall_seconds": round(build_wall, 3),
+        # issue #234 additive observability (no secrets, no raw prompts)
+        "totals": totals,
+        "evidence_levels": evidence_levels,
+        "llm_calls": search_snap.get("judge_calls", 0),
+        "web_searches": search_snap.get("calls", 0),
+        "wall_duration_s": round(build_wall, 3),
+    }
     print(f"[build-all] telemetry discovered={total_keep} unique={len(live_keys)} reused={reused_unique} rebuilt={rebuilt_total} (new={rebuilt_new} identity={rebuilt_identity}) gc={gc_count} store={store.size()} wall={build_wall:.2f}s conc={provider_concurrency}")
     for prov in sorted(per_provider_raw):
         c = per_provider_raw[prov]

@@ -1286,6 +1286,9 @@ class EvaluatorCoordinator:
         result["cached"] = True
         result["cache_key"] = cache_key
         result["evidence_level"] = entry.evidence_level
+        result["evidence_status"] = "uncertain"
+        result["evidence_reason"] = "candidate_cache_hit"
+        result["recovery_attempts"] = ["candidate_cache_hit"]
         result.setdefault("evidence", []).append(
             f"Candidate cache hit: {entry.evidence_level} evidence unchanged, {CANDIDATE_TTL_DAYS}d TTL (issue #222), no LLM"
         )

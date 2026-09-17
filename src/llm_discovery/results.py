@@ -103,6 +103,10 @@ class SingleModelWriter:
             "evidence": clean_evidence(record.get("evidence", [])),
             "coding_assessment": record.get("coding_assessment"),
         }
+        # Observability passthrough (issue #234) — additive, no secrets.
+        for _k in ("evidence_status", "evidence_reason", "recovery_attempts", "error_category", "retry_count"):
+            if _k in record and record[_k] is not None:
+                payload[_k] = record[_k]
 
         path = output_dir / f"{provider}.yaml"
         path.write_text(yaml.safe_dump(payload, sort_keys=False, allow_unicode=True))
@@ -153,6 +157,11 @@ class ProviderBatchWriter:
         }
         if "stage" in rec:
             projected["stage"] = rec["stage"]
+        # Observability: weak/none evidence_status/reason/recovery_attempts (issue #234)
+        # and error error_category/retry_count — additive, backfill/cache compat.
+        for _k in ("evidence_status", "evidence_reason", "recovery_attempts", "error_category", "retry_count"):
+            if _k in rec and rec[_k] is not None:
+                projected[_k] = rec[_k]
         return projected
 
     def write(

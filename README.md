@@ -32,7 +32,7 @@ Discover and evaluate cloud LLMs across multiple providers. Enumerates provider 
   LLM_DISCOVERY_PROJECT_ID=<project with AA_API_KEY only>
   ```
 
-  `LLM_SHARED_PROJECT_ID` holds every provider key (`GROQ_API_KEY`, `KILO_AI_API_KEY`, `CEREBRAS_API_KEY`, `OPENCODE_ZEN_API_KEY`, ...) plus the judge key `AGNES_AI_API_KEY`. `LLM_DISCOVERY_PROJECT_ID` holds only `AA_API_KEY` (used for catalog refresh). If you do not use Infisical, just export the keys and ignore these two vars — `src/llm_discovery/secrets.py:load_all_secrets()` only runs when the vars are set.
+  `LLM_SHARED_PROJECT_ID` holds every provider key (`GROQ_API_KEY`, `KILO_AI_API_KEY`, `CEREBRAS_API_KEY`, ...) plus the judge key `AGNES_AI_API_KEY`. `LLM_DISCOVERY_PROJECT_ID` holds only `AA_API_KEY` (used for catalog refresh). If you do not use Infisical, just export the keys and ignore these two vars — `src/llm_discovery/secrets.py:load_all_secrets()` only runs when the vars are set.
 
 No Podman, systemd, or gateway setup is required to run discovery locally.
 

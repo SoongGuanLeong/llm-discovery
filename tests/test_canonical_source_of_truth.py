@@ -22,13 +22,12 @@ def test_providers_not_in_registry_map_to_custom():
 
 def test_registry_includes_key_providers():
     """Test that _OMNIROUTE_REGISTRY includes ONLY Standard API Providers per new rule."""
-    # Per new rule: ONLY Cloudflare Workers AI and Opencode Zen are Standard
+    # Per new rule: ONLY Cloudflare Workers AI is Standard (opencode_zen retired, issue #236)
     assert mod._OMNIROUTE_REGISTRY == mod.STANDARD_PROVIDER_MAP, \
         f"_OMNIROUTE_REGISTRY should equal STANDARD_PROVIDER_MAP {mod.STANDARD_PROVIDER_MAP}, got {mod._OMNIROUTE_REGISTRY}"
     assert "cloudflare" in mod._OMNIROUTE_REGISTRY
-    assert "opencode_zen" in mod._OMNIROUTE_REGISTRY
+    assert "opencode_zen" not in mod._OMNIROUTE_REGISTRY
     assert mod._OMNIROUTE_REGISTRY["cloudflare"] == "cloudflare-ai"
-    assert mod._OMNIROUTE_REGISTRY["opencode_zen"] == "opencode-zen"
     # Non-standard providers must NOT be in registry (they are custom)
     for non_standard in ["google", "groq", "openrouter", "mistral", "agentrouter", "kilo_ai"]:
         assert non_standard not in mod._OMNIROUTE_REGISTRY, f"{non_standard} should NOT be in _OMNIROUTE_REGISTRY (custom)"

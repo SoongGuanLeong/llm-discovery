@@ -234,12 +234,12 @@ def test_custom_node_mapping():
     assert by_name["apinex"]["name"] == "apinex"
 
 
-def test_opencode_zen_mapping():
-    """opencode_zen maps to opencode-zen registry id (Standard API Provider)."""
+def test_opencode_zen_retired():
+    """opencode_zen retired (issue #236): no import rows, gateway id in retired set."""
     rows = mod.build_import_entries(Path("config/providers.yaml"))
-    by_name = {r["name"]: r for r in rows}
-    assert by_name["opencode_zen"]["provider"] == "opencode-zen"
-    assert by_name["opencode_zen"]["name"] == "opencode_zen"
+    assert all(r["name"] != "opencode_zen" for r in rows)
+    assert all(r["provider"] != "opencode-zen" for r in rows)
+    assert "opencode-zen" in mod.RETIRED_PROVIDER_IDS
 
 
 def test_untouched_providers_unchanged():
@@ -253,8 +253,8 @@ def test_untouched_providers_unchanged():
 
 
 def test_retired_provider_ids_exact():
-    """Retired ids are exactly the four frozen registry + free opencode."""
-    assert mod.RETIRED_PROVIDER_IDS == frozenset({"nara", "zai", "agnes", "opencode"})
+    """Retired ids are exactly frozen registry + free opencode + opencode-zen (issue #236)."""
+    assert mod.RETIRED_PROVIDER_IDS == frozenset({"nara", "zai", "agnes", "opencode", "opencode-zen"})
 
 
 def test_retired_ids_never_recreated():
@@ -262,6 +262,7 @@ def test_retired_ids_never_recreated():
     rows = mod.build_import_entries(Path("config/providers.yaml"))
     providers = {r["provider"] for r in rows}
     assert "opencode" not in providers
+    assert "opencode-zen" not in providers
 
 
 class _FakeResponse:
@@ -549,12 +550,11 @@ class TestE2EFullApply:
         env = {
             "CLOUDFLARE_ACCOUNT_ID": "test-123",
             "GROQ_API_KEY": "sk-groq",
-            "OPENCODE_ZEN_API_KEY": "sk-zen",
         }
 
         summary = mod.apply_payload(payload, base_url="http://x", auth_headers=None, resolve_env=env)
 
-        assert summary["retire"]["count"] == 4
+        assert summary["retire"]["count"] == 5
         assert len([r for r in summary["import"]["response"]["results"] if "status" in r]) >= 2
         assert summary["psd_patches"]["count"] > 0
         assert summary["models"]["sent"] > 0
@@ -575,7 +575,6 @@ class TestE2EFullApply:
         env = {
             "CLOUDFLARE_ACCOUNT_ID": "test-123",
             "GROQ_API_KEY": "sk-groq",
-            "OPENCODE_ZEN_API_KEY": "sk-zen",
         }
 
         mod.apply_payload(payload, base_url="http://x", auth_headers=None, resolve_env=env)
@@ -601,7 +600,6 @@ class TestE2EFullApply:
         env = {
             "CLOUDFLARE_ACCOUNT_ID": "test-123",
             "GROQ_API_KEY": "sk-groq",
-            "OPENCODE_ZEN_API_KEY": "sk-zen",
         }
         snapshot_before = mod.snapshot_gateway_state("http://x")
 
@@ -629,7 +627,6 @@ class TestE2EFullApply:
         env = {
             "CLOUDFLARE_ACCOUNT_ID": "test-123",
             "GROQ_API_KEY": "sk-secret-key-123",
-            "OPENCODE_ZEN_API_KEY": "sk-zen",
         }
         redacted = {
             "import": mod.redact_rows(payload.get("import", [])),
@@ -654,6 +651,7 @@ class _MockGateway:
             {"id": "c4", "provider": "zai", "name": "zai", "isActive": True, "providerSpecificData": {}},
             {"id": "c5", "provider": "agnes", "name": "agnes", "isActive": True, "providerSpecificData": {}},
             {"id": "c6", "provider": "opencode", "name": "opencode", "isActive": True, "providerSpecificData": {}},
+            {"id": "c7", "provider": "opencode-zen", "name": "opencode_zen", "isActive": True, "providerSpecificData": {}},
         ]
         self.models: dict[str, list[dict[str, Any]]] = {
             "groq": [

@@ -54,12 +54,11 @@ COMBO_CREATE_PATH = "/api/combos"
 
 PROVIDER_MODELS_PATH = "/api/provider-models"
 
-# Rule: ONLY Cloudflare Workers AI and Opencode Zen are Standard API Providers.
+# Rule: ONLY Cloudflare Workers AI is a Standard API Provider.
 # All other providers are API Key Compatible Providers (custom OpenAI-compatible nodes).
 # See CONTEXT.md / issue rule: standard = registry-backed, custom = {name}-custom.
 STANDARD_PROVIDER_MAP: dict[str, str] = {
     "cloudflare": "cloudflare-ai",      # Cloudflare Workers AI (registry)
-    "opencode_zen": "opencode-zen",      # Opencode Zen (registry)
 }
 
 # Legacy alias map — retained for backwards-compat and apply-time fallback diagnostics.
@@ -72,7 +71,6 @@ _PROVIDER_ALIAS = {
     "navy_ai": "navy",
     "ollama_cloud": "ollama-cloud",
     "sea-lion": "sealion",
-    "opencode_zen": "opencode-zen",
     "modelscope": "modelscope-custom",
 }
 
@@ -86,9 +84,6 @@ CUSTOM_NODE_MAP = {
     "tokenharbor": "tokenharbor-custom",
     "xkiro": "xkiro-custom",
 }
-
-# Opencode Zen → registry id (alias for STANDARD_PROVIDER_MAP entry)
-OPENCOD_ZEN_MAP = {"opencode_zen": "opencode-zen"}
 
 # Deprecated: all non-standard providers are now custom without requiring explicit flag.
 # Kept as empty frozenset for backwards-compat imports.
@@ -104,10 +99,11 @@ _MODEL_PROVIDER_MAP: dict[str, str] = dict(STANDARD_PROVIDER_MAP)
 
 # Ticket 176: retired provider ids â frozen registry + free opencode
 RETIRED_PROVIDER_IDS = frozenset({
-    "nara",        # frozen static catalog (3 models, live=47 via custom node)
-    "zai",         # frozen static catalog (7 models, live=10 via custom node)
-    "agnes",       # frozen static catalog (3 models, live=12 via custom node)
-    "opencode",    # free no-auth (70 models, zen=13)
+    "nara",         # frozen static catalog (3 models, live=47 via custom node)
+    "zai",          # frozen static catalog (7 models, live=10 via custom node)
+    "agnes",        # frozen static catalog (3 models, live=12 via custom node)
+    "opencode",     # free no-auth (70 models, zen=13)
+    "opencode-zen", # registry id; free tier client-walled by opencode (issue #236)
 })
 
 
@@ -172,8 +168,8 @@ def _custom_provider_ids(providers_path: Path = DEFAULT_PROVIDERS) -> set[str]:
 def _resolve_provider_id(name: str, raw: dict[str, Any] | None = None) -> str:
     """Resolve provider id per new rule.
 
-    ONLY Cloudflare Workers AI (cloudflare -> cloudflare-ai) and Opencode Zen
-    (opencode_zen -> opencode-zen) are Standard API Providers (registry-backed).
+    ONLY Cloudflare Workers AI (cloudflare -> cloudflare-ai) is a Standard API
+    Provider (registry-backed).
     ALL other providers are API Key Compatible Providers (custom OpenAI-compatible)
     and map to `{name}-custom` (or stable CUSTOM_NODE_MAP id if defined).
 
@@ -193,8 +189,8 @@ def _resolve_provider_id(name: str, raw: dict[str, Any] | None = None) -> str:
 def build_import_entries(providers_path: Path = DEFAULT_PROVIDERS) -> list[dict[str, Any]]:
     """Build import rows from providers.yaml.
 
-    Rule: ONLY Cloudflare Workers AI (cloudflare → cloudflare-ai) and Opencode Zen
-    (opencode_zen → opencode-zen) are Standard API Providers (registry-backed).
+    Rule: ONLY Cloudflare Workers AI (cloudflare → cloudflare-ai) is a Standard
+    API Provider (registry-backed).
     ALL other providers are API Key Compatible Providers (custom OpenAI-compatible
     nodes) and are emitted as `{name}-custom` (stable CUSTOM_NODE_MAP id if defined).
     Connection names keep yaml names for traceability. Explicit `custom: true`
@@ -318,8 +314,8 @@ def group_keeps_by_tier(keeps: list[dict[str, Any]], *, strict_contributor_free:
 def _map_provider_for_model(p: str) -> str:
     """Map provider for model/combo entries per new rule.
 
-    Only Cloudflare Workers AI and Opencode Zen are Standard API Providers
-    (registry-backed). All others → API Key Compatible (custom) node
+    Only Cloudflare Workers AI is a Standard API Provider (registry-backed).
+    All others → API Key Compatible (custom) node
     `{name}-custom` (stable CUSTOM_NODE_MAP id if defined).
     """
     if p in STANDARD_PROVIDER_MAP:
@@ -487,7 +483,7 @@ def apply_import_entries(base_url: str, rows: list[dict[str, Any]], auth_headers
             results.append({"provider": row.get("provider"), "skipped": True, "reason": "missing env"})
             continue
         # Apply full standard-vs-custom rule to provider id before sending.
-        # Only Cloudflare Workers AI + Opencode Zen are Standard (registry-backed);
+        # Only Cloudflare Workers AI is a Standard provider (registry-backed);
         # everything else must be a {name}-custom (API Key Compatible Provider).
         orig = row.get("provider")
         mapped = _map_provider_for_model(str(orig))
@@ -645,8 +641,8 @@ def retire_connections(base_url: str, retired_ids: frozenset[str], auth_headers:
 def _legacy_standard_provider_ids(resolved_import: list[dict[str, Any]]) -> set[str]:
     """Compute set of provider ids that should NOT exist as Standard connections on OmniRoute.
 
-    Per new rule, only Cloudflare Workers AI (cloudflare-ai) and Opencode Zen
-    (opencode-zen) are Standard. Any existing connection on OmniRoute whose
+    Per new rule, only Cloudflare Workers AI (cloudflare-ai) is a Standard
+    provider. Any existing connection on OmniRoute whose
     provider id is a yaml provider name (e.g. 'groq') without the '-custom'
     suffix is a legacy Standard that should be deprecated so OmniRoute UI
     shows it as a custom API Key Compatible Provider instead.
@@ -671,7 +667,7 @@ def _legacy_standard_provider_ids(resolved_import: list[dict[str, Any]]) -> set[
 def retire_legacy_standard_connections(base_url: str, resolved_import: list[dict[str, Any]], auth_headers: dict[str, str] | None = None, timeout: float = 15.0) -> dict[str, Any]:
     """Retire legacy Standard connections that should now be API Key Compatible (custom).
 
-    After switching to the new rule (only Cloudflare + Opencode Zen are Standard),
+    After switching to the new rule (only Cloudflare is Standard),
     any existing connection on OmniRoute whose provider was a plain yaml name
     (e.g. 'groq', 'agnes', 'openrouter') is still treated by OmniRoute as Standard.
     This function deprecates/deletes those so they are re-created as '{name}-custom'
@@ -737,7 +733,7 @@ def patch_provider_specific_data(base_url: str, import_rows: list[dict[str, Any]
     base = base_url.rstrip("/")
     existing = _fetch_existing_connections(base_url, auth_headers, timeout)
     # Build set of live-discoverable provider ids from import rows (mapped via custom + alias)
-    live_ids = {CUSTOM_NODE_MAP.get(str(r["provider"]), OPENCOD_ZEN_MAP.get(str(r["provider"]), _map_provider(str(r["provider"])))) for r in import_rows}
+    live_ids = {CUSTOM_NODE_MAP.get(str(r["provider"]), _map_provider(str(r["provider"]))) for r in import_rows}
     # Also include cloudflare-ai (mapped from cloudflare)
     live_ids.add("cloudflare-ai")
     # Build desired baseUrl map from import rows (match by connection name first, then provider id)
@@ -753,7 +749,7 @@ def patch_provider_specific_data(base_url: str, import_rows: list[dict[str, Any]
         if provider_id and base_url_val:
             desired_base_urls_by_provider[provider_id] = str(base_url_val)
             # also index by alias/custom mapped ids
-            for m in [_map_provider(provider_id), CUSTOM_NODE_MAP.get(provider_id, ""), OPENCOD_ZEN_MAP.get(provider_id, "")]:
+            for m in [_map_provider(provider_id), CUSTOM_NODE_MAP.get(provider_id, "")]:
                 if m and m != provider_id:
                     desired_base_urls_by_provider[m] = str(base_url_val)
     # Filter existing connections to live-discoverable ones (by provider or by name fallback for aliases like nararouter->nara)

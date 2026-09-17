@@ -687,7 +687,6 @@ class TestDiscoverAllProvidersIsolation:
         monkeypatch.setenv("GEMINI_API_KEY", "fake-gemini-key")
         monkeypatch.setenv("LLM7_API_KEY", "fake-llm7-key")
         monkeypatch.setenv("MISTRAL_API_KEY", "fake-mistral-key")
-        monkeypatch.setenv("OPENCODE_ZEN_API_KEY", "fake-zen-key")
         monkeypatch.setenv("OPENROUTER_API_KEY", "fake-openrouter-key")
 
         config = load_config()

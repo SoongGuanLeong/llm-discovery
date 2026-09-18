@@ -42,17 +42,18 @@ SCAFFOLD_COMBOS = [
     {"name": "contributor_free", "models": [], "strategy": "reset-aware", "config": {}},
 ]
 
-BULK_IMPORT_CANDIDATES = [
-    "/api/providers/bulk-import",
-    "/api/providers/import",
-    "/api/provider/import",
-    "/api/providers/bulk_import",
-]
-
 COMBOS_LIST_PATH = "/api/combos"
 COMBO_CREATE_PATH = "/api/combos"
 
 PROVIDER_MODELS_PATH = "/api/provider-models"
+
+# Custom (API Key Compatible) providers are stored as OpenAI-compatible nodes;
+# OmniRoute generates the connection provider id `openai-compatible-chat-<uuid>`
+# and keeps the `{name}-custom` token in the node `prefix` + connection
+# providerSpecificData. `{name}-custom` is never a valid provider id.
+PROVIDER_NODES_PATH = "/api/provider-nodes"
+PROVIDERS_PATH = "/api/providers"
+OPENAI_COMPATIBLE_PREFIX = "openai-compatible-"
 
 # Rule: ONLY Cloudflare Workers AI is a Standard API Provider.
 # All other providers are API Key Compatible Providers (custom OpenAI-compatible nodes).
@@ -60,6 +61,8 @@ PROVIDER_MODELS_PATH = "/api/provider-models"
 STANDARD_PROVIDER_MAP: dict[str, str] = {
     "cloudflare": "cloudflare-ai",      # Cloudflare Workers AI (registry)
 }
+
+_STANDARD_PROVIDER_IDS = frozenset(STANDARD_PROVIDER_MAP.values())
 
 # Legacy alias map — retained for backwards-compat and apply-time fallback diagnostics.
 # Not used as source of truth (see STANDARD_PROVIDER_MAP). Deprecated.
@@ -176,6 +179,9 @@ def _resolve_provider_id(name: str, raw: dict[str, Any] | None = None) -> str:
     Explicit `custom: true` in YAML still forces custom (backwards-compat) but
     is now redundant because non-standard already default to custom.
     """
+    # Already-resolved ids must pass through untouched (mapping is not idempotent).
+    if name in _STANDARD_PROVIDER_IDS or name.endswith("-custom") or name.startswith(OPENAI_COMPATIBLE_PREFIX):
+        return name
     # Explicit flag forces custom even for standard (allow override)
     if raw is not None and _is_explicit_custom(raw):
         return CUSTOM_NODE_MAP.get(name, f"{name}-custom")
@@ -317,7 +323,12 @@ def _map_provider_for_model(p: str) -> str:
     Only Cloudflare Workers AI is a Standard API Provider (registry-backed).
     All others → API Key Compatible (custom) node
     `{name}-custom` (stable CUSTOM_NODE_MAP id if defined).
+
+    Idempotent: already-resolved ids (standard registry ids, `{name}-custom`
+    prefixes, `openai-compatible-*` node ids) pass through untouched.
     """
+    if p in _STANDARD_PROVIDER_IDS or p.endswith("-custom") or p.startswith(OPENAI_COMPATIBLE_PREFIX):
+        return p
     if p in STANDARD_PROVIDER_MAP:
         return STANDARD_PROVIDER_MAP[p]
     # All non-standard → custom OpenAI-compatible node
@@ -442,78 +453,175 @@ def _map_provider(p: str) -> str:
     return p
 
 
+def _fetch_existing_nodes(base_url: str, auth_headers: dict[str, str] | None = None, timeout: float = 15.0) -> list[dict[str, Any]]:
+    """Fetch all OpenAI/anthropic-compatible provider nodes from the gateway."""
+    httpx = _httpx_client()
+    headers: dict[str, str] = {}
+    if auth_headers:
+        headers.update(auth_headers)
+    url = base_url.rstrip("/") + PROVIDER_NODES_PATH
+    resp = httpx.get(url, headers=headers, timeout=timeout)
+    if resp.status_code != 200:
+        return []
+    data = resp.json()
+    if isinstance(data, dict):
+        nodes = data.get("nodes", [])
+        return nodes if isinstance(nodes, list) else []
+    if isinstance(data, list):
+        return data
+    return []
+
+
+def ensure_provider_node(
+    base_url: str,
+    row: dict[str, Any],
+    nodes_by_name: dict[str, dict[str, Any]],
+    headers: dict[str, str],
+    timeout: float = 15.0,
+) -> dict[str, Any]:
+    """Create or refresh the OpenAI-compatible node backing a custom provider.
+
+    OmniRoute generates the connection provider id (`openai-compatible-chat-<uuid>`)
+    and stores the `{name}-custom` token in the node `prefix`. A node PUT also
+    propagates prefix/baseUrl/apiType/nodeName into its connections'
+    providerSpecificData, so refreshing the node is how baseUrl drift is fixed.
+    """
+    httpx = _httpx_client()
+    base = base_url.rstrip("/")
+    name = str(row.get("name") or "").strip()
+    prefix = str(row.get("provider") or "").strip()
+    node_base_url = str(row.get("baseUrl") or "").strip()
+    node = nodes_by_name.get(name)
+    if node is None:
+        node = next((n for n in nodes_by_name.values() if str(n.get("prefix") or "") == prefix), None)
+    payload: dict[str, Any] = {"name": name, "prefix": prefix, "apiType": "chat"}
+    if node_base_url:
+        payload["baseUrl"] = node_base_url
+    if node is None:
+        try:
+            resp = httpx.post(base + PROVIDER_NODES_PATH, json=payload, headers=headers, timeout=timeout)
+        except Exception as e:
+            return {"error": str(e)}
+        if resp.status_code not in (200, 201, 204):
+            return {"error": f"{resp.status_code}: {resp.text[:300]}"}
+        try:
+            data = resp.json() if resp.content else {}
+        except Exception:
+            data = {}
+        created = data.get("node") or {}
+        return {"id": created.get("id"), "action": "created"}
+    node_id = node.get("id")
+    prefix_drift = str(node.get("prefix") or "") != prefix
+    base_url_drift = bool(node_base_url) and str(node.get("baseUrl") or "") != node_base_url
+    if (prefix_drift or base_url_drift) and node_id and node_base_url:
+        try:
+            resp = httpx.put(f"{base}{PROVIDER_NODES_PATH}/{node_id}", json=payload, headers=headers, timeout=timeout)
+        except Exception as e:
+            return {"id": node_id, "action": "updated", "error": str(e)}
+        if resp.status_code not in (200, 201, 204):
+            return {"id": node_id, "action": "updated", "error": f"{resp.status_code}: {resp.text[:300]}"}
+        return {"id": node_id, "action": "updated"}
+    return {"id": node_id, "action": "reused"}
+
+
 def apply_import_entries(base_url: str, rows: list[dict[str, Any]], auth_headers: dict[str, str] | None = None, timeout: float = 15.0) -> dict[str, Any]:
+    """Apply provider connections to the gateway, idempotently.
+
+    Standard providers (Cloudflare Workers AI) post straight to `/api/providers`
+    with their registry id. Custom providers need an OpenAI-compatible node first
+    (`POST /api/provider-nodes`), then a connection whose `provider` is the node id;
+    `{name}-custom` is only ever the node prefix. Existing connections are matched
+    by name + provider id and updated in place, so a re-apply mutates nothing.
+    """
     httpx = _httpx_client()
     headers = {"Content-Type": "application/json"}
     if auth_headers:
         headers.update(auth_headers)
     base = base_url.rstrip("/")
-    last_err: str | None = None
-    for path in BULK_IMPORT_CANDIDATES:
-        url = base + path
-        for body in [rows, {"providers": rows}]:
-            try:
-                resp = httpx.post(url, json=body, headers=headers, timeout=timeout)
-            except Exception as e:
-                last_err = f"{url} -> {e}"
-                continue
-            if resp.status_code in (200, 201, 204):
-                try:
-                    data = resp.json() if resp.content else {}
-                except Exception:
-                    data = {"raw": resp.text[:500]}
-                return {"url": url, "status": resp.status_code, "response": data, "sent": len(rows)}
-            if resp.status_code == 404:
-                last_err = f"{url} 404"
-                break
-            if resp.status_code == 400:
-                last_err = f"{url} 400: {resp.text[:300]}"
-                continue
-            last_err = f"{url} {resp.status_code}: {resp.text[:300]}"
-        if last_err and "404" not in last_err:
-            pass
-    print(f"bulk endpoints unavailable ({last_err}), falling back to per-provider POST /api/providers", file=sys.stderr)
-    single_url = base + "/api/providers"
+    existing_nodes = _fetch_existing_nodes(base_url, auth_headers, timeout)
+    nodes_by_name = {str(n.get("name") or "").strip(): n for n in existing_nodes if n.get("name")}
+    conns_by_name: dict[str, list[dict[str, Any]]] = {}
+    for conn in _fetch_existing_connections(base_url, auth_headers, timeout):
+        conns_by_name.setdefault(str(conn.get("name") or "").strip(), []).append(conn)
+
     results: list[dict[str, Any]] = []
-    fallback_err: str | None = None
+    created_nodes: list[dict[str, Any]] = []
     for row in rows:
+        name = str(row.get("name") or "").strip()
+        provider_id = str(row.get("provider") or "").strip()
         ak = str(row.get("apiKey", ""))
         if ak.startswith("env:"):
-            print(f"skip {row.get('provider')}: apiKey still placeholder {ak} (missing env)", file=sys.stderr)
-            results.append({"provider": row.get("provider"), "skipped": True, "reason": "missing env"})
+            print(f"skip {provider_id}: apiKey still placeholder {ak} (missing env)", file=sys.stderr)
+            results.append({"provider": provider_id, "name": name, "skipped": True, "reason": "missing env"})
             continue
-        # Apply full standard-vs-custom rule to provider id before sending.
-        # Only Cloudflare Workers AI is a Standard provider (registry-backed);
-        # everything else must be a {name}-custom (API Key Compatible Provider).
-        orig = row.get("provider")
-        mapped = _map_provider_for_model(str(orig))
-        send_row = dict(row)
-        send_row["provider"] = mapped
-        # name stays original for traceability
-        send_row["name"] = row.get("name", orig)
-        if mapped != orig:
-            tag = "standard" if mapped in STANDARD_PROVIDER_MAP.values() else "custom"
-            print(f"map {orig} -> {mapped} ({tag})", file=sys.stderr)
+        if not name or not provider_id:
+            results.append({"provider": provider_id, "name": name, "error": "missing provider or name"})
+            continue
+        if provider_id in _STANDARD_PROVIDER_IDS:
+            target_provider = provider_id
+            node_action = "standard"
+            node_warning = None
+        else:
+            node_info = ensure_provider_node(base_url, row, nodes_by_name, headers, timeout=timeout)
+            if not node_info.get("id"):
+                results.append({"provider": provider_id, "name": name, "error": f"node: {node_info.get('error') or 'no id returned'}"})
+                continue
+            target_provider = str(node_info["id"])
+            node_action = str(node_info.get("action"))
+            # A failed node refresh must not block the connection upsert.
+            node_warning = node_info.get("error")
+            if node_action == "created":
+                created_nodes.append({"id": target_provider, "name": name, "prefix": provider_id})
+                nodes_by_name[name] = {"id": target_provider, "name": name, "prefix": provider_id, "baseUrl": str(row.get("baseUrl") or "")}
+
+        existing = next((c for c in conns_by_name.get(name, []) if c.get("provider") == target_provider), None)
+        entry_base = {"provider": provider_id, "mapped": target_provider, "name": name, "node": node_action}
+        if node_warning:
+            entry_base["node_error"] = node_warning
+        if existing:
+            cid = existing.get("id")
+            body: dict[str, Any] = {"apiKey": ak}
+            if row.get("priority") is not None:
+                body["priority"] = row["priority"]
+            try:
+                resp = httpx.put(f"{base}{PROVIDERS_PATH}/{cid}", json=body, headers=headers, timeout=timeout)
+            except Exception as e:
+                results.append({**entry_base, "method": "PUT", "id": cid, "error": str(e)})
+                continue
+            if resp.status_code in (200, 201, 204):
+                results.append({**entry_base, "method": "PUT", "id": cid, "status": resp.status_code})
+            else:
+                results.append({**entry_base, "method": "PUT", "id": cid, "error": f"{resp.status_code}: {resp.text[:300]}"})
+            continue
+        body = {"provider": target_provider, "name": name, "apiKey": ak}
+        if row.get("priority") is not None:
+            body["priority"] = row["priority"]
         try:
-            resp = httpx.post(single_url, json=send_row, headers=headers, timeout=timeout)
+            resp = httpx.post(base + PROVIDERS_PATH, json=body, headers=headers, timeout=timeout)
         except Exception as e:
-            fallback_err = f"{orig} -> {e}"
-            results.append({"provider": orig, "mapped": mapped, "error": fallback_err})
+            results.append({**entry_base, "method": "POST", "error": str(e)})
             continue
         if resp.status_code in (200, 201, 204):
             try:
                 data = resp.json() if resp.content else {}
             except Exception:
-                data = {"raw": resp.text[:200]}
-            results.append({"provider": orig, "mapped": mapped, "status": resp.status_code, "id": (data.get("connection") or {}).get("id")})
+                data = {}
+            new_id = (data.get("connection") or {}).get("id")
+            results.append({**entry_base, "method": "POST", "id": new_id, "status": resp.status_code})
+            conns_by_name.setdefault(name, []).append({"id": new_id, "provider": target_provider, "name": name})
         else:
-            # if openai fallback still fails, try again without mapping (last resort)
-            fallback_err = f"{orig}({mapped}) {resp.status_code}: {resp.text[:300]}"
-            results.append({"provider": orig, "mapped": mapped, "error": fallback_err})
+            results.append({**entry_base, "method": "POST", "error": f"{resp.status_code}: {resp.text[:300]}"})
     successes = [r for r in results if "status" in r]
-    if not successes and any("error" in r for r in results):
-        raise RuntimeError(f"per-provider fallback failed, last error: {fallback_err} (bulk last: {last_err})")
-    return {"url": single_url + " (per-row fallback)", "status": 201 if successes else 200, "response": {"results": results, "fallback": True}, "sent": len(rows), "fallback": True}
+    errors = [r for r in results if "error" in r]
+    if not successes and errors:
+        raise RuntimeError(f"provider apply failed, last error: {errors[-1]['error']}")
+    return {
+        "url": base + PROVIDERS_PATH,
+        "status": 201 if successes else 200,
+        "response": {"results": results, "created_nodes": created_nodes},
+        "sent": len(rows),
+        "created_nodes": created_nodes,
+    }
 
 
 def fetch_combos(base_url: str, auth_headers: dict[str, str] | None = None, timeout: float = 15.0) -> list[dict[str, Any]]:
@@ -949,13 +1057,14 @@ def snapshot_gateway_state(
 ) -> dict[str, Any]:
     """Ticket 178: capture pre-apply gateway state for verification + revert."""
     connections = _fetch_existing_connections(base_url, auth_headers, timeout)
+    nodes = _fetch_existing_nodes(base_url, auth_headers, timeout)
     combos = fetch_combos(base_url, auth_headers, timeout)
     models: dict[str, list[dict[str, Any]]] = {}
     for conn in connections:
         provider = conn.get("provider")
         if provider:
             models[provider] = fetch_existing_models(base_url, provider, auth_headers, timeout)
-    return {"connections": connections, "combos": combos, "models": models}
+    return {"connections": connections, "nodes": nodes, "combos": combos, "models": models}
 
 
 def revert_payload(
@@ -1002,7 +1111,21 @@ def revert_payload(
                 except Exception as e:
                     revert_summary["errors"].append({"id": cid, "error": str(e)})
 
-    # 3. Restore providerSpecificData patches by comparing snapshots
+    # 3. Delete provider nodes created by this apply (also drops their connections)
+    snap_node_ids = {n.get("id") for n in snapshot_before.get("nodes", [])}
+    for node in summary.get("import", {}).get("created_nodes", []):
+        nid = node.get("id")
+        if not nid or nid in snap_node_ids:
+            continue
+        del_url = f"{base}{PROVIDER_NODES_PATH}/{nid}"
+        try:
+            resp = httpx.delete(del_url, headers=headers, timeout=timeout)
+            if resp.status_code in (200, 201, 204):
+                revert_summary["reverted"].append({"id": nid, "provider": node.get("prefix"), "action": "delete_node"})
+        except Exception as e:
+            revert_summary["errors"].append({"id": nid, "error": str(e)})
+
+    # 4. Restore providerSpecificData patches by comparing snapshots
     snap_conns = {c.get("id"): c for c in snapshot_before.get("connections", [])}
     current_conns = _fetch_existing_connections(base_url, auth_headers, timeout)
     for conn in current_conns:
@@ -1020,7 +1143,7 @@ def revert_payload(
                 except Exception as e:
                     revert_summary["errors"].append({"id": cid, "error": str(e)})
 
-    # 4. Delete newly created models + restore GC'd models
+    # 5. Delete newly created models + restore GC'd models
     snap_models = snapshot_before.get("models", {})
     curr_models: dict[str, list[dict[str, Any]]] = {}
     for conn in _fetch_existing_connections(base_url, auth_headers, timeout):
@@ -1055,7 +1178,7 @@ def revert_payload(
                 except Exception as e:
                     revert_summary["errors"].append({"provider": provider, "modelId": mid, "error": str(e)})
 
-    # 5. Delete newly created combos
+    # 6. Delete newly created combos
     snap_combo_names = {c.get("name") for c in snapshot_before.get("combos", [])}
     try:
         current_combos = fetch_combos(base_url, auth_headers, timeout)
@@ -1074,7 +1197,7 @@ def revert_payload(
     except Exception as e:
         revert_summary["errors"].append({"scope": "combos", "error": str(e)})
 
-    # 5a. Restore snapshot combos that were overwritten or deleted by apply
+    # 6a. Restore snapshot combos that were overwritten or deleted by apply
     for combo in snapshot_before.get("combos", []):
         post_url = f"{base}/api/combos"
         try:
@@ -1102,6 +1225,10 @@ def verify_gateway_unchanged(
     curr_conns = sorted(current.get("connections", []), key=lambda c: c.get("id", ""))
     connections_match = snap_conns == curr_conns
 
+    snap_nodes = sorted(snapshot.get("nodes", []), key=lambda n: n.get("id", ""))
+    curr_nodes = sorted(current.get("nodes", []), key=lambda n: n.get("id", ""))
+    nodes_match = snap_nodes == curr_nodes
+
     snap_combos = sorted(snapshot.get("combos", []), key=lambda c: c.get("name", ""))
     curr_combos = sorted(current.get("combos", []), key=lambda c: c.get("name", ""))
     combos_match = snap_combos == curr_combos
@@ -1116,14 +1243,16 @@ def verify_gateway_unchanged(
             models_match = False
             model_diff[provider] = {"before": snap_list, "after": curr_list}
 
-    unchanged = connections_match and combos_match and models_match
+    unchanged = connections_match and combos_match and models_match and nodes_match
     return {
         "unchanged": unchanged,
         "connections_match": connections_match,
         "combos_match": combos_match,
         "models_match": models_match,
+        "nodes_match": nodes_match,
         "diff": {
             "connections": {"before": snap_conns, "after": curr_conns} if not connections_match else None,
+            "nodes": {"before": snap_nodes, "after": curr_nodes} if not nodes_match else None,
             "combos": {"before": snap_combos, "after": curr_combos} if not combos_match else None,
             "models": model_diff if not models_match else None,
         },

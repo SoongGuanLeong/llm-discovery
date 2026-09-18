@@ -555,7 +555,15 @@ class TestE2EFullApply:
         summary = mod.apply_payload(payload, base_url="http://x", auth_headers=None, resolve_env=env)
 
         assert summary["retire"]["count"] == 5
-        assert len([r for r in summary["import"]["response"]["results"] if "status" in r]) >= 2
+        import_results = summary["import"]["response"]["results"]
+        resolved = [r for r in import_results if not r.get("skipped")]
+        assert resolved, "expected at least one provider with a resolved key"
+        assert [r for r in resolved if "error" in r] == []
+        for r in resolved:
+            mapped = str(r["mapped"])
+            # `{name}-custom` is a node prefix, never a provider id.
+            assert not mapped.endswith("-custom-custom")
+            assert mapped in mod._STANDARD_PROVIDER_IDS or mapped.startswith("openai-compatible-")
         assert summary["psd_patches"]["count"] > 0
         assert summary["models"]["sent"] > 0
         assert len(summary["combos"]["upserted"]) >= 1
@@ -640,6 +648,83 @@ class TestE2EFullApply:
         assert dumped.count("env:") >= 10
 
 
+class TestProviderNodeApply:
+    """Custom providers apply as OpenAI-compatible nodes; `{name}-custom` is a prefix, never a provider id."""
+
+    def _wire(self, monkeypatch: pytest.MonkeyPatch, gateway: "_MockGateway") -> None:
+        def fake_request(method: str, url: str, **kwargs: Any) -> _FakeResponse:
+            return _mock_request(gateway, method, url, kwargs.get("json"), kwargs.get("headers"))
+
+        monkeypatch.setattr("httpx.post", lambda *a, **k: fake_request("POST", a[0], **k))
+        monkeypatch.setattr("httpx.put", lambda *a, **k: fake_request("PUT", a[0], **k))
+        monkeypatch.setattr("httpx.get", lambda *a, **k: fake_request("GET", a[0], **k))
+        monkeypatch.setattr("httpx.delete", lambda *a, **k: fake_request("DELETE", a[0], **k))
+
+    def test_mapping_is_idempotent(self) -> None:
+        # Already-resolved ids must pass through — this is the `-custom-custom` regression guard.
+        assert mod._map_provider_for_model("groq-custom") == "groq-custom"
+        assert mod._map_provider_for_model("cloudflare-ai") == "cloudflare-ai"
+        assert mod._map_provider_for_model("openai-compatible-chat-abc") == "openai-compatible-chat-abc"
+        assert mod._resolve_provider_id("groq-custom") == "groq-custom"
+        # Raw yaml names still resolve to the custom node prefix.
+        assert mod._map_provider_for_model("groq") == "groq-custom"
+        assert mod._resolve_provider_id("cloudflare") == "cloudflare-ai"
+
+    def test_custom_row_creates_node_then_connection(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        gateway = _MockGateway()
+        self._wire(monkeypatch, gateway)
+        rows = [{"provider": "groq-custom", "name": "groq", "apiKey": "sk-groq", "baseUrl": "https://api.groq.com/openai/v1"}]
+
+        res = mod.apply_import_entries("http://x", rows)
+
+        assert res["created_nodes"] == [{"id": gateway.nodes[0]["id"], "name": "groq", "prefix": "groq-custom"}]
+        node = gateway.nodes[0]
+        assert node["prefix"] == "groq-custom"
+        assert node["baseUrl"] == "https://api.groq.com/openai/v1"
+        assert node["id"].startswith("openai-compatible-chat-")
+        created = [c for c in gateway.connections if c.get("provider") == node["id"]]
+        assert len(created) == 1
+        assert created[0]["name"] == "groq"
+        assert all("-custom-custom" not in json.dumps(c) for c in gateway.connections)
+
+    def test_standard_provider_keeps_registry_id(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        gateway = _MockGateway()
+        self._wire(monkeypatch, gateway)
+        rows = [{"provider": "cloudflare-ai", "name": "cloudflare", "apiKey": "cf-key"}]
+
+        res = mod.apply_import_entries("http://x", rows)
+
+        assert res["created_nodes"] == []
+        assert gateway.nodes == []
+        assert any(c.get("provider") == "cloudflare-ai" for c in gateway.connections)
+        assert not any(c.get("provider") == "cloudflare-ai-custom" for c in gateway.connections)
+
+    def test_reapply_is_noop(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        gateway = _MockGateway()
+        self._wire(monkeypatch, gateway)
+        rows = [{"provider": "groq-custom", "name": "groq", "apiKey": "sk-groq", "baseUrl": "https://api.groq.com/openai/v1"}]
+
+        mod.apply_import_entries("http://x", rows)
+        first = mod.snapshot_gateway_state("http://x")
+        res2 = mod.apply_import_entries("http://x", rows)
+        second = mod.snapshot_gateway_state("http://x")
+
+        assert res2["created_nodes"] == []
+        assert first == second
+
+    def test_node_refresh_propagates_base_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        gateway = _MockGateway()
+        self._wire(monkeypatch, gateway)
+        mod.apply_import_entries("http://x", [{"provider": "groq-custom", "name": "groq", "apiKey": "sk-groq", "baseUrl": "https://old.example.com/v1"}])
+
+        res = mod.apply_import_entries("http://x", [{"provider": "groq-custom", "name": "groq", "apiKey": "sk-groq", "baseUrl": "https://new.example.com/v1"}])
+
+        assert res["created_nodes"] == []
+        assert gateway.nodes[0]["baseUrl"] == "https://new.example.com/v1"
+        node_conns = [c for c in gateway.connections if c.get("provider") == gateway.nodes[0]["id"]]
+        assert node_conns[0]["providerSpecificData"]["baseUrl"] == "https://new.example.com/v1"
+
+
 class _MockGateway:
     """In-memory mock OmniRoute gateway for E2E tests."""
 
@@ -665,11 +750,57 @@ class _MockGateway:
         self.combos: list[dict[str, Any]] = [
             {"id": "cb1", "name": "flash", "models": [{"provider": "groq", "model": "old-flash"}], "strategy": "reset-aware"},
         ]
+        # OpenAI-compatible provider nodes (custom API Key Compatible providers).
+        # A node's id is the connection provider id; its prefix carries `{name}-custom`.
+        self.nodes: list[dict[str, Any]] = []
         self._next_id = 10
 
     def _next(self, prefix: str) -> str:
         self._next_id += 1
         return f"{prefix}{self._next_id}"
+
+    def get_nodes(self) -> list[dict[str, Any]]:
+        return list(self.nodes)
+
+    def create_node(self, body: dict[str, Any]) -> dict[str, Any]:
+        prefix = body.get("prefix")
+        name = body.get("name", "")
+        existing = [n for n in self.nodes if n.get("name") == name or n.get("prefix") == prefix]
+        if existing:
+            return {"node": existing[0]}
+        node = {
+            "id": f"openai-compatible-chat-{self._next('n')}",
+            "name": name,
+            "prefix": prefix,
+            "apiType": body.get("apiType", "chat"),
+            "baseUrl": body.get("baseUrl", ""),
+            "type": "openai-compatible",
+        }
+        self.nodes.append(node)
+        return {"node": node}
+
+    def update_node(self, nid: str, body: dict[str, Any]) -> dict[str, Any]:
+        for node in self.nodes:
+            if node.get("id") == nid:
+                node.update({k: v for k, v in body.items() if v is not None})
+                # Mirrors OmniRoute: a node PUT propagates psd into its connections.
+                for conn in self.connections:
+                    if conn.get("provider") == nid:
+                        psd = dict(conn.get("providerSpecificData") or {})
+                        psd.update({
+                            "prefix": node.get("prefix"),
+                            "apiType": node.get("apiType"),
+                            "baseUrl": node.get("baseUrl"),
+                            "nodeName": node.get("name"),
+                        })
+                        conn["providerSpecificData"] = psd
+                return {"node": node}
+        return {}
+
+    def delete_node(self, nid: str) -> bool:
+        self.connections = [c for c in self.connections if c.get("provider") != nid]
+        self.nodes = [n for n in self.nodes if n.get("id") != nid]
+        return True
 
     def get_connections(self) -> list[dict[str, Any]]:
         return list(self.connections)
@@ -767,12 +898,16 @@ def _mock_request(gateway: _MockGateway, method: str, url: str, json: Any = None
     if method == "GET":
         if url.endswith("/api/providers"):
             return _FakeResponse({"connections": gateway.get_connections()})
+        if url.endswith("/api/provider-nodes"):
+            return _FakeResponse({"nodes": gateway.get_nodes()})
         if "/api/provider-models?provider=" in url:
             provider = url.split("provider=")[-1]
             return _FakeResponse({"models": gateway.get_models(provider)})
         if url.endswith("/api/combos"):
             return _FakeResponse({"combos": gateway.get_combos()})
     if method == "POST":
+        if url.endswith("/api/provider-nodes"):
+            return _FakeResponse(gateway.create_node(json), status_code=201)
         if url.endswith("/api/providers") and json and isinstance(json, dict) and "providers" not in json:
             return _FakeResponse(gateway.create_connection(json))
         if url.endswith("/api/provider-models"):
@@ -780,6 +915,9 @@ def _mock_request(gateway: _MockGateway, method: str, url: str, json: Any = None
         if url.endswith("/api/combos"):
             return _FakeResponse(gateway.create_combo(json))
     if method == "PUT":
+        if "/api/provider-nodes/" in url:
+            nid = url.split("/api/provider-nodes/")[-1]
+            return _FakeResponse(gateway.update_node(nid, json))
         if "/api/providers/" in url:
             cid = url.split("/api/providers/")[-1]
             return _FakeResponse(gateway.update_connection(cid, json))
@@ -787,6 +925,10 @@ def _mock_request(gateway: _MockGateway, method: str, url: str, json: Any = None
             cid = url.split("/api/combos/")[-1]
             return _FakeResponse(gateway.update_combo(cid, json))
     if method == "DELETE":
+        if "/api/provider-nodes/" in url:
+            nid = url.split("/api/provider-nodes/")[-1]
+            gateway.delete_node(nid)
+            return _FakeResponse({}, status_code=204)
         if "/api/providers/" in url and "/api/provider-models" not in url:
             cid = url.split("/api/providers/")[-1]
             gateway.delete_connection(cid)

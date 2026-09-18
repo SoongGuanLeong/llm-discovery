@@ -30,6 +30,20 @@ _Avoid_: console filter, pricing probe
 A provider whose discovery strategy yields one synthetic `auto:free` record instead of per-model discovery, because its catalogue is a routing endpoint rather than a model list. Its record is always decision keep, tier flash.
 _Avoid_: auto provider, free router
 
+### Interfaces
+
+**Golden Path**:
+The end-to-end sequence a new user must complete: configure the OmniRoute key, discover a provider, build the store, export, apply to the gateway. Every interface is judged by whether it can walk this path from a fresh clone.
+_Avoid_: happy path, main flow, quickstart
+
+**Configured Provider**:
+A provider entry in `config/providers.yaml` — a name, base URL, and secret env var this repo holds a key for. The set discovery and export iterate over.
+_Avoid_: provider, local provider
+
+**Catalog Provider**:
+A provider entry in the models.dev catalog snapshot, queried offline for model metadata. May never be a Configured Provider.
+_Avoid_: provider, upstream provider
+
 ### Source of Truth
 
 **Source of Truth**:

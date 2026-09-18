@@ -37,7 +37,7 @@ The regenerable SQLite file `data/derived/cache.db` rebuilt at build_all tail fr
 _Avoid_: cache, model cache, store DB
 
 **Accurate-Enough Gate**:
-Predicate that decides whether a keep record may become a Keeper. Requires: evidence_level == strong, coding_score != null, pricing present or free-marker exception, aa_model_id present or qualifying supplement (SWE/Terminal >=50) with URL, benchmark_coverage >=0.25, at least one http URL in evidence, and no hallucinated or UUID model_id.
+Predicate that decides whether a keep record may become a Keeper. Requires: evidence_level in {strong, moderate} with moderate needing an AA match plus pricing plus benchmark_coverage >=0.25, coding_score != null, pricing present or free-marker exception, strong allowing an AA match or a qualifying supplement (SWE/Terminal >=50) with URL, benchmark_coverage >=0.25, an http URL in evidence or an AA match, and no hallucinated or UUID model_id.
 _Avoid_: eligibility gate, cache gate
 
 **Record TTL**:

@@ -114,7 +114,7 @@ class SingleModelWriter:
 
 
 # Per-provider result schema (keep/uncertain/drop/error lists, idempotent overwrite).
-# Issue #220: keep filtered by is_accurate_enough; failing -> uncertain distinct from drop.
+# Issue #247: keep filtered by is_accurate_enough; failing -> uncertain with rewrite+reason.
 PROVIDER_SCHEMA_KEYS = [
     "provider",
     "evaluated_at",
@@ -159,7 +159,8 @@ class ProviderBatchWriter:
             projected["stage"] = rec["stage"]
         # Observability: weak/none evidence_status/reason/recovery_attempts (issue #234)
         # and error error_category/retry_count — additive, backfill/cache compat.
-        for _k in ("evidence_status", "evidence_reason", "recovery_attempts", "error_category", "retry_count"):
+        # Gate demotion reason (issue #247) — set by write(), passthrough here.
+        for _k in ("evidence_status", "evidence_reason", "recovery_attempts", "error_category", "retry_count", "gate_reason"):
             if _k in rec and rec[_k] is not None:
                 projected[_k] = rec[_k]
         return projected
@@ -202,7 +203,8 @@ class ProviderBatchWriter:
             if "free-model-rule" not in evidence_str:
                 drop_llm.append(projected)
 
-        # Issue #220: gate keep list pre-write; failing -> uncertain bucket
+        # Issue #247: gate keep list pre-write; failing -> uncertain bucket with
+        # decision rewritten to uncertain and gate_reason stored (was discarded).
         from .gate import is_accurate_enough
 
         keep: list[dict[str, Any]] = []
@@ -212,10 +214,13 @@ class ProviderBatchWriter:
             uncertain.append(self._to_record(r))
         for r in result.get("keep", []):
             projected = self._to_record(r)
-            ok, _ = is_accurate_enough(projected)
+            ok, reason = is_accurate_enough(projected)
             if ok:
+                projected.pop("gate_reason", None)
                 keep.append(projected)
             else:
+                projected["decision"] = "uncertain"
+                projected["gate_reason"] = reason
                 uncertain.append(projected)
 
         payload = {

@@ -1,17 +1,18 @@
-"""Accurate-Enough Gate — ADR 0006 §3 Keeper eligibility (issue #220: strong-only).
+"""Accurate-Enough Gate — ADR 0006 §3 Keeper eligibility (issue #247: moderate with guards).
 
 All 7 floors must pass for Keeper; fail => uncertain/candidate (re-evaluated every build).
 Router keeps tagged separately per ADR 0006 (always keep but not coding Keeper).
-Keeper gate is strong-only; should_cache remains strong+moderate for drop cache.
-Strong via is_accurate_enough; weak/moderate never Keeper (uncertain).
+Keeper gate is strong plus guarded-moderate; weak/none never Keeper (uncertain).
+Strong via is_accurate_enough; moderate needs AA match plus pricing plus coverage.
 
-Floors (issue #220):
-- evidence_level == strong
+Floors (issue #247):
+- evidence_level in {strong, moderate}
 - coding_score != null
 - pricing present OR free-marker (:free/-free/_free//free or blended==0)
-- aa_model_id present OR supplement bench >=50 with http URL
+- strong: aa_model_id present OR supplement bench >=50 with http URL;
+  moderate: aa_model_id present required (no supplement fallback)
 - benchmark_coverage >=0.25 (KEY_SIGNALS: aa_intelligence, swe_bench_verified, livecodebench, humaneval)
-- evidence contains http URL
+- evidence contains http URL OR aa_model_id present (AA-backed waiver)
 - not UUID-shaped model_id and not hallucinated denylist (tokenmix.ai, callsphere.ai, benchlm)
 
 Gate operates on provider keep record dicts (YAML or pipeline evaluation) before
@@ -29,8 +30,8 @@ _UUID_RE = re.compile(r"^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-
 _UUID_HEX32_RE = re.compile(r"^[0-9a-f]{32}$", re.IGNORECASE)
 
 CACHEABLE_LEVELS = {"strong", "moderate"}
-# Keeper gate is strong-only (issue #220): weak/moderate never Keeper; uncertain bucket.
-KEEPER_LEVELS = {"strong"}
+# Keeper gate is strong plus guarded-moderate (issue #247): weak/none never Keeper.
+KEEPER_LEVELS = {"strong", "moderate"}
 
 SUPPLEMENT_50_KEYS = ("swe_bench_verified", "terminal_bench", "terminal_bench_2_1", "swe_bench_pro")
 
@@ -108,9 +109,11 @@ def is_accurate_enough(record: dict[str, Any]) -> tuple[bool, str]:
         except Exception:
             pricing_blended = pricing
 
-    # Floor 1: evidence_level == strong (Keeper gate, issue #220)
-    if _normalize_evidence_level(evidence_level) not in KEEPER_LEVELS:
+    # Floor 1: evidence_level in {strong, moderate} (Keeper gate, issue #247)
+    lvl = _normalize_evidence_level(evidence_level)
+    if lvl not in KEEPER_LEVELS:
         return False, f"evidence_level={evidence_level} not in {sorted(KEEPER_LEVELS)}"
+    is_moderate = lvl == "moderate"
     # Floor 2: coding_score != null
     if coding_score is None:
         return False, "coding_score is null"
@@ -132,7 +135,8 @@ def is_accurate_enough(record: dict[str, Any]) -> tuple[bool, str]:
     is_free = _is_free_model_id(model_id) or (pricing_blended == 0)
     if not has_pricing and not is_free:
         return False, "pricing missing and not free"
-    # Floor 4: aa_model_id or supplement >=50 with http URL
+    # Floor 4: strong allows aa_model_id or supplement >=50 with http URL;
+    # moderate requires aa_model_id (AA guard, no supplement fallback).
     has_aa = bool(aa_model_id)
     has_supp_50 = False
     scores_for_coverage: dict[str, Any] = {}
@@ -157,7 +161,10 @@ def is_accurate_enough(record: dict[str, Any]) -> tuple[bool, str]:
                 except Exception:
                     continue
     has_url = any("http" in str(e).lower() for e in (evidence or []))
-    if not has_aa and not (has_supp_50 and has_url):
+    if is_moderate:
+        if not has_aa:
+            return False, "aa_model_id missing (moderate needs AA match)"
+    elif not has_aa and not (has_supp_50 and has_url):
         return False, "aa_model_id missing and no supplement >=50 with URL"
     # Floor 5: benchmark_coverage >=0.25
     if benchmark_coverage is None and isinstance(benchmarks, dict):
@@ -171,8 +178,9 @@ def is_accurate_enough(record: dict[str, Any]) -> tuple[bool, str]:
         bc = None
     if bc is None or bc < 0.25:
         return False, f"benchmark_coverage {benchmark_coverage} < 0.25"
-    # Floor 6: evidence contains http URL
-    if not has_url:
+    # Floor 6: evidence contains http URL, waived when aa_model_id present
+    # (AA-backed waiver, issue #247 — general rule, no per-model branch).
+    if not has_url and not has_aa:
         return False, "evidence lacks http URL"
     # Floor 7: not UUID / hallucinated
     if _is_uuid_model_id(model_id):

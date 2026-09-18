@@ -55,10 +55,15 @@ llm_discovery.cli` keeps working, so the module is a drop-in for that wiring.
 | `providers list` | real |
 | `catalog aa search\|filter`, `catalog models show\|providers`, `catalog providers show\|models` | real |
 | `export dry-run` (calls `generate_payload`, writes nothing) | real |
-| `discover`, `build`, `refresh`, `export apply` | surface-only stub — says so on stderr, exits 0, emits the documented `data` shape with zero counts |
+| `export apply` (probes the gateway for real, then stubs the apply) | partly real |
+| `discover`, `build`, `refresh` | surface-only stub — says so on stderr, exits 0, emits the documented `data` shape with zero counts |
 
 Stub commands exiting `0` with `ok: true` is a prototype artefact. #271 must
 never ship a stub that reports success.
+
+`export apply` is deliberately not a pure stub: it probes the gateway and raises
+`pipeline` (exit `4`) when it is unreachable, because that is a locked ADR 0010 #3
+row and a stub that exited `0` against a dead gateway would have hidden it.
 
 ## Captured output
 
@@ -135,7 +140,9 @@ $ echo $?
 ```
 
 Interrupting during secret load names that instead:
-`"message": "interrupted during secret load: infisical export"`.
+`"message": "interrupted during secret load: infisical export"`. So does
+interrupting `export apply` mid-probe:
+`"message": "interrupted during export apply: gateway probe"`.
 
 ### The stdout/stderr invariant
 
@@ -161,10 +168,11 @@ A throwaway sweep (kept out of the repo; #271 writes the permanent
 - every `error` carries `code`, `message` and `hint`
 - a canary secret value set as `OMNIROUTE_API_KEY` appears in no stdout or stderr
 
-Result: **30 cases, 0 failures.** The cases cover success paths, usage errors
+Result: **31 cases, 0 failures.** The cases cover success paths, usage errors
 (unknown provider, missing subcommand, unknown model, bad gateway URL), all four
 prerequisite paths (missing config, missing catalog, missing key, unreachable
-gateway), and `--help` at two levels.
+gateway), the `pipeline` path (unreachable gateway on `export apply`), and
+`--help` at two levels.
 
 Full-suite baseline on this checkout: `666 passed, 8 skipped, 3 failed`. The
 three failures — `test_audit_harness.py::test_fixed_snapshot_fingerprint_uses_fixed_catalogs`
@@ -230,6 +238,34 @@ quietly with no traceback.
     fix is a `default=argparse.SUPPRESS` parent parser on both group and leaf —
     and it is deliberately left undone here so the wart is visible rather than
     silently inherited.
+13. **Only two of the six `catalog` commands have a locked `data` shape.** #268
+    documents `{"count", "models"}` for `catalog aa` and `catalog models`. It says
+    nothing about `catalog models show`, `catalog models providers`,
+    `catalog providers show` or `catalog providers models`. The prototype used
+    `models` for all of them, which put Catalog Provider objects under a `models`
+    key on `catalog models providers`; that one is now `{"count", "providers"}`
+    because the name was actively misleading. `show` still returns a one-element
+    list to keep the family uniform — #271 should lock all six.
+14. **Dotted `command` paths go one level deeper than #268's example.** #268 shows
+    `catalog.aa`; the prototype emits `catalog.aa.search`, `catalog.aa.filter`,
+    `catalog.models.show`, … and no command ever produces `catalog.aa` itself. If
+    agents are expected to match on `command`, the exact depth needs locking.
+
+## Review notes
+
+Two claims from the two-axis review that this directory's evidence contradicts,
+recorded so they are not re-raised:
+
+- **`build --providers` is not a new surface delta.** ADR 0010 #1 drops the
+  hidden positional `providers_pos` (it lives in `build_all.py:708`, absorbing a
+  `kilo_ai --all` invocation) and the `--max-workers` alias. `--providers
+  nargs="*"` already existed on the old `build-all` (`cli.py:80`) and survives
+  unchanged, so it is not an undocumented addition.
+- **`doctor`'s gateway probe is the only place `httpx` availability is decided.**
+  `httpx` missing now raises `prerequisite` (exit 3) from the shared probe, which
+  matches ADR 0010 #3's `httpx unavailable → 3` row for both `doctor` and
+  `export apply`. `doctor` still runs every check and reports rather than
+  failing fast.
 
 ## Verdict
 

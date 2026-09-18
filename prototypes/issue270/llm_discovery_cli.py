@@ -214,12 +214,23 @@ def _build_parser() -> _Parser:
     config = sub.add_parser(
         "config",
         parents=[_COMMON, _CONFIG_PARENT],
-        help="Inspect or change local configuration.",
+        help="Inspect or change local configuration. `set` means present, not valid.",
     )
     config_sub = config.add_subparsers(dest="action", required=True, metavar="<action>")
 
     status = config_sub.add_parser(
-        "status", parents=[_COMMON], help="Show config path, provider count, key presence and gateway URL."
+        "status",
+        parents=[_COMMON],
+        help=(
+            "Show config path, provider count, gateway URL and key presence. "
+            "`set` means the key is present, not that it works — run `doctor` to validate."
+        ),
+        description=(
+            "Show the config path, the provider count, the gateway URL and whether each "
+            "OMNIROUTE_* secret is present.\n\n"
+            "`set` means the key is PRESENT, not that it works. Validity is `doctor`'s job: "
+            "it probes the gateway with the key and reports what the gateway said."
+        ),
     )
     status.set_defaults(handler=_cmd_config_status, command_path="config.status")
 
@@ -694,8 +705,13 @@ def _cmd_export_apply(args: argparse.Namespace) -> Result:
                 "(prefer the environment variable: argv leaks into `ps` and shell history)"
             ),
         )
-    _stub("export apply")
     gateway_url = _gateway_url(args.gateway_url)
+    # Real probe, so the ADR 0010 #3 row "gateway unreachable on `export apply`
+    # -> 4 pipeline" is exercised rather than assumed.
+    reachable, detail, fix = _probe_gateway(gateway_url, "export apply: gateway probe")
+    if not reachable:
+        raise PipelineError(f"gateway not reachable: {detail}", hint=fix)
+    _stub("export apply")
     data = {"gateway_url": gateway_url, "applied": 0, "results": []}
     return Result("export.apply", data, f"export apply: not wired in this prototype (target {gateway_url})")
 
@@ -791,7 +807,10 @@ def _cmd_catalog_models_providers(args: argparse.Namespace) -> Result:
             hint="check the id, or run `llm-discovery refresh` if the catalog is stale",
         )
     lines = [f"{p['id']} | {p['name']} | {p['api']}" for p in providers]
-    return Result("catalog.models.providers", {"count": len(providers), "models": providers}, "\n".join(lines))
+    # `providers`, not `models`: these are Catalog Providers that offer the model.
+    # #268 only locks the `{"count", "models"}` shape for `catalog aa` and
+    # `catalog models`, so this one is free to be named honestly.
+    return Result("catalog.models.providers", {"count": len(providers), "providers": providers}, "\n".join(lines))
 
 
 def _cmd_catalog_providers_show(args: argparse.Namespace) -> Result:
@@ -822,7 +841,6 @@ def _cmd_catalog_providers_models(args: argparse.Namespace) -> Result:
     rows = [{"id": model_id, **model} for model_id, model in models.items()]
     lines = [f"{model_id} | {model['name']}" for model_id, model in models.items()]
     return Result("catalog.providers.models", {"count": len(rows), "models": rows}, "\n".join(lines))
-
 
 # --------------------------------------------------------------------------- #
 # doctor
@@ -930,12 +948,18 @@ def _check_catalogs(data_dir: Path) -> Check:
     )
 
 
-def _check_gateway(url: str) -> Check:
+def _probe_gateway(url: str, unit: str, timeout: float = 5.0) -> tuple[bool, str, str]:
+    """GET <url>/api/combos with the key.
+
+    Returns (reachable, detail, fix). `unit` names the in-flight work so a Ctrl-C
+    envelope can say what was interrupted. A missing httpx is a prerequisite
+    failure, not an internal one (ADR 0010 #3).
+    """
     global _CURRENT_UNIT
     try:
         import httpx
-    except Exception:
-        return Check("gateway", "required", "fail", "httpx is not installed", "run `pip install -e .`")
+    except Exception as exc:
+        raise PrerequisiteError("httpx is not installed", hint="run `pip install -e .`") from exc
 
     probe = f"{url}/api/combos"
     headers = {}
@@ -943,41 +967,44 @@ def _check_gateway(url: str) -> Check:
     if key:
         headers["Authorization"] = f"Bearer {key}"
 
-    _CURRENT_UNIT = "doctor: gateway probe"
+    _CURRENT_UNIT = unit
     try:
-        response = httpx.get(probe, headers=headers, timeout=5.0)
+        response = httpx.get(probe, headers=headers, timeout=timeout)
     except KeyboardInterrupt:
         raise  # leave _CURRENT_UNIT set so the envelope can name what was interrupted
     except Exception as exc:
         _CURRENT_UNIT = ""
         name = type(exc).__name__
         if "Connect" in name or "Connection" in name:
-            detail = f"connection refused at {url}"
-        elif "Timeout" in name:
-            detail = f"timed out after 5s at {url}"
-        else:
-            detail = f"{name}: {exc}"
-        return Check("gateway", "required", "fail", detail, "start the OmniRoute gateway, then re-run `llm-discovery doctor`")
+            return False, f"connection refused at {url}", "start the OmniRoute gateway, then re-run the command"
+        if "Timeout" in name:
+            return False, f"timed out after {timeout:g}s at {url}", "start the OmniRoute gateway, then re-run the command"
+        return False, f"{name}: {exc}", "check that the URL is the OmniRoute gateway and that the gateway is healthy"
     _CURRENT_UNIT = ""
 
     status = response.status_code
     if status == 200:
-        return Check("gateway", "required", "pass", f"HTTP 200 from {probe}", "")
+        return True, f"HTTP 200 from {probe}", ""
     if status in (401, 403):
-        return Check(
-            "gateway",
-            "required",
-            "fail",
+        return (
+            False,
             f"HTTP {status} from {probe} — the gateway rejected the key",
             f"run `llm-discovery config set-key {SUPPORTED_SECRET}` with a valid management key",
         )
-    return Check(
-        "gateway",
-        "required",
-        "fail",
+    return (
+        False,
         f"HTTP {status} from {probe}",
         "check that the URL is the OmniRoute gateway and that the gateway is healthy",
     )
+
+
+def _check_gateway(url: str) -> Check:
+    try:
+        reachable, detail, fix = _probe_gateway(url, "doctor: gateway probe")
+    except PrerequisiteError as exc:
+        # doctor runs every check; no fail-fast.
+        return Check("gateway", "required", "fail", exc.message, exc.hint)
+    return Check("gateway", "required", "pass" if reachable else "fail", detail, fix)
 
 
 _TAGS = {"pass": "[ ok ]", "warn": "[warn]", "fail": "[fail]"}

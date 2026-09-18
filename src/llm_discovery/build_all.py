@@ -119,6 +119,7 @@ def build_all(
     retry_failed: bool = False,
     provider_concurrency: int | None = None,
     judge_timeout: int | None = None,
+    force_judge: bool = False,
 ) -> dict[str, Any]:
     """Build store from providers.yaml in one invocation.
 
@@ -142,6 +143,9 @@ def build_all(
             means use default PROVIDER_CONCURRENCY (2).
         judge_timeout: override judge LLM timeout in seconds for this build.
             When set, overrides config.providers.yaml judge_llm.timeout.
+        force_judge (issue #242): when True, skip Keeper and Candidate reuse for
+            the selected providers, always run fresh LLM judge where pipeline
+            calls for one. Combine with provider_names subset. Default False.
 
     Returns:
         dict with keys: providers_discovered, files_written, backfill stats, store_path, store_size, catalogs
@@ -275,9 +279,10 @@ def build_all(
         def _run_mock_provider(name: str) -> tuple[str, dict[str, list[dict[str, Any]]], Path]:
             result = None
             tried = False
-            # Try signatures in order: (name, config, aa, models_dev, max_workers, store=..., candidate_store=...),
-            # then without store, then (name,)
+            # Try signatures in order: (name, config, aa, models_dev, max_workers, store=..., candidate_store=..., force_judge=...),
+            # then without force_judge/store, then (name,)
             attempts: list[Callable[[], Any]] = [
+                lambda n=name: discover_fn(n, config, aa, models_dev, max_workers, store=store_for_discovery, candidate_store=candidate_store_for_discovery, force_judge=force_judge),
                 lambda n=name: discover_fn(n, config, aa, models_dev, max_workers, store=store_for_discovery, candidate_store=candidate_store_for_discovery),
                 lambda n=name: discover_fn(n, config, aa, models_dev, max_workers, store=store_for_discovery),
                 lambda n=name: discover_fn(n, config, aa, models_dev, max_workers),
@@ -290,7 +295,7 @@ def build_all(
                     break
                 except TypeError as e:
                     msg = str(e)
-                    if "store" in msg or "positional" in msg or "missing" in msg or "unexpected" in msg:
+                    if "store" in msg or "force_judge" in msg or "force" in msg or "positional" in msg or "missing" in msg or "unexpected" in msg:
                         continue
                     raise
             if not tried or result is None:
@@ -367,7 +372,7 @@ def build_all(
         def _run_real_provider(name: str) -> tuple[str, dict[str, list[dict[str, Any]]], Path]:
             print(f"\n=== {name} === (build-all)")
             try:
-                result = discover_provider(name, config, _aa_shared, _md_shared, max_workers=max_workers, store=store_for_discovery, catalog_stale=catalog_stale, candidate_store=candidate_store_for_discovery)
+                result = discover_provider(name, config, _aa_shared, _md_shared, max_workers=max_workers, store=store_for_discovery, catalog_stale=catalog_stale, candidate_store=candidate_store_for_discovery, force_judge=force_judge)
             except Exception as exc:
                 from .pipeline import provider_error_result
                 result = provider_error_result(name, exc)
@@ -704,6 +709,7 @@ def main() -> None:
     parser.add_argument("--workers", "--max-workers", dest="max_workers", type=int, default=4, help="Workers per provider (alias --workers for discover.py parity)")
     parser.add_argument("--catalog-max-age-days", type=int, default=28, help="Refresh catalogs before build when fetched_at is older than this (0 disables, default 28)")
     parser.add_argument("--no-catalog-refresh", action="store_true", help="Skip the catalog freshness gate entirely (offline builds)")
+    parser.add_argument("--force-judge", action="store_true", help="Rebuild selected providers with fresh LLM judge, bypass stored Keeper/Candidate reuse (costs judge budget; combine with --providers)")
     args = parser.parse_args()
     # Parity with discover.py: allow positional provider names like "kilo_ai" or "kilo_ai --all"
     providers = args.providers
@@ -712,7 +718,7 @@ def main() -> None:
         pos = [p for p in args.providers_pos if p != "--all" and not p.startswith("-")]
         if pos:
             providers = pos
-    res = build_all(data_dir=args.data_dir, config_path=args.config, provider_names=providers, max_workers=args.max_workers, catalog_max_age_days=args.catalog_max_age_days, no_catalog_refresh=args.no_catalog_refresh)
+    res = build_all(data_dir=args.data_dir, config_path=args.config, provider_names=providers, max_workers=args.max_workers, catalog_max_age_days=args.catalog_max_age_days, no_catalog_refresh=args.no_catalog_refresh, force_judge=args.force_judge)
     print(json.dumps(res, indent=2))
     print(f"Done: store {res['store_path']} size={res['store_size']} compact {res['compact_bytes']} < pretty {res['pretty_bytes']}")
 

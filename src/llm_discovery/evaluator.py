@@ -86,6 +86,7 @@ class EvaluatorCoordinator:
     store: ModelInfoStore = None
     candidate_store: Any = None  # issue #222: weak/none candidate cache (default None -> no candidate caching)
     catalog_stale: bool = False  # deprecated per-evidence TTL (issue #221) - kept for compat, ignored
+    force_judge: bool = False  # issue #242: bypass stored judge reuse, always run fresh judge
 
     @staticmethod
     def _cached_decision(record: Any | None) -> str | None:
@@ -118,7 +119,7 @@ class EvaluatorCoordinator:
             cache_key = resolve_cache_identity(model_id, resolution) or None
         except Exception:
             cache_key = None
-        if self.store is not None:
+        if self.store is not None and not self.force_judge:
             try:
                 if cache_key:
                     cached = self.store.get(cache_key)
@@ -153,7 +154,8 @@ class EvaluatorCoordinator:
             except Exception:
                 pass
         # Candidate cache reuse (issue #222): weak/none cached with 60-90d TTL, no LLM on hit
-        if self.candidate_store is not None and cache_key:
+        # issue #242: force_judge skips reuse, always runs fresh judge path below
+        if self.candidate_store is not None and cache_key and not self.force_judge:
             try:
                 candidate = self._candidate_cache_lookup(model_id, cache_key, resolution)
             except Exception:

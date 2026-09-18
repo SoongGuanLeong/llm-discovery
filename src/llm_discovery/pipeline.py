@@ -97,6 +97,8 @@ def evaluate_model(
     store: ModelInfoStore | None = None,
     fresh_pricing_obs: list[dict[str, Any]] | None = None,
     catalog_stale: bool = False,
+    candidate_store: Any = None,
+    force_judge: bool = False,
 ) -> dict[str, Any]:
     """Judge one model and apply tiering (thin coordinator + cache seam per #96).
 
@@ -110,6 +112,9 @@ def evaluate_model(
 
     catalog_stale: when True (catalog fetched_at > 28d TTL), cached drop results with
     strong/moderate evidence are reused, but cached keep results are re-evaluated.
+
+    force_judge (issue #242): when True, skip Keeper and Candidate reuse, always
+    run fresh deterministic evidence plus LLM judge where pipeline calls for one.
     """
     coord = EvaluatorCoordinator(
         provider_name=provider_name,
@@ -121,6 +126,8 @@ def evaluate_model(
         cache=cache,
         store=store,
         catalog_stale=catalog_stale,
+        candidate_store=candidate_store,
+        force_judge=force_judge,
     )
     return coord.evaluate(model)
 def _llm_error_record(model_id: str, exc: Exception, coding_score: float = 0.0, benchmarks: dict = None) -> dict[str, Any]:
@@ -303,6 +310,7 @@ def discover_provider(
     store: ModelInfoStore | None = None,
     catalog_stale: bool = False,
     candidate_store: Any = None,
+    force_judge: bool = False,
 ) -> dict[str, list[dict[str, Any]]]:
     """T3 path: evaluate every model for a provider in parallel.
 
@@ -315,6 +323,9 @@ def discover_provider(
     candidate_store (issue #222): optional weak/none Candidate cache (60-90d
     TTL). When provided, weak/none evaluations are cached there and reused on
     identical evidence_hash; results route to the "uncertain" bucket.
+
+    force_judge (issue #242): when True, skip Keeper and Candidate reuse for
+    this provider, always run fresh judge where pipeline calls for one.
     """
     print(f"[{provider_name}] Starting discovery...")
     from .benchmarks import BenchmarkDataCache
@@ -425,6 +436,7 @@ def discover_provider(
         store=store,
         catalog_stale=catalog_stale,
         candidate_store=candidate_store,
+        force_judge=force_judge,
     )
     # issue #220/#222: uncertain bucket for weak/none candidates (gate-failed keeps)
     result: dict[str, list[dict[str, Any]]] = {"keep": [], "drop": [], "uncertain": [], "error": []}

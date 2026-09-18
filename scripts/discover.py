@@ -55,6 +55,11 @@ def parse_args(argv: list[str], config) -> argparse.Namespace:
         default=4,
         help="Max parallel judge calls per provider (default: 4).",
     )
+    parser.add_argument(
+        "--force-judge",
+        action="store_true",
+        help="Rebuild provider with fresh LLM judge, bypass stored Keeper/Candidate reuse (costs judge budget).",
+    )
     args = parser.parse_args(argv)
 
     if args.all_providers:
@@ -108,7 +113,7 @@ def main() -> None:
         return
 
     if args.all:
-        result = discover_provider(args.provider, config, aa, models_dev, max_workers=args.workers)
+        result = discover_provider(args.provider, config, aa, models_dev, max_workers=args.workers, force_judge=args.force_judge)
         result_path = save_provider_result(result, args.provider)
         print(f"Saved: {result_path}")
         print(f"provider:    {args.provider}")

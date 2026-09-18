@@ -84,6 +84,7 @@ def build_parser() -> argparse.ArgumentParser:
     build_parser.add_argument("--retry-failed", action="store_true", help="Only retry providers with errors or empty keep+drop (missing file, error>0, or keep==0 and drop==0); can be combined with --providers to narrow within subset")
     build_parser.add_argument("--provider-concurrency", type=int, default=None, help="Max providers in parallel (default 4; use 1-2 for local judges like LM Studio)")
     build_parser.add_argument("--judge-timeout", type=int, default=None, help="Override judge LLM timeout in seconds (default from providers.yaml, typically 120)")
+    build_parser.add_argument("--force-judge", action="store_true", help="Rebuild selected providers with fresh LLM judge, bypass stored Keeper/Candidate reuse (costs judge budget; combine with --providers)")
 
     return parser
 
@@ -105,6 +106,7 @@ def main() -> None:
                 retry_failed=args.retry_failed,
                 provider_concurrency=args.provider_concurrency,
                 judge_timeout=args.judge_timeout,
+                force_judge=args.force_judge,
             )
             sp = res['store_path']
             sz = res['store_size']

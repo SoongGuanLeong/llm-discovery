@@ -430,7 +430,7 @@
       },
       "_meta": {
         "first_seen": "2026-09-18T07:37:30.964037+00:00",
-        "last_updated": "2026-09-18T08:39:17.402944+00:00",
+        "last_updated": "2026-09-18T10:01:03.538723+00:00",
         "version": 2
       },
       "judge": {
@@ -465,7 +465,7 @@
       },
       "_meta": {
         "first_seen": "2026-09-11T07:54:30.677196+00:00",
-        "last_updated": "2026-09-18T08:39:26.443976+00:00",
+        "last_updated": "2026-09-18T10:03:00.864495+00:00",
         "version": 2
       },
       "judge": {
@@ -6621,7 +6621,7 @@
       },
       "_meta": {
         "first_seen": "2026-09-11T07:54:30.677196+00:00",
-        "last_updated": "2026-09-18T08:40:30.055046+00:00",
+        "last_updated": "2026-09-18T10:03:00.864495+00:00",
         "version": 2
       },
       "judge": {
@@ -17847,20 +17847,20 @@
       },
       "_meta": {
         "first_seen": "2026-09-11T07:54:30.677196+00:00",
-        "last_updated": "2026-09-18T09:16:57.185900+00:00",
+        "last_updated": "2026-09-18T10:03:00.864495+00:00",
         "version": 2
       },
       "judge": {
         "evidence_level": "moderate",
         "evidence": [
-          "No AA score available (matched: false, score: null)",
-          "No coding benchmark scores found in raw_benchmarks",
-          "Evidence level promoted weak→moderate via deterministic signals (aa=None, coding_score=12.3)"
+          "AA intelligence score of 12.3 is below the configured minimum threshold of 24.0",
+          "No direct AA candidate match; benchmark coverage only 0.25 with zero raw benchmarks",
+          "Evidence level promoted none→moderate via deterministic signals (aa=None, coding_score=12.3)"
         ],
-        "confidence": 0.1,
+        "confidence": 0.35,
         "coding": true,
         "decision": "drop",
-        "evidence_hash": "a7c1eeb374a78482"
+        "evidence_hash": "21ac043a027ded51"
       },
       "facts": {
         "aa_row_hash": "71f4bef95045bf3a",
@@ -17914,15 +17914,15 @@
           }
         }
       },
-      "evidence_snapshot_hash": "a7c1eeb374a78482",
+      "evidence_snapshot_hash": "21ac043a027ded51",
       "judgement": {
         "evidence_level": "moderate",
         "decision": "drop",
-        "confidence": 0.1,
+        "confidence": 0.35,
         "evidence": [
-          "No AA score available (matched: false, score: null)",
-          "No coding benchmark scores found in raw_benchmarks",
-          "Evidence level promoted weak→moderate via deterministic signals (aa=None, coding_score=12.3)"
+          "AA intelligence score of 12.3 is below the configured minimum threshold of 24.0",
+          "No direct AA candidate match; benchmark coverage only 0.25 with zero raw benchmarks",
+          "Evidence level promoted none→moderate via deterministic signals (aa=None, coding_score=12.3)"
         ]
       }
     },
@@ -21911,20 +21911,20 @@
       },
       "_meta": {
         "first_seen": "2026-09-17T15:33:52.491341+00:00",
-        "last_updated": "2026-09-18T09:10:20.266632+00:00",
+        "last_updated": "2026-09-18T10:03:45.741352+00:00",
         "version": 2
       },
       "judge": {
         "evidence_level": "moderate",
         "evidence": [
-          "AA intelligence score of 23 is below the configured minimum threshold of 24.0",
-          "No raw benchmarks available (empty array), benchmark coverage only 0.25",
-          "Evidence level promoted none→moderate via deterministic signals (aa=23, coding_score=23.0)"
+          "No direct AA candidate match found (matched: false, score: null)",
+          "AA Intelligence score of 23 is below the minimum threshold of 24.0",
+          "Coding benchmark coverage is only 0.25 with no raw benchmarks available"
         ],
-        "confidence": 0.15,
+        "confidence": 0.2,
         "coding": true,
         "decision": "drop",
-        "evidence_hash": "f5a63318828e8acd"
+        "evidence_hash": "814d4f08fe6e076f"
       },
       "facts": {
         "aa_row_hash": "7ba4bd3a85c7d2f5",
@@ -21978,15 +21978,15 @@
           }
         }
       },
-      "evidence_snapshot_hash": "f5a63318828e8acd",
+      "evidence_snapshot_hash": "814d4f08fe6e076f",
       "judgement": {
         "evidence_level": "moderate",
         "decision": "drop",
-        "confidence": 0.15,
+        "confidence": 0.2,
         "evidence": [
-          "AA intelligence score of 23 is below the configured minimum threshold of 24.0",
-          "No raw benchmarks available (empty array), benchmark coverage only 0.25",
-          "Evidence level promoted none→moderate via deterministic signals (aa=23, coding_score=23.0)"
+          "No direct AA candidate match found (matched: false, score: null)",
+          "AA Intelligence score of 23 is below the minimum threshold of 24.0",
+          "Coding benchmark coverage is only 0.25 with no raw benchmarks available"
         ]
       }
     },
@@ -22104,20 +22104,20 @@
       },
       "_meta": {
         "first_seen": "2026-09-17T15:33:52.491341+00:00",
-        "last_updated": "2026-09-18T09:10:20.266632+00:00",
+        "last_updated": "2026-09-18T10:03:45.741352+00:00",
         "version": 2
       },
       "judge": {
         "evidence_level": "moderate",
         "evidence": [
-          "AA Intelligence score: 25 (meets minimum threshold of 24.0)",
-          "AA Coding score: 57 (strong coding capability)",
-          "Pricing blended $0.00/1M, intelligence per dollar 250.0 influenced tier=drop"
+          "AA coding score of 57 supports strong coding capability",
+          "AA intelligence score of 25 meets the configured minimum threshold of 24.0",
+          "Tier assessment below minimum; forced drop"
         ],
-        "confidence": 0.85,
+        "confidence": 0.75,
         "coding": true,
         "decision": "drop",
-        "evidence_hash": "eb30d27bf4538e0b"
+        "evidence_hash": "5d13c5f6967ed229"
       },
       "facts": {
         "aa_row_hash": "0d70d6c572b95a39",
@@ -22171,15 +22171,15 @@
           }
         }
       },
-      "evidence_snapshot_hash": "eb30d27bf4538e0b",
+      "evidence_snapshot_hash": "5d13c5f6967ed229",
       "judgement": {
         "evidence_level": "moderate",
         "decision": "drop",
-        "confidence": 0.85,
+        "confidence": 0.75,
         "evidence": [
-          "AA Intelligence score: 25 (meets minimum threshold of 24.0)",
-          "AA Coding score: 57 (strong coding capability)",
-          "Pricing blended $0.00/1M, intelligence per dollar 250.0 influenced tier=drop"
+          "AA coding score of 57 supports strong coding capability",
+          "AA intelligence score of 25 meets the configured minimum threshold of 24.0",
+          "Tier assessment below minimum; forced drop"
         ]
       }
     },
@@ -22528,7 +22528,7 @@
       },
       "_meta": {
         "first_seen": "2026-09-11T07:54:30.677196+00:00",
-        "last_updated": "2026-09-18T09:18:15.570630+00:00",
+        "last_updated": "2026-09-18T10:03:00.864495+00:00",
         "version": 2
       },
       "judge": {
@@ -22734,7 +22734,7 @@
       },
       "_meta": {
         "first_seen": "2026-09-11T07:54:30.677196+00:00",
-        "last_updated": "2026-09-18T08:39:26.443976+00:00",
+        "last_updated": "2026-09-18T10:03:00.864495+00:00",
         "version": 2
       },
       "judge": {
@@ -23228,7 +23228,7 @@
       },
       "_meta": {
         "first_seen": "2026-09-11T07:54:30.677196+00:00",
-        "last_updated": "2026-09-18T08:40:30.055046+00:00",
+        "last_updated": "2026-09-18T10:03:00.864495+00:00",
         "version": 2
       },
       "judge": {
@@ -28299,7 +28299,7 @@
       },
       "_meta": {
         "first_seen": "2026-09-11T07:54:30.677196+00:00",
-        "last_updated": "2026-09-18T08:40:30.055046+00:00",
+        "last_updated": "2026-09-18T10:03:00.864495+00:00",
         "version": 2
       },
       "judge": {
@@ -30601,7 +30601,7 @@
       },
       "_meta": {
         "first_seen": "2026-09-11T07:54:30.677196+00:00",
-        "last_updated": "2026-09-18T08:40:30.055046+00:00",
+        "last_updated": "2026-09-18T10:03:00.864495+00:00",
         "version": 2
       },
       "judge": {
@@ -34827,7 +34827,7 @@
       },
       "_meta": {
         "first_seen": "2026-09-11T07:54:30.677196+00:00",
-        "last_updated": "2026-09-18T08:40:30.055046+00:00",
+        "last_updated": "2026-09-18T10:03:00.864495+00:00",
         "version": 2
       },
       "judge": {
@@ -34932,7 +34932,7 @@
       },
       "_meta": {
         "first_seen": "2026-09-11T07:54:30.677196+00:00",
-        "last_updated": "2026-09-18T09:16:57.185900+00:00",
+        "last_updated": "2026-09-18T10:03:00.864495+00:00",
         "version": 2
       },
       "judge": {
@@ -34967,7 +34967,7 @@
       },
       "_meta": {
         "first_seen": "2026-09-11T07:54:30.677196+00:00",
-        "last_updated": "2026-09-18T08:40:30.055046+00:00",
+        "last_updated": "2026-09-18T10:03:00.864495+00:00",
         "version": 2
       },
       "judge": {

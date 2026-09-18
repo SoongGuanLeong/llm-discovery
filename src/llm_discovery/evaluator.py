@@ -911,6 +911,16 @@ class EvaluatorCoordinator:
         # For drop strong, tier is always drop regardless of pricing
         if cached_decision == "drop":
             tier = "drop"
+        # Router override (mirrors PolicyGate.apply): routing meta-models carry no
+        # coding/AA signal by design, so categorize_model would return "uncertain"
+        # on this cache-hit path. Routers are always keep + flash (ADR 0006).
+        if _is_router_model(raw_model_id):
+            cached_decision = "keep"
+            deterministic_coding = True
+            tier = "flash"
+            evidence_level = "strong"
+            if not any("Router model: always keep" in str(e) for e in evidence):
+                evidence = list(evidence) + ["Router model: always keep (routing meta-model)"]
         stale = self._pricing_is_stale(cached)
         return {
             "provider_model_id": raw_model_id,
@@ -1329,7 +1339,12 @@ class EvaluatorCoordinator:
             pass
 
     def _auto_free_record(self, provider_name: str | None = None) -> dict[str, Any]:
-        """Auto-free provider: skip evaluation, return auto:free routing recommendation."""
+        """Auto-free provider: skip evaluation, return auto:free routing recommendation.
+
+        Always decision=keep, tier=flash: an auto-free record is a routing
+        fallback, not a strategic reserve, so it lands in the same band as
+        other router keeps (`policy_gate._is_router_model`).
+        """
         pn = provider_name if provider_name is not None else self.provider_name
         return {
             "provider_model_id": "auto:free",
@@ -1344,7 +1359,7 @@ class EvaluatorCoordinator:
             "benchmarks": {},
             "confidence": 1.0,
             "decision": "keep",
-            "tier": "max",
+            "tier": "flash",
             "evidence_level": "strong",
             "evidence": [f"Provider {pn} uses auto_free discovery strategy"],
             "coding_assessment": None,

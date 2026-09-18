@@ -22,6 +22,14 @@ _Avoid_: confidence, trust level
 Share of KEY_SIGNALS (aa_intelligence, swe_bench_verified, livecodebench, humaneval) present in a record. Used as a floor for the Accurate-Enough Gate.
 _Avoid_: coverage, bench score
 
+**Pricing-Endpoint Filter**:
+Pre-probe free/paid split for pay-per-token gateways that publish a public console pricing endpoint. A model is free when its pricing row carries a free tag or a zero model ratio; a decisive mixed split filters discovery before the live probe, which cannot distinguish free from funded-paid on such gateways. Absent or non-mixed endpoint data falls back to the live probe. No model names are hardcoded.
+_Avoid_: console filter, pricing probe
+
+**Auto-Free Provider**:
+A provider whose discovery strategy yields one synthetic `auto:free` record instead of per-model discovery, because its catalogue is a routing endpoint rather than a model list. Its record is always decision keep, tier flash.
+_Avoid_: auto provider, free router
+
 ### Source of Truth
 
 **Source of Truth**:
@@ -70,5 +78,5 @@ A provider model_id that is a UUID (8-4-4-4-12 hex) rather than a human name. Ne
 _Avoid_: infra id, opaque id
 **Tier**:
 
-Internal categorization token `flash`/`max`/`contributor_free` assigned by `categorize.py`.
+Internal categorization token `flash`/`max`/`contributor_free` assigned by `categorize.py`. Router keeps and Auto-Free Provider records are always `flash`: they are routing fallbacks, never a strategic reserve.
 _Avoid_: category, group type

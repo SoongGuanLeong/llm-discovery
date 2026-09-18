@@ -13,6 +13,7 @@ import os
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime, timedelta
+from urllib.parse import urlparse
 from pathlib import Path
 from typing import Any
 
@@ -252,10 +253,16 @@ def discover_single(
         if dropped_models:
             print(f"[{provider_name}] Free-model filter: dropped {len(dropped_models)} non-free, keeping {len(eval_models)} free")
         elif provider_name in PROBE_FREE_PROVIDERS:
-            # No free via marker/pricing but provider may have free vs paid via live probe (bai, ollama, vyceai, bvg, nvidia)
-            probed_free, probed_paid = _probe_free_models(base_url, api_key, models, provider_name)
-            if probed_paid:
-                eval_models, dropped_models = probed_free, probed_paid
+            # No free via marker/pricing: pay-per-token gateways expose a console
+            # pricing endpoint listing truly-free models (tags/ratio==0); try it
+            # first since the live probe can't tell free from funded-paid there.
+            pricing_split = _split_free_by_pricing_endpoint(base_url, models, provider_name)
+            if pricing_split is not None:
+                eval_models, dropped_models = pricing_split
+            else:
+                probed_free, probed_paid = _probe_free_models(base_url, api_key, models, provider_name)
+                if probed_paid:
+                    eval_models, dropped_models = probed_free, probed_paid
         if dropped_models:
             print(f"[{provider_name}] Free-model filter: dropped {len(dropped_models)} non-free, keeping {len(eval_models)} free")
     # QwenCloud dated dedup: drop dated variant where undated base exists (after free/probe, all discovery branches)
@@ -387,9 +394,14 @@ def discover_provider(
             if dropped_models:
                 print(f"[{provider_name}] Free-model filter: dropped {len(dropped_models)} non-free, keeping {len(eval_models)} free")
             elif provider_name in PROBE_FREE_PROVIDERS:
-                probed_free, probed_paid = _probe_free_models(base_url, api_key, models, provider_name)
-                if probed_paid:
-                    eval_models, dropped_models = probed_free, probed_paid
+                pricing_split = _split_free_by_pricing_endpoint(base_url, models, provider_name)
+                if pricing_split is not None:
+                    eval_models, dropped_models = pricing_split
+                else:
+                    probed_free, probed_paid = _probe_free_models(base_url, api_key, models, provider_name)
+                    if probed_paid:
+                        eval_models, dropped_models = probed_free, probed_paid
+                if dropped_models:
                     print(f"[{provider_name}] Probe free filter: dropped {len(dropped_models)} non-free, keeping {len(eval_models)} free")
     except Exception as exc:  # noqa: BLE001 — provider-level failure
         print(f"[{provider_name}] Discovery failed: {exc}")
@@ -828,6 +840,14 @@ def _apply_free_model_rule(
 # deposit/subscription). No hardcoded model names; probe is generic.
 # xkiro dropped per user request — no free filtering (keep all 83).
 PROBE_FREE_PROVIDERS = {"bai", "bestvirtualgoods", "nvidia_nim", "ollama_cloud", "vyceai"}
+
+# Pay-per-token gateways (e.g. bestvirtualgoods) expose a public console pricing
+# endpoint that tags truly-free models (tags=="free" or model_ratio==0). The
+# chat-completions probe cannot distinguish free from funded-paid on such
+# gateways (both return 200), so this endpoint is consulted first. Generic: any
+# host serving the same JSON shape benefits; no model names hardcoded.
+PRICING_ENDPOINT_PATH = "/api/pricing"
+PRICING_ENDPOINT_TIMEOUT = 10.0
 # xkiro explicitly excluded from free filtering
 NO_FREE_FILTER_PROVIDERS = {"xkiro"}
 
@@ -981,6 +1001,78 @@ def _probe_model_is_free_live(base_url: str, api_key: str, model_id: str, timeou
         return None
     except Exception:
         return None
+
+
+def _fetch_pricing_free_ids(base_url: str, timeout: float = PRICING_ENDPOINT_TIMEOUT) -> set[str] | None:
+    """Fetch the console pricing endpoint and return ids of truly-free models.
+
+    Tries the /api/pricing console endpoint on both the API host and the web
+    host (base_url host with the 'api.' prefix stripped). A row is free when
+    its tags contain 'free' or its model_ratio is 0. Returns None when the
+    endpoint is absent or unparsable so callers fall back to the live probe.
+    """
+    try:
+        import httpx
+    except ImportError:
+        return None
+    parsed = urlparse(base_url)
+    if not parsed.hostname:
+        return None
+    hosts = [parsed.hostname]
+    if parsed.hostname.startswith("api."):
+        hosts.append(parsed.hostname[len("api."):])
+    for host in hosts:
+        url = f"{parsed.scheme or 'https'}://{host}{PRICING_ENDPOINT_PATH}"
+        try:
+            resp = httpx.get(url, timeout=timeout)
+            if resp.status_code != 200:
+                continue
+            payload = resp.json()
+        except Exception:
+            continue
+        rows = payload.get("data") if isinstance(payload, dict) else payload
+        if not isinstance(rows, list):
+            continue
+        free_ids: set[str] = set()
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            name = row.get("model_name") or row.get("id") or row.get("model")
+            if not isinstance(name, str) or not name:
+                continue
+            tags = row.get("tags")
+            tags_free = isinstance(tags, str) and "free" in tags.lower()
+            tags_free = tags_free or (isinstance(tags, list) and any(isinstance(t, str) and "free" in t.lower() for t in tags))
+            ratio = row.get("model_ratio")
+            ratio_free = isinstance(ratio, (int, float)) and ratio == 0
+            if tags_free or ratio_free:
+                free_ids.add(name)
+        return free_ids
+    return None
+
+
+def _split_free_by_pricing_endpoint(
+    base_url: str,
+    models: list[dict[str, Any]],
+    provider_name: str = "",
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]] | None:
+    """Split free vs paid using the console pricing endpoint, before live probe.
+
+    Returns (free, paid) when the endpoint yields a decisive split (at least one
+    free and at least one paid model), None otherwise (endpoint missing,
+    unparsable, or non-mixed) so callers fall back to the probe.
+    """
+    free_ids = _fetch_pricing_free_ids(base_url)
+    if free_ids is None:
+        print(f"[{provider_name}] Pricing endpoint unavailable at {PRICING_ENDPOINT_PATH}, falling back to probe")
+        return None
+    free = [m for m in models if str(m.get("id", "")) in free_ids]
+    paid = [m for m in models if str(m.get("id", "")) not in free_ids]
+    if not free or not paid:
+        print(f"[{provider_name}] Pricing endpoint non-mixed (free={len(free)} paid={len(paid)}), no filtering")
+        return None
+    print(f"[{provider_name}] Pricing endpoint filter: {len(free)} free, {len(paid)} paid")
+    return free, paid
 
 
 def _probe_free_models(

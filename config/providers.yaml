@@ -52,10 +52,6 @@ providers:
     base_url: https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1
     secret: CLOUDFLARE_API_KEY
     discovery: cloudflare
-
-  - name: getunikey_ai
-    base_url: https://www.getunikey.ai/v1
-    secret: GETUNIKEY_AI_API_KEY
   
   - name: google
     base_url: https://generativelanguage.googleapis.com/v1beta/openai

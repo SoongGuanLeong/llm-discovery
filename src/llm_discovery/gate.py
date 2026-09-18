@@ -91,6 +91,14 @@ def is_accurate_enough(record: dict[str, Any]) -> tuple[bool, str]:
     """
     d = record if isinstance(record, dict) else {}
     model_id = d.get("model_id") or d.get("provider_model_id") or ""
+    # Router/auto-free early pass (ADR 0006): routing fallbacks are always keep
+    # but never coding Keepers — they carry no coding_score/pricing/AA signal by
+    # design, so the coding-Keeper floors do not apply. `_is_router_model_id`
+    # covers the synthetic `auto:free` (bazaarlink) plus `kilo-auto/free`,
+    # `openrouter/free`, and any `*router*` id. Returns the policy reason so the
+    # caller can tag these separately from coding Keeper passes.
+    if _is_router_model_id(model_id):
+        return True, "router"
     evidence_level = d.get("evidence_level")
     coding_score = d.get("coding_score")
     pricing = d.get("pricing")

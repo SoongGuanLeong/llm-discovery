@@ -748,13 +748,13 @@ def _is_free_model(model: dict[str, Any] | str, provider_name: str | None = None
     navy_ai: marker OR premium is False (identity check) OR pricing == 0.
     llm7: tier==turbo OR marker OR pricing == 0.
     agnes: marker OR -flash suffix OR pricing == 0.
-    xkiro: no free filtering (keep all) per user request.
+    xkiro: access_tier == "free" OR pricing == 0. The earlier keep-all
+    exemption was withdrawn (issue #266): xkiro's free credits are usable only
+    on free-tier models, so paid/premium models must not be evaluated.
     All other providers (bai, bestvirtualgoods, vyceai, nvidia_nim,
     ollama_cloud, etc): marker OR pricing == 0 OR access_tier free — no hardcoded allowlists.
     Missing/None/string premium -> marker/pricing fallback. Str model -> marker-only.
     """
-    if provider_name == "xkiro":
-        return False
     if isinstance(model, dict):
         # kilo: isFree flag is authoritative when a real model descriptor is given
         if model.get("isFree") is True:
@@ -799,14 +799,14 @@ def _split_by_free_rule(
     navy_ai: marker OR premium is False OR pricing == 0.
     llm7: tier==turbo OR marker OR pricing == 0.
     agnes: -flash suffix OR marker OR pricing == 0.
-    xkiro: no filtering per user request (keep all 83).
+    xkiro: access_tier == "free" OR pricing == 0 (free-only; the earlier keep-all
+    exemption was withdrawn in issue #266 — xkiro's free credits are usable only
+    on free-tier models).
     All other providers: marker OR pricing == 0 (generic, no hardcoded names).
     Default provider_name="" => generic marker/pricing, zero regression.
     Dropped models must NOT be sent to LLM nor written to YAML — free filter
     always runs before LLM judgement.
     """
-    if provider_name == "xkiro":
-        return models, []
     # Normalize provider_name for _is_free_model (None vs "" both generic)
     pn = provider_name or None
     if not _has_free_name(models, pn):
@@ -838,7 +838,8 @@ def _apply_free_model_rule(
 # Providers where /models gives no pricing/access_tier signal but live probe
 # via /chat/completions can distinguish free (200/400/429) vs paid (402/403
 # deposit/subscription). No hardcoded model names; probe is generic.
-# xkiro dropped per user request — no free filtering (keep all 83).
+# xkiro not probed: its /models exposes access_tier, so the free-model rule
+# (access_tier == "free", issue #266) filters it without a live probe.
 PROBE_FREE_PROVIDERS = {"bai", "bestvirtualgoods", "nvidia_nim", "ollama_cloud", "vyceai"}
 
 # Pay-per-token gateways (e.g. bestvirtualgoods) expose a public console pricing
@@ -848,8 +849,6 @@ PROBE_FREE_PROVIDERS = {"bai", "bestvirtualgoods", "nvidia_nim", "ollama_cloud",
 # host serving the same JSON shape benefits; no model names hardcoded.
 PRICING_ENDPOINT_PATH = "/api/pricing"
 PRICING_ENDPOINT_TIMEOUT = 10.0
-# xkiro explicitly excluded from free filtering
-NO_FREE_FILTER_PROVIDERS = {"xkiro"}
 
 
 PROBE_CACHE_TTL_DAYS = 7

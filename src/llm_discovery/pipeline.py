@@ -678,7 +678,8 @@ def provider_error_result(name: str, exc: Exception) -> dict[str, list[dict[str,
 _provider_error_result = provider_error_result
 
 
-FREE_MARKERS = (":free", "-free", "_free", "/free")
+# "free/" is the prefix form (apinex: free/claude-opus-4.6); the rest are suffix forms.
+FREE_MARKERS = (":free", "-free", "_free", "/free", "free/")
 
 
 def _is_pricing_free(model: dict[str, Any]) -> bool:
@@ -730,7 +731,8 @@ def _is_access_tier_free(model: dict[str, Any]) -> bool:
 def _is_free_model(model: dict[str, Any] | str, provider_name: str | None = None) -> bool:
     """Return True if model is free (provider-aware, no hardcoded model names).
 
-    Generic: id contains any FREE_MARKERS OR pricing == 0 OR access_tier == free.
+    Generic: id contains any FREE_MARKERS (suffix :free/-free/_free//free or
+    prefix free/) OR pricing == 0 OR access_tier == free.
     navy_ai: marker OR premium is False (identity check) OR pricing == 0.
     llm7: tier==turbo OR marker OR pricing == 0.
     agnes: marker OR -flash suffix OR pricing == 0.

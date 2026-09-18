@@ -1,7 +1,7 @@
 """OmniRoute export generator â tickets 166 + 167 + 168 + 176.
 
 Local-first generator: reads config/providers.yaml + data/results/*.yaml
-and emits OmniRoute import file + 3 tier combos (keep-all, reset-aware).
+and emits OmniRoute import file + 3 tier combos (keep-all, auto strategy).
 Supports --dry-run (local only) and --apply (POST to OmniRoute gateway).
 
 Ticket 176: connection provisioning â custom OpenAI-compatible nodes for
@@ -36,10 +36,11 @@ TIER_MAX = "max"
 TIER_CONTRIBUTOR_FREE = "contributor_free"
 ALL_TIERS = [TIER_FLASH, TIER_MAX, TIER_CONTRIBUTOR_FREE]
 
+# OmniRoute strategy value "auto" is rendered as "Intelligent Auto" in its UI.
 SCAFFOLD_COMBOS = [
-    {"name": "flash", "models": [], "strategy": "reset-aware", "config": {}},
-    {"name": "max", "models": [], "strategy": "reset-aware", "config": {}},
-    {"name": "contributor_free", "models": [], "strategy": "reset-aware", "config": {}},
+    {"name": "flash", "models": [], "strategy": "auto", "config": {}},
+    {"name": "max", "models": [], "strategy": "auto", "config": {}},
+    {"name": "contributor_free", "models": [], "strategy": "auto", "config": {}},
 ]
 
 COMBOS_LIST_PATH = "/api/combos"
@@ -388,7 +389,7 @@ def build_combo_entries(results_dir: Path = DEFAULT_RESULTS_DIR, *, strict_contr
             provider = _map_provider_for_model(str(r["provider"]))
             model_id = str(r["model_id"])
             models.append({"provider": provider, "model": model_id})
-        combos.append({"name": tier, "models": models, "strategy": "reset-aware", "config": {}})
+        combos.append({"name": tier, "models": models, "strategy": "auto", "config": {}})
     combos.sort(key=lambda c: c.get("name", ""))
     return combos
 
@@ -694,6 +695,44 @@ def upsert_combos(base_url: str, combos: list[dict[str, Any]], auth_headers: dic
                 raise RuntimeError(f"POST {url} combo {name} failed {resp.status_code}: {resp.text[:500]}")
             results.append({"name": name, "method": "POST", "url": url, "status": resp.status_code})
     return {"upserted": results, "existing_count": len(existing)}
+
+
+def delete_managed_combos(
+    base_url: str,
+    keep_names: set[str],
+    auth_headers: dict[str, str] | None = None,
+    timeout: float = 15.0,
+) -> dict[str, Any]:
+    """Delete managed tier combos that carry no models.
+
+    Only combos whose name is one of ALL_TIERS are eligible, so combos a user
+    created by hand are never touched. This keeps the gateway aligned with the
+    "show only combos with a non-zero model count" contract: when a tier has
+    zero keeps, the exporter omits its combo and any stale copy on the gateway
+    is removed here.
+    """
+    httpx = _httpx_client()
+    headers: dict[str, str] = {}
+    if auth_headers:
+        headers.update(auth_headers)
+    base = base_url.rstrip("/")
+    deleted: list[dict[str, Any]] = []
+    for combo in fetch_combos(base_url, auth_headers, timeout=timeout):
+        name = combo.get("name")
+        if name not in ALL_TIERS or name in keep_names:
+            continue
+        cid = combo.get("id") or combo.get("_id") or name
+        url = f"{base}/api/combos/{cid}"
+        try:
+            resp = httpx.delete(url, headers=headers, timeout=timeout)
+        except Exception as e:
+            deleted.append({"name": name, "error": str(e)})
+            continue
+        if resp.status_code in (200, 201, 204):
+            deleted.append({"name": name, "method": "DELETE", "url": url, "status": resp.status_code})
+        else:
+            deleted.append({"name": name, "error": f"{resp.status_code}: {resp.text[:300]}"})
+    return {"deleted": deleted, "count": len([d for d in deleted if "status" in d])}
 
 def _fetch_existing_connections(base_url: str, auth_headers: dict[str, str] | None = None, timeout: float = 15.0) -> list[dict[str, Any]]:
     """Fetch all existing connections from the gateway."""
@@ -1038,7 +1077,7 @@ def apply_payload(payload: dict[str, Any], base_url: str = DEFAULT_OMNIROUTE_URL
             gc_results.append(gc_res)
             print(f"gc {provider}: {gc_res['count']} deleted", file=sys.stderr)
         summary["gc"] = {"providers": gc_results, "total_deleted": sum(r["count"] for r in gc_results)}
-    if combos:
+    if combos is not None:
         combos_nonempty = [c for c in combos if c.get("models")]
         if combos_nonempty:
             print(f"upserting {len(combos_nonempty)} combos to {base_url} ...", file=sys.stderr)
@@ -1047,6 +1086,11 @@ def apply_payload(payload: dict[str, Any], base_url: str = DEFAULT_OMNIROUTE_URL
             print(f"combos ok: {len(res2['upserted'])} upserted", file=sys.stderr)
         else:
             summary["combos"] = {"upserted": [], "skipped_empty": True}
+        keep_names = {c["name"] for c in combos_nonempty}
+        gc_res = delete_managed_combos(base_url, keep_names, auth_headers=auth_headers)
+        summary["combos"]["deleted"] = gc_res["deleted"]
+        if gc_res["count"]:
+            print(f"combos gc: {gc_res['count']} empty-tier combo(s) deleted", file=sys.stderr)
     return summary
 
 

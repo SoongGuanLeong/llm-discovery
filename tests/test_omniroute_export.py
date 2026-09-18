@@ -21,7 +21,7 @@ def test_scaffold_payload_shape():
     for c in payload["combos"]:
         assert set(c.keys()) == {"name", "models", "strategy", "config"}
         assert c["models"] == []
-        assert c["strategy"] == "reset-aware"
+        assert c["strategy"] == "auto"
         assert c["config"] == {}
     assert payload["meta"] == {"scaffold": True, "version": 0}
 
@@ -340,6 +340,48 @@ def test_combo_provider_mapping() -> None:
     flash = next(c for c in combos if c["name"] == "flash")
     flash_providers = {m["provider"] for m in flash["models"]}
     assert "cerebras-custom" in flash_providers
+    assert all(c["strategy"] == "auto" for c in combos)
+
+
+def test_apply_deletes_stale_empty_tier_combos(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression: gateway keeps only non-zero-model managed combos.
+
+    Stale max/contributor_free combos left over from a previous apply must be
+    deleted when their tier is now empty, while the populated flash combo is
+    upserted and user-created combos are left untouched.
+    """
+    gateway = _MockGateway()
+    gateway.combos = [
+        {"id": "cb1", "name": "flash", "models": [{"provider": "groq-custom", "model": "old"}], "strategy": "reset-aware"},
+        {"id": "cb2", "name": "max", "models": [{"provider": "groq-custom", "model": "stale"}], "strategy": "reset-aware"},
+        {"id": "cb3", "name": "contributor_free", "models": [{"provider": "dead-custom", "model": "stale"}], "strategy": "reset-aware"},
+        {"id": "cb4", "name": "my-personal-combo", "models": [{"provider": "x", "model": "y"}], "strategy": "priority"},
+    ]
+
+    def fake_request(method: str, url: str, **kwargs: Any) -> _FakeResponse:
+        return _mock_request(gateway, method, url, kwargs.get("json"), kwargs.get("headers"))
+
+    monkeypatch.setattr("httpx.post", lambda *a, **k: fake_request("POST", a[0], **k))
+    monkeypatch.setattr("httpx.put", lambda *a, **k: fake_request("PUT", a[0], **k))
+    monkeypatch.setattr("httpx.get", lambda *a, **k: fake_request("GET", a[0], **k))
+    monkeypatch.setattr("httpx.delete", lambda *a, **k: fake_request("DELETE", a[0], **k))
+
+    payload = {
+        "import": [],
+        "models": [],
+        "gc": {},
+        "combos": [
+            {"name": "flash", "models": [{"provider": "bazaarlink-custom", "model": "auto:free"}], "strategy": "auto", "config": {}},
+        ],
+    }
+    summary = mod.apply_payload(payload, base_url="http://x", auth_headers=None, resolve_env={})
+
+    names = {c["name"] for c in gateway.get_combos()}
+    assert names == {"flash", "my-personal-combo"}
+    assert {d["name"] for d in summary["combos"]["deleted"]} == {"max", "contributor_free"}
+    flash = next(c for c in gateway.get_combos() if c["name"] == "flash")
+    assert flash["strategy"] == "auto"
+    assert len(flash["models"]) == 1
 
 
 def test_dry_run_emits_complete_model_plan() -> None:
@@ -748,7 +790,7 @@ class _MockGateway:
             ],
         }
         self.combos: list[dict[str, Any]] = [
-            {"id": "cb1", "name": "flash", "models": [{"provider": "groq", "model": "old-flash"}], "strategy": "reset-aware"},
+            {"id": "cb1", "name": "flash", "models": [{"provider": "groq", "model": "old-flash"}], "strategy": "auto"},
         ]
         # OpenAI-compatible provider nodes (custom API Key Compatible providers).
         # A node's id is the connection provider id; its prefix carries `{name}-custom`.

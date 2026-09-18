@@ -128,11 +128,11 @@ Summarized from README "OmniRoute export (per-provider model control)" + src/llm
 
 | Mode | Command | Network | Secrets resolved? | Output |
 |------|---------|---------|-------------------|--------|
-| Dry-run (safe) | `.venv/bin/python -m llm_discovery.omniroute_export --dry-run` | None | No — placeholder `apiKey: "env:SECRET"` | `data/derived/omniroute_import.json` ([{provider,name,apiKey:"env:SECRET",baseUrl}]) + `data/derived/omniroute_combos.json` ([{name,models:[{provider,model}],strategy:"reset-aware"}]) |
+| Dry-run (safe) | `.venv/bin/python -m llm_discovery.omniroute_export --dry-run` | None | No — placeholder `apiKey: "env:SECRET"` | `data/derived/omniroute_import.json` ([{provider,name,apiKey:"env:SECRET",baseUrl}]) + `data/derived/omniroute_combos.json` ([{name,models:[{provider,model}],strategy:"auto"}]) |
 | Apply (idempotent POST) | `.venv/bin/python -m llm_discovery.omniroute_export --apply --omniroute-url http://localhost:20128` | Yes — bulk import + GET/POST/PUT /api/combos upsert | Yes — env vars (GROQ_API_KEY etc.) resolved; requires gateway reachable | Same files plus live gateway state; verify via `curl -s http://localhost:20128/api/combos | jq` and `curl -s http://localhost:20128/v1/chat/completions -d '{"model":"flash",...}'` |
 
 - Import: one row per `config/providers.yaml` (22 providers), baseUrl verbatim, apiKey only at apply via resolve_import_secrets().
-- Combos: pure tier partition keep-all (e.g. 100 keeps -> 100 targets), `contributor_special` normalized, strict contributor filter, sorted deterministic; empty tier skipped with warning. Default 3 combos (flash/max/contributor_free) strategy reset-aware.
+- Combos: pure tier partition keep-all (e.g. 100 keeps -> 100 targets), `contributor_special` normalized, strict contributor filter, sorted deterministic; empty tier skipped with warning, and a stale empty-tier combo on the gateway is deleted on apply (managed names only). Default 3 combos (flash/max/contributor_free) strategy `auto` (shown as "Intelligent Auto" in the OmniRoute UI).
 - Auth for --apply: `--api-key` flag or env `OMNIROUTE_API_KEY` (also OMNIROUTE_MANAGE_KEY / OMNIROUTE_TOKEN / OMNIROUTE_AUTH_TOKEN). Falls back to unauthenticated if gateway allows it.
 - Exit code 0 success, non-zero on validation; no secrets logged (redact_rows replaces with "***").
 - Docs seam: issue-159 confirms bulk import is connections-only (no model pin); combos are the model-pin seam. Issue-160 confirms deterministic pin via provider/model or combo.

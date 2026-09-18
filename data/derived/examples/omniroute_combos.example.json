@@ -12,7 +12,7 @@
       }
     ],
     "name": "contributor_free",
-    "strategy": "reset-aware"
+    "strategy": "auto"
   },
   {
     "config": {},
@@ -23,7 +23,7 @@
       }
     ],
     "name": "flash",
-    "strategy": "reset-aware"
+    "strategy": "auto"
   },
   {
     "config": {},
@@ -34,6 +34,6 @@
       }
     ],
     "name": "max",
-    "strategy": "reset-aware"
+    "strategy": "auto"
   }
 ]

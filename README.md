@@ -177,13 +177,13 @@ Programmatic writers: `src/llm_discovery/results.py:ProviderBatchWriter` / `Sing
 
 ### OmniRoute export (per-provider model control)
 
-Single command pins every keep to an OmniRoute tier combo (`flash`/`max`/`contributor_free`, keep-all, reset-aware). Source of truth stays `config/providers.yaml` + `data/results/*.yaml`; secrets never inline.
+Single command pins every keep to an OmniRoute tier combo (`flash`/`max`/`contributor_free`, keep-all, `auto` strategy). Only tiers with at least one keep get a combo; an empty tier's stale gateway combo is deleted on apply. Source of truth stays `config/providers.yaml` + `data/results/*.yaml`; secrets never inline.
 
 ```bash
 # Dry-run — writes files only, no network, placeholder epiKey
 .venv/bin/python -m llm_discovery.omniroute_export --dry-run
 cat data/derived/omniroute_import.json        # [{provider,name,apiKey:"env:SECRET",baseUrl}]
-cat data/derived/omniroute_combos.json        # [{name,models:[{provider,model}],strategy:"reset-aware"}]
+cat data/derived/omniroute_combos.json        # [{name,models:[{provider,model}],strategy:"auto"}]
 # Example fixture committed for shape reference
 cat data/derived/examples/omniroute_combos.example.json
 
@@ -192,7 +192,7 @@ cat data/derived/examples/omniroute_combos.example.json
 # Auth via env OMNIROUTE_API_KEY or --api-key, fallback to unauthenticated local gateway
 .venv/bin/python -m llm_discovery.omniroute_export --apply --omniroute-url http://localhost:20128
 # Verify
-curl -s http://localhost:20128/api/combos | jq    # shows flash/max/contributor_free reset-aware
+curl -s http://localhost:20128/api/combos | jq    # shows only non-empty tier combos, strategy "auto"
 curl -s http://localhost:20128/v1/chat/completions -H "Content-Type: application/json" \
   -d '{"model":"flash","messages":[{"role":"user","content":"hi"}]}' | jq
 ```

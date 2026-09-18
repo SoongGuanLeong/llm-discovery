@@ -95,10 +95,6 @@ providers:
     base_url: https://integrate.api.nvidia.com/v1
     secret: NVIDIA_NIM_API_KEY
 
-  - name: ollama_cloud
-    base_url: https://ollama.com/v1
-    secret: OLLAMA_CLOUD_API_KEY
-
   - name: openrouter
     base_url: https://openrouter.ai/api/v1
     secret: OPENROUTER_API_KEY
@@ -126,10 +122,6 @@ providers:
   - name: tokenharbor
     base_url: https://tokenharbor.ai/v1
     secret: TOKENHARBOR_API_KEY
-
-  - name: tokenrouter
-    base_url: https://api.tokenrouter.com/v1
-    secret: TOKENROUTER_API_KEY
 
   - name: unorouter
     base_url: https://api.unorouter.com/v1

@@ -5,8 +5,12 @@ wired the free/router callers onto it and issue #289 migrated the free-suffix
 strip onto :func:`strip_free_suffix`. ``pipeline``, ``gate``, ``policy_gate``
 and ``search_budget`` no longer answer the free/router question themselves —
 their old private names are thin delegates to this module, and ``FREE_MARKERS``
-is aliased rather than copied. Behaviour was absorbed verbatim from the call
-sites it replaced, so the migration is a move, not a rule change.
+is aliased rather than copied. The free/router predicates were absorbed verbatim
+from the call sites they replaced, so that half of the migration is a move, not
+a rule change. The free-suffix half (#289) is deliberately not a pure move:
+:func:`strip_free_suffix` anchors the strip, so ``evidence_utils.clean_evidence``
+no longer rewrites ids where ``free`` is not a trailing marker (``model-freedom``
+previously became ``modeldom``). ``canonical_key`` output is unchanged.
 
 The free rule is *provider-scoped*: :func:`is_free` takes the provider name as
 an explicit input, so a fix for one provider cannot change another provider's

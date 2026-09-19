@@ -127,6 +127,42 @@ def test_store_adapter_only_counts_kept_records():
     assert store_has_older_kept_sibling("agnes-3.0-flash", store) is False
 
 
+def test_store_adapter_reads_judgement_before_legacy_judge():
+    """Canonical ``judgement`` is read first; ``judge`` and a top-level
+    ``decision`` are fallbacks for older record shapes. Both object and
+    dictionary records are supported."""
+    from types import SimpleNamespace
+
+    from llm_discovery.sibling import store_has_older_kept_sibling
+
+    class _Store:
+        def __init__(self, data):
+            self._data = data
+
+        def _ensure_loaded(self):
+            pass
+
+    # new shape: judgement only, no legacy judge snapshot
+    store = _Store({"agnes-2.5-flash": {"judgement": {"decision": "keep"}}})
+    assert store_has_older_kept_sibling("agnes-3.0-flash", store) is True
+
+    # canonical judgement wins over the legacy judge snapshot
+    store = _Store({"agnes-2.5-flash": {"judgement": {"decision": "drop"}, "judge": {"decision": "keep"}}})
+    assert store_has_older_kept_sibling("agnes-3.0-flash", store) is False
+
+    # legacy judge-only record still counts (older shapes)
+    store = _Store({"agnes-2.5-flash": {"judge": {"decision": "keep"}}})
+    assert store_has_older_kept_sibling("agnes-3.0-flash", store) is True
+
+    # object records go through the same path
+    store = _Store({"agnes-2.5-flash": SimpleNamespace(judgement=SimpleNamespace(decision="keep"))})
+    assert store_has_older_kept_sibling("agnes-3.0-flash", store) is True
+
+    # top-level decision fallback when neither snapshot carries one
+    store = _Store({"agnes-2.5-flash": {"decision": "keep"}})
+    assert store_has_older_kept_sibling("agnes-3.0-flash", store) is True
+
+
 def test_store_adapter_tolerates_missing_store_and_records():
     from llm_discovery.sibling import store_has_older_kept_sibling
 

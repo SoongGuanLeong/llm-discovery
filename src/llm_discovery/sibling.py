@@ -147,13 +147,19 @@ def _keeper_ids_from_store(store: Any | None) -> Iterator[str]:
         if not data:
             return
         for key, rec in list(data.items()):
-            judge = getattr(rec, "judge", None)
-            if judge is None and isinstance(rec, dict):
-                judge = rec.get("judge")
+            # Canonical ``judgement`` first, then the legacy ``judge`` snapshot —
+            # the same precedence ``model_info_store.derive_tier`` uses.
             decision = None
-            if judge is not None:
-                decision = judge.get("decision") if isinstance(judge, dict) else getattr(judge, "decision", None)
-            if decision is None:
+            for field_name in ("judgement", "judge"):
+                snap = getattr(rec, field_name, None)
+                if snap is None and isinstance(rec, dict):
+                    snap = rec.get(field_name)
+                if snap is None:
+                    continue
+                decision = snap.get("decision") if isinstance(snap, dict) else getattr(snap, "decision", None)
+                if decision:
+                    break
+            if not decision:
                 decision = getattr(rec, "decision", None) if not isinstance(rec, dict) else rec.get("decision")
             if decision and str(decision).strip().lower() == "keep":
                 yield key

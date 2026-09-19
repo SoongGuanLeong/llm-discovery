@@ -108,9 +108,45 @@ class EvaluatorCoordinator:
             return str(dec).strip().lower()
         return None
 
+    def _apply_provider_tier_override(self, result: dict[str, Any], model: dict[str, Any]) -> None:
+        """Single home for the llm7 turbo -> flash provider special case (#290).
+
+        llm7 turbo models are free routing entries, so they surface as a keep
+        in the flash tier. Callers on the cache / deterministic / router paths
+        guard the call with ``decision != "drop"`` to leave a drop verdict
+        untouched; the judge path applies it unconditionally, preserving the
+        pre-#290 behaviour of each site exactly.
+        """
+        if self.provider_name == "llm7" and model.get("tier") == "turbo":
+            result["decision"] = "keep"
+            result["tier"] = "flash"
+
+    def _persist(self, model_id: str, resolution: Any, result: dict[str, Any]) -> None:
+        """The single Keeper-store write seam (#290).
+
+        Resolves the canonical cache identity, builds the store record and
+        puts it. A missing store or unresolvable identity is a no-op, and any
+        failure is swallowed: persistence must never change the verdict.
+        """
+        if self.store is None:
+            return
+        try:
+            from .model_info_store import ModelInfoRecord
+            key = resolve_cache_identity(model_id, resolution)
+            if key:
+                rec = ModelInfoRecord.from_provider_record(
+                    result, provider=self.provider_name, evaluated_at=datetime.now(UTC).isoformat()
+                )
+                self.store.put(key, rec)
+        except Exception:
+            pass
+
     def evaluate(self, model: dict[str, Any]) -> dict[str, Any]:
         """Judge one model and apply tiering."""
         model_id = model["id"]
+        # Weak -> moderate recovery attempts are threaded to the LLM path as a
+        # value, never parked on the instance (issue #290).
+        pending_recovery_attempts: list[str] | None = None
         from .model_matching import resolve_model as _resolve
         resolution = _resolve(model_id, self.aa, self.models_dev, self.cache)
         # Canonical cache identity shared by the Keeper and Candidate stores (issue #222)
@@ -144,8 +180,8 @@ class EvaluatorCoordinator:
                             resolution=resolution, cache=self.cache,
                             min_score=self.min_score, max_score=self.max_score,
                         )
-                        if self.provider_name == "llm7" and model.get("tier") == "turbo" and result.get("decision") != "drop":
-                            result["tier"] = "flash"
+                        if result.get("decision") != "drop":
+                            self._apply_provider_tier_override(result, model)
                         # Keeper hit: model evaluates strong -> leave the Candidate store (issue #222)
                         self._reconcile_candidate_store(model_id, cache_key, resolution, result)
                         return result
@@ -199,19 +235,11 @@ class EvaluatorCoordinator:
         if _is_router_model(model_id):
             result = self._deterministic_router_record(model_id, resolution, packet)
             # store drop/keep mirroring post-Judge path
-            if self.store is not None:
-                try:
-                    from .model_info_store import ModelInfoRecord
-                    rec = ModelInfoRecord.from_provider_record(result, provider=self.provider_name, evaluated_at=datetime.now(UTC).isoformat())
-                    key = resolve_cache_identity(model_id, resolution)
-                    if key:
-                        self.store.put(key, rec)
-                except Exception:
-                    pass
+            self._persist(model_id, resolution, result)
             # issue #222: router records are strong -> leave the Candidate store if present
             self._reconcile_candidate_store(model_id, cache_key, resolution, result)
-            if self.provider_name == "llm7" and model.get("tier") == "turbo" and result.get("decision") != "drop":
-                result["tier"] = "flash"
+            if result.get("decision") != "drop":
+                self._apply_provider_tier_override(result, model)
             return result
         # --- Deterministic screening before Judge (spec #219) ---
         # Compute evidence strength via same PolicyGate floors as ADR 0008
@@ -239,26 +267,15 @@ class EvaluatorCoordinator:
                 try:
                     ok, _ = is_accurate_enough(result)
                     if ok:
-                        from .model_info_store import ModelInfoRecord
-                        rec = ModelInfoRecord.from_provider_record(result, provider=self.provider_name, evaluated_at=datetime.now(UTC).isoformat())
-                        key = resolve_cache_identity(model_id, resolution)
-                        if key:
-                            self.store.put(key, rec)
+                        self._persist(model_id, resolution, result)
                 except Exception:
                     pass
             elif self.store is not None and str(result.get("decision", "")).strip().lower() == "drop":
-                try:
-                    from .model_info_store import ModelInfoRecord
-                    rec = ModelInfoRecord.from_provider_record(result, provider=self.provider_name, evaluated_at=datetime.now(UTC).isoformat())
-                    key = resolve_cache_identity(model_id, resolution)
-                    if key:
-                        self.store.put(key, rec)
-                except Exception:
-                    pass
+                self._persist(model_id, resolution, result)
             # issue #222: strong result -> model is (or remains) a Keeper; drop stale candidate entry
             self._reconcile_candidate_store(model_id, cache_key, resolution, result)
-            if self.provider_name == "llm7" and model.get("tier") == "turbo" and result.get("decision") != "drop":
-                result["tier"] = "flash"
+            if result.get("decision") != "drop":
+                self._apply_provider_tier_override(result, model)
             return result
         elif det_level == "weak":
             # Recovery before declaring weak/none (phase 4): cheap deterministic + LLM/web
@@ -377,11 +394,7 @@ class EvaluatorCoordinator:
                     try:
                         ok, _ = is_accurate_enough(result)
                         if ok:
-                            from .model_info_store import ModelInfoRecord
-                            rec = ModelInfoRecord.from_provider_record(result, provider=self.provider_name, evaluated_at=datetime.now(UTC).isoformat())
-                            key = resolve_cache_identity(model_id, rec_resolution)
-                            if key:
-                                self.store.put(key, rec)
+                            self._persist(model_id, rec_resolution, result)
                     except Exception:
                         pass
                 self._reconcile_candidate_store(model_id, cache_key, rec_resolution, result)
@@ -393,9 +406,9 @@ class EvaluatorCoordinator:
                 verified_score = rec_verified
                 coding_score = rec_coding
                 recovery_attempts.append("recovered_to_moderate_via_alias")
-                # fall through to LLM evaluation with updated profile/resolution
-                # store attempts for observability after LLM
-                self._pending_recovery_attempts = recovery_attempts  # type: ignore
+                # fall through to LLM evaluation with updated profile/resolution;
+                # the attempts travel as a local value (issue #290)
+                pending_recovery_attempts = recovery_attempts
             else:
                 # still weak -> try LLM/web recovery only when appropriate
                 # Appropriate when provider claim exists (verifiable) or cheap alias hint exists,
@@ -431,11 +444,7 @@ class EvaluatorCoordinator:
                             try:
                                 ok, _ = is_accurate_enough(llm_res)
                                 if ok:
-                                    from .model_info_store import ModelInfoRecord
-                                    rec = ModelInfoRecord.from_provider_record(llm_res, provider=self.provider_name, evaluated_at=datetime.now(UTC).isoformat())
-                                    key = resolve_cache_identity(model_id, llm_resolution)
-                                    if key:
-                                        self.store.put(key, rec)
+                                    self._persist(model_id, llm_resolution, llm_res)
                             except Exception:
                                 pass
                         self._reconcile_candidate_store(model_id, cache_key, llm_resolution, llm_res)
@@ -465,13 +474,9 @@ class EvaluatorCoordinator:
                 result["evidence_status"] = "uncertain"
                 self._reconcile_candidate_store(model_id, cache_key, rec_resolution, result)
                 return result
-        # moderate/ambiguous -> LLM (with pending recovery attempts from weak->moderate path)
-        pending = getattr(self, "_pending_recovery_attempts", None)
-        if pending:
-            try:
-                delattr(self, "_pending_recovery_attempts")
-            except Exception:
-                pass
+        # moderate/ambiguous -> LLM (with recovery attempts threaded from the
+        # weak->moderate path as a local value, issue #290)
+        pending = pending_recovery_attempts
         if self.evaluator is not None:
             bump_judge_call()  # issue #232: observability (attempted)
         judge = Judge(self.evaluator)
@@ -506,26 +511,13 @@ class EvaluatorCoordinator:
             try:
                 ok, _ = is_accurate_enough(result)
                 if ok:
-                    from .model_info_store import ModelInfoRecord
-                    rec = ModelInfoRecord.from_provider_record(result, provider=self.provider_name, evaluated_at=datetime.now(UTC).isoformat())
-                    key = resolve_cache_identity(model_id, resolution)
-                    if key:
-                        self.store.put(key, rec)
+                    self._persist(model_id, resolution, result)
             except Exception:
                 pass
         elif self.store is not None and _llm_lvl not in ("weak", "none") and str(result.get("decision", "")).strip().lower() == "drop":
-            try:
-                from .model_info_store import ModelInfoRecord
-                rec = ModelInfoRecord.from_provider_record(result, provider=self.provider_name, evaluated_at=datetime.now(UTC).isoformat())
-                key = resolve_cache_identity(model_id, resolution)
-                if key:
-                    self.store.put(key, rec)
-            except Exception:
-                pass
+            self._persist(model_id, resolution, result)
         self._reconcile_candidate_store(model_id, cache_key, resolution, result)
-        if self.provider_name == "llm7" and model.get("tier") == "turbo":
-            result["decision"] = "keep"
-            result["tier"] = "flash"
+        self._apply_provider_tier_override(result, model)
         return result
 
     @staticmethod
@@ -755,9 +747,9 @@ class EvaluatorCoordinator:
         has_sibling = False
         try:
             if verified_score is None and coding_score is None:
-                from .policy_gate import _has_older_kept_sibling
+                from .sibling import store_has_older_kept_sibling
                 # use self.store as sibling source
-                has_sibling = _has_older_kept_sibling(raw_model_id, self.store)
+                has_sibling = store_has_older_kept_sibling(raw_model_id, self.store)
         except Exception:
             has_sibling = False
 
@@ -1085,8 +1077,8 @@ class EvaluatorCoordinator:
         has_sibling = False
         try:
             if verified_score is None and coding_score is None:
-                from .policy_gate import _has_older_kept_sibling
-                has_sibling = _has_older_kept_sibling(model_id, self.store)
+                from .sibling import store_has_older_kept_sibling
+                has_sibling = store_has_older_kept_sibling(model_id, self.store)
         except Exception:
             has_sibling = False
         tier = categorize_model(

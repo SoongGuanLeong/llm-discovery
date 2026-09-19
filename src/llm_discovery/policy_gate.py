@@ -43,16 +43,6 @@ def _aa_score(aa_model: dict[str, Any] | None) -> float | None:
     return aa_model.get("evaluations", {}).get("artificial_analysis_intelligence_index")
 
 
-def _has_older_kept_sibling(model_id: str, store: Any | None) -> bool:
-    """Back-compat delegate to the store adapter in :mod:`llm_discovery.sibling`.
-
-    Issue #291 moved the predicate and the version parser into one module.
-    ``evaluator.py`` still imports this name; ``PolicyGate.apply`` calls the
-    adapter directly.
-    """
-    return store_has_older_kept_sibling(model_id, store)
-
-
 class PolicyGate:
     """Deterministic policy: LLM result + benchmarks + AA → final record."""
 

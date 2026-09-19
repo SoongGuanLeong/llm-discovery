@@ -747,9 +747,9 @@ class EvaluatorCoordinator:
         has_sibling = False
         try:
             if verified_score is None and coding_score is None:
-                from .policy_gate import _has_older_kept_sibling
+                from .sibling import store_has_older_kept_sibling
                 # use self.store as sibling source
-                has_sibling = _has_older_kept_sibling(raw_model_id, self.store)
+                has_sibling = store_has_older_kept_sibling(raw_model_id, self.store)
         except Exception:
             has_sibling = False
 
@@ -1077,8 +1077,8 @@ class EvaluatorCoordinator:
         has_sibling = False
         try:
             if verified_score is None and coding_score is None:
-                from .policy_gate import _has_older_kept_sibling
-                has_sibling = _has_older_kept_sibling(model_id, self.store)
+                from .sibling import store_has_older_kept_sibling
+                has_sibling = store_has_older_kept_sibling(model_id, self.store)
         except Exception:
             has_sibling = False
         tier = categorize_model(

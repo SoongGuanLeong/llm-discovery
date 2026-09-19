@@ -186,18 +186,21 @@ def is_router(model_id: str | None) -> bool:
     Routers delegate to free candidates, carry no coding benchmarks, and are
     always keep/flash. The union of the three pre-consolidation predicates
     (``gate._is_router_model_id``, ``policy_gate._is_router_model``,
-    ``search_budget._is_router``): an exact router id, a ``router`` substring,
-    or ``auto`` and ``free`` together. The id is stripped and lowercased, so
-    whitespace-padded ids match; ``None``/empty is not a router. The three
-    copies agree on every corpus row; the only difference is input handling —
-    ``policy_gate._is_router_model`` would raise on ``None`` — and this function
-    resolves that to ``False``. #288 removes the copies.
+    ``search_budget._is_router``): a ``router`` substring, or ``auto`` and
+    ``free`` together. The id is stripped and lowercased, so whitespace-padded
+    ids match; ``None``/empty is not a router.
+
+    Those copies also carry an explicit allowlist of ``kilo-auto/free`` and
+    ``openrouter/free``. It is dropped here because it is unreachable — the
+    first matches ``auto``+``free`` and the second matches ``router`` — so the
+    union is unchanged (verified over the router corpus and a brute-force id
+    space). The three copies agree on every corpus row; the only difference is
+    input handling — ``policy_gate._is_router_model`` would raise on ``None`` —
+    and this function resolves that to ``False``. #288 removes the copies.
     """
     if not model_id:
         return False
     lower = str(model_id).strip().lower()
-    if lower in ("kilo-auto/free", "openrouter/free"):
-        return True
     if "router" in lower:
         return True
     if "auto" in lower and "free" in lower:

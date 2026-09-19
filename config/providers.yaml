@@ -61,10 +61,6 @@ providers:
     base_url: https://api.groq.com/openai/v1
     secret: GROQ_API_KEY
 
-  - name: kilo_ai
-    base_url: https://api.kilo.ai/api/gateway
-    secret: KILO_AI_API_KEY
-
   - name: llm7
     base_url: https://api.llm7.io/v1
     secret: LLM7_API_KEY

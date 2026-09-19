@@ -824,6 +824,11 @@ def _cmd_refresh(args: argparse.Namespace) -> Result:
 
 
 def _cmd_export_apply(args: argparse.Namespace) -> Result:
+    try:
+        _cfg = _load_config_or_fail(args.providers)
+    except PrerequisiteError:
+        _cfg = None
+    _load_secrets(_cfg.infisical if _cfg else None)
     if not args.api_key and not _gateway_key():
         raise PrerequisiteError(
             "no gateway API key",

@@ -2,21 +2,23 @@
 
 Issue #287 added this module (Phase 2 of #285, the expand step); issue #288
 wired the free/router callers onto it and issue #289 migrated the free-suffix
-strip onto :func:`strip_free_suffix`. ``pipeline``, ``gate``, ``policy_gate``
-and ``search_budget`` no longer answer the free/router question themselves —
-their old private names are thin delegates to this module, and ``FREE_MARKERS``
-is aliased rather than copied. The free/router predicates were absorbed verbatim
-from the call sites they replaced, so that half of the migration is a move, not
-a rule change. The free-suffix half (#289) is deliberately not a pure move:
+strip onto :func:`strip_free_suffix`. Issue #292 then deleted the superseded
+copies: ``pipeline`` calls :func:`split` / :func:`is_free` directly, and the
+router delegates in ``gate``, ``policy_gate`` and ``search_budget`` are gone,
+so ``pipeline``, ``gate``, ``policy_gate`` and ``search_budget`` no longer name
+a free or router predicate of their own. The free/router predicates
+were absorbed verbatim from the call sites they replaced, so that half of the
+migration is a move, not a rule change. The free-suffix half (#289) is
+deliberately not a pure move:
 :func:`strip_free_suffix` anchors the strip, so ``evidence_utils.clean_evidence``
 no longer rewrites ids where ``free`` is not a trailing marker (``model-freedom``
 previously became ``modeldom``). ``canonical_key`` output is unchanged.
 
-The free rule is *provider-scoped*: :func:`is_free` takes the provider name as
+The Free Rule is *provider-scoped*: :func:`is_free` takes the provider name as
 an explicit input, so a fix for one provider cannot change another provider's
 result. This is the seam ADR 0004 §5 anticipated when it deferred a
 ``free_rule: premium_flag`` per-provider toggle; the provider branches,
-absorbed from ``pipeline._is_free_model``, are:
+absorbed from the pipeline's former free predicate, are:
 
   * ``kilo``    — ``isFree is True`` on a real model descriptor is authoritative.
   * ``navy_ai`` — ``premium is False`` (identity check; the string ``"false"``
@@ -32,8 +34,9 @@ in the recognised pricing shapes, or an ``access_tier`` of ``free``.
 
 The Keeper gate's free branch (#288)
 ------------------------------------
-``gate._is_free_model_id`` was one of the nine pre-consolidation free-rule
-copies but used a different, narrower predicate: a case-insensitive regex
+The Keeper gate's old id-only free predicate was one of the nine
+pre-consolidation free-rule copies but used a different, narrower rule: a
+case-insensitive regex
 anchored at the end of the id, ``(?:[:/_-]|^)free$``. It therefore missed the
 apinex ``free/`` prefix, non-terminal markers (``foo-free-bar``), and every
 non-id signal (``isFree``, ``premium``, ``tier``, ``access_tier``, pricing); it
@@ -205,19 +208,19 @@ def is_router(model_id: str | None) -> bool:
 
     Routers delegate to free candidates, carry no coding benchmarks, and are
     always keep/flash. The union of the three pre-consolidation predicates
-    (``gate._is_router_model_id``, ``policy_gate._is_router_model``,
-    ``search_budget._is_router``): a ``router`` substring, or ``auto`` and
-    ``free`` together. The id is stripped and lowercased, so whitespace-padded
-    ids match; ``None``/empty is not a router.
+    (the former gate, policy-gate and search-budget router copies, deleted by
+    #288/#292): a ``router`` substring, or ``auto`` and ``free`` together. The
+    id is stripped and lowercased, so whitespace-padded ids match;
+    ``None``/empty is not a router.
 
     Those copies also carry an explicit allowlist of ``kilo-auto/free`` and
     ``openrouter/free``. It is dropped here because it is unreachable — the
     first matches ``auto``+``free`` and the second matches ``router`` — so the
     union is unchanged (verified over the router corpus and a brute-force id
     space). The three copies agree on every corpus row; the only difference is
-    input handling — ``policy_gate._is_router_model`` would raise on ``None`` —
-    and this function resolves that to ``False``. #288 replaced those copies
-    with delegates to this function.
+    input handling — the old ``policy_gate`` copy would raise on ``None`` —
+    and this function resolves that to ``False``. #292 deleted the delegates,
+    so this is now the only router predicate.
     """
     if not model_id:
         return False

@@ -30,14 +30,6 @@ SPECIALIZED_ID_PATTERNS = (
 _URL_RE = re.compile(r"https?://[^\s\)]+")  # same family as verified_claim guard
 
 
-def _is_router(model_id: str) -> bool:
-    """Router meta-models are force-strong; never part of a weak sample.
-
-    Delegate to :func:`free_rule.is_router` (one router definition, #288).
-    """
-    return free_rule.is_router(model_id)
-
-
 def _is_specialized_id(model_id: str) -> bool:
     lower = model_id.lower()
     return any(p in lower for p in SPECIALIZED_ID_PATTERNS)
@@ -63,7 +55,7 @@ def select_weak_sample(
         level = str(rec.get("evidence_level", "weak")).strip().lower()
         if level not in ("weak", "none"):
             continue
-        if not model_id or _is_router(model_id) or _is_specialized_id(model_id):
+        if not model_id or free_rule.is_router(model_id) or _is_specialized_id(model_id):
             continue
         key = (provider, model_id)
         if key in seen:

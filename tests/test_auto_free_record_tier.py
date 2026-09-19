@@ -4,13 +4,13 @@ bazaarlink has no /models enumeration; `pipeline.discover_provider` /
 `discover_single` short-circuit `discovery_strategy == "bazaarlink"` to a single
 synthetic `auto:free` record. That record used to claim `tier: "max"`, which both
 put a routing fallback in the strategic-reserve band and contradicted the router
-override in `policy_gate` (`_is_router_model` forces flash). It is now flash.
+override in `policy_gate` (the router predicate forces flash). It is now flash.
 
 Seams: EvaluatorCoordinator._auto_free_record (the only definition),
 ProviderBatchWriter.write (issue #247 gate demotion bypass for routers/auto-free).
 """
 from llm_discovery.evaluator import EvaluatorCoordinator
-from llm_discovery.policy_gate import _is_router_model
+from llm_discovery.free_rule import is_router
 
 
 def _auto_free(provider_name="bazaarlink"):
@@ -43,7 +43,7 @@ def test_pipeline_auto_free_record_matches():
 
 def test_auto_free_id_takes_router_band():
     # The synthetic id satisfies the router predicate, so gate and pipeline agree on flash.
-    assert _is_router_model("auto:free") is True
+    assert is_router("auto:free") is True
 
 
 def test_write_keeps_auto_free_record():

@@ -206,12 +206,12 @@ def discover_single(
     elif provider.discovery == "cloudflare":
         account_id = os.environ["CLOUDFLARE_ACCOUNT_ID"]
         models = discover_cloudflare_models(account_id, api_key)
-        eval_models, dropped_models = _split_by_free_rule(models, provider_name)
+        eval_models, dropped_models = free_rule.split(models, provider_name)
         if dropped_models:
             print(f"[{provider_name}] Free-model filter: dropped {len(dropped_models)} non-free, keeping {len(eval_models)} free")
     else:
         models = discover_models(base_url, api_key)
-        eval_models, dropped_models = _split_by_free_rule(models, provider_name)
+        eval_models, dropped_models = free_rule.split(models, provider_name)
         if dropped_models:
             print(f"[{provider_name}] Free-model filter: dropped {len(dropped_models)} non-free, keeping {len(eval_models)} free")
         elif provider_name in PROBE_FREE_PROVIDERS:
@@ -352,14 +352,14 @@ def discover_provider(
             print(f"[{provider_name}] Discovering models via Cloudflare API...")
             models = discover_cloudflare_models(account_id, api_key)
             print(f"[{provider_name}] Discovered {len(models)} models")
-            eval_models, dropped_models = _split_by_free_rule(models, provider_name)
+            eval_models, dropped_models = free_rule.split(models, provider_name)
             if dropped_models:
                 print(f"[{provider_name}] Free-model filter: dropped {len(dropped_models)} non-free, keeping {len(eval_models)} free")
         else:
             print(f"[{provider_name}] Discovering models from {base_url}/models ...")
             models = discover_models(base_url, api_key)
             print(f"[{provider_name}] Discovered {len(models)} models")
-            eval_models, dropped_models = _split_by_free_rule(models, provider_name)
+            eval_models, dropped_models = free_rule.split(models, provider_name)
             if dropped_models:
                 print(f"[{provider_name}] Free-model filter: dropped {len(dropped_models)} non-free, keeping {len(eval_models)} free")
             elif provider_name in PROBE_FREE_PROVIDERS:
@@ -609,67 +609,10 @@ def provider_error_result(name: str, exc: Exception) -> dict[str, list[dict[str,
 _provider_error_result = provider_error_result
 
 
-# The Free Rule lives in ``free_rule`` (one definition). These pipeline names
-# are thin delegates kept for call-site and test compatibility; the decision is
-# no longer answered here (#288). ``FREE_MARKERS`` is aliased, not copied.
-FREE_MARKERS = free_rule.FREE_MARKERS
-
-
-def _is_pricing_free(model: dict[str, Any]) -> bool:
-    """Delegate to :func:`free_rule._is_pricing_free` (Free Rule, #288)."""
-    return free_rule._is_pricing_free(model)
-
-
-def _is_access_tier_free(model: dict[str, Any]) -> bool:
-    """Delegate to :func:`free_rule._is_access_tier_free` (Free Rule, #288)."""
-    return free_rule._is_access_tier_free(model)
-
-
-def _is_free_model(model: dict[str, Any] | str, provider_name: str | None = None) -> bool:
-    """Delegate to :func:`free_rule.is_free` (Free Rule, #288).
-
-    Provider is an explicit input so a fix for one provider cannot change
-    another provider's result.
-    """
-    return free_rule.is_free(model, provider_name)
-
-
-def _has_free_name(models: list[dict[str, Any]], provider_name: str | None = None) -> bool:
-    """Delegate to :func:`free_rule.has_free` (Free Rule, #288)."""
-    return free_rule.has_free(models, provider_name)
-
-
-def _split_by_free_rule(
-    models: list[dict[str, Any]],
-    provider_name: str = "",
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Delegate to :func:`free_rule.split` (Free Rule, #288).
-
-    Dropped models must NOT be sent to LLM nor written to YAML — the free
-    filter always runs before LLM judgement. When nothing is free the whole
-    list is kept and nothing dropped (same list object).
-    """
-    return free_rule.split(models, provider_name)
-
-
-def _apply_free_model_rule(
-    models: list[dict[str, Any]], provider_name: str = ""
-) -> list[dict[str, Any]]:
-    """Legacy mutating helper — now delegates to _split_by_free_rule.
-
-    Mutates dropped models with ``_deterministic_drop`` / ``_drop_reason`` for
-    backward compatibility, but callers should prefer ``_split_by_free_rule``
-    which filters BEFORE LLM evaluation.
-    """
-    free_models, non_free = _split_by_free_rule(models, provider_name)
-    if not non_free:
-        return models
-    reason = f"free-model-rule: all non-free models dropped because {free_models[0]['id'] if free_models else 'a free model'} has a free marker in its id"
-    for m in non_free:
-        m["_deterministic_drop"] = True
-        m["_drop_reason"] = reason
-    return models
-
+# The Free Rule lives in ``free_rule`` (one definition, #292): pipeline calls
+# ``free_rule.split`` / ``free_rule.is_free`` directly. Dropped models must NOT
+# be sent to LLM nor written to YAML — the Free Rule always runs before LLM
+# judgement.
 
 # Providers where /models gives no pricing/access_tier signal but live probe
 # via /chat/completions can distinguish free (200/400/429) vs paid (402/403

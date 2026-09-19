@@ -20,16 +20,6 @@ from .categorize import categorize_model
 from .sibling import store_has_older_kept_sibling
 
 
-def _is_router_model(model_id: str) -> bool:
-    """Delegate to :func:`free_rule.is_router` (one router definition, #288).
-
-    Router models (e.g. kilo-auto/free, openrouter/free) are meta-models that
-    delegate to free candidates; they have no coding benchmarks but must appear
-    in the keep list for routing.
-    """
-    return free_rule.is_router(model_id)
-
-
 def _aa_score(aa_model: dict[str, Any] | None) -> float | None:
     if aa_model is None:
         return None
@@ -237,7 +227,7 @@ class PolicyGate:
             evaluation.setdefault("evidence", []).append(f"Pricing blended ${pricing_blended:.2f}/1M, intelligence per dollar {value:.1f} influenced tier={tier}")
 
         # --- Router override: always keep + flash regardless of coding/tier ---
-        if _is_router_model(model_id):
+        if free_rule.is_router(model_id):
             evaluation["tier"] = "flash"
             evaluation["decision"] = "keep"
             evaluation["coding"] = True

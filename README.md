@@ -228,7 +228,7 @@ llm-discovery discover --help
 ### What happens per run
 
 1. `discover_models(base_url, api_key)` (or Cloudflare/BazaarLink special paths) enumerates `/models`.
-2. Free-model filter (`_split_by_free_rule`) drops non-free models before any LLM cost.
+2. Free Rule (`free_rule.split`) drops non-free models before any LLM cost.
 3. `BenchmarkDataCache` + `ModelResolver` resolve each model against AA/models.dev/benchmarks.
 4. `EvidenceCollector` + `Judge` (via `AGNES_AI_API_KEY` / `agnes-2.0-flash`) + `PolicyGate` judge coding relevance and tier (`max` >=45, `flash` 24–45, `drop` below).
 5. Failures are isolated - one model error goes to the `error` bucket, other models still complete.

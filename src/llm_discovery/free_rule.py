@@ -1,11 +1,12 @@
 """Free rule — one predicate for "is this model free?" and "is this a router?".
 
 Issue #287 added this module (Phase 2 of #285, the expand step); issue #288
-wired the callers onto it. ``pipeline``, ``gate``, ``policy_gate`` and
-``search_budget`` no longer answer the free/router question themselves — their
-old private names are thin delegates to this module, and ``FREE_MARKERS`` is
-aliased rather than copied. Behaviour was absorbed verbatim from the call sites
-it replaced, so the migration is a move, not a rule change.
+wired the free/router callers onto it and issue #289 migrated the free-suffix
+strip onto :func:`strip_free_suffix`. ``pipeline``, ``gate``, ``policy_gate``
+and ``search_budget`` no longer answer the free/router question themselves —
+their old private names are thin delegates to this module, and ``FREE_MARKERS``
+is aliased rather than copied. Behaviour was absorbed verbatim from the call
+sites it replaced, so the migration is a move, not a rule change.
 
 The free rule is *provider-scoped*: :func:`is_free` takes the provider name as
 an explicit input, so a fix for one provider cannot change another provider's
@@ -53,10 +54,26 @@ network I/O, not a predicate, and stays in ``pipeline``.
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 # "free/" is the prefix form (apinex: free/claude-opus-4.6); the rest are suffix forms.
 FREE_MARKERS = (":free", "-free", "_free", "/free", "free/")
+
+
+def strip_free_suffix(text: str) -> str:
+    """Strip one trailing free marker from *text*.
+
+    Removes ``:free``, ``-free``, ``_free`` or ``/free`` at the end of the
+    string, case-insensitively. This is the one home for the free-suffix strip
+    shared by ``evidence_identity.canonical_key``, ``evidence_utils.clean_evidence``,
+    the ``model_matching`` alias lookup and ``evidence_collector`` (issue #289).
+    The strip is anchored: a marker in the middle (``foo-free-bar``) and the
+    ``free/`` prefix form (apinex: ``free/claude-opus-4.6``) are left for the
+    caller to handle.
+    """
+    return re.sub(r"[:/_-]free$", "", text, flags=re.IGNORECASE)
+
 
 # Pricing keys that actually describe a per-token price. Ancillary fields
 # (request, image, web_search) are 0 for many paid models (e.g. kilo), so they

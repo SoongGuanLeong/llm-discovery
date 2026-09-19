@@ -25,6 +25,7 @@ from .gate import _is_router_model_id, is_accurate_enough
 from .model_info_store import ModelInfoStore
 from .categorize import categorize_model
 from .policy_gate import PolicyGate
+from .sibling import batch_has_older_kept_sibling, store_has_older_kept_sibling
 from .secrets import load_all_secrets, load_discovery_secrets, load_shared_secrets  # noqa: keep aliases for patch compat
 from .search_throttle import PROBE_CACHE_DEFAULT_PATH, get_search_accounting, make_cached_search
 
@@ -459,26 +460,6 @@ def discover_provider(
     # --- Sibling heuristic post-pass: promote newer versions without aa_score if older kept exists ---
     # Handles same-batch siblings where older keep not yet in store during gate evaluation
     try:
-        import re
-        from llm_discovery.model_matching import ModelNormalizer
-        from llm_discovery.categorize import categorize_model
-        _num_re = re.compile(r"\d+(?:[\.\-]\d+)+")
-        def _num(v: str) -> str:
-            m = _num_re.search(v or "")
-            return m.group(0) if m else ""
-        def _ver_tuple(v: str):
-            parts = re.split(r"[.\-]", v)
-            out=[]
-            for p in parts:
-                mm=re.match(r"(\d+)", p)
-                if mm:
-                    out.append(int(mm.group(1)))
-            return tuple(out)
-        def _base(mid: str) -> str:
-            norm = ModelNormalizer.normalize(mid)
-            base = _num_re.sub("", norm)
-            base = re.sub(r"-+", "-", base).strip("-")
-            return base
         # Build set of kept bases+versions
         kept = result.get("keep", [])
         # For each keep with uncertain tier and no aa_score/coding_score, check older kept
@@ -494,41 +475,11 @@ def discover_provider(
             if tier not in ("uncertain", "drop"):
                 continue
             mid = evaluation.get("provider_model_id") or evaluation.get("model_id") or ""
-            cur_num = _num(mid if mid else "")
-            # try via signature if direct numeric not found
-            if not cur_num:
-                try:
-                    sig = ModelNormalizer.extract_signature(mid)
-                    cur_num = _num(sig.version)
-                except Exception:
-                    continue
-            if not cur_num:
-                continue
-            cur_ver = _ver_tuple(cur_num)
-            cur_base = _base(mid)
-            promoted = False
-            for k in kept:
-                if k is evaluation:
-                    continue
-                kmid = k.get("provider_model_id") or k.get("model_id") or ""
-                k_base = _base(kmid)
-                if k_base != cur_base:
-                    continue
-                try:
-                    k_sig = ModelNormalizer.extract_signature(kmid)
-                    k_num = _num(k_sig.version) or _num(kmid)
-                except Exception:
-                    k_num = _num(kmid)
-                if not k_num:
-                    continue
-                if _ver_tuple(k_num) < cur_ver:
-                    promoted = True
-                    break
+            promoted = batch_has_older_kept_sibling(mid, kept)
             # also check store for older kept (covers cross-batch)
             if not promoted and store is not None:
                 try:
-                    from llm_discovery.policy_gate import _has_older_kept_sibling
-                    if _has_older_kept_sibling(mid, store):
+                    if store_has_older_kept_sibling(mid, store):
                         promoted = True
                 except Exception:
                     pass

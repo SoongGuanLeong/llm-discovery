@@ -636,6 +636,10 @@ class TestE2EFullApply:
         assert snapshot_after_first == snapshot_after_second
 
     def test_revert_restores_gateway_state(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Data-dependent: requires real keep rows, same as test_full_apply above.
+        # Scaffold payload (empty data/results) does not revert to identical state.
+        if not mod._load_keep_records(Path("data/results")):
+            pytest.skip("requires keep rows in data/results/*.yaml (live build snapshot; not in repo)")
         gateway = _MockGateway()
 
         def fake_request(method: str, url: str, **kwargs: Any) -> _FakeResponse:

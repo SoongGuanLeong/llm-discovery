@@ -70,18 +70,10 @@ def fixed_snapshot_fingerprint(data_dir: Path | str = "data") -> dict[str, Any]:
     base = Path(data_dir)
     out: dict[str, Any] = {}
     for rel in FIXED_CATALOG_FILES:
-        # rel is like data/artificial... -> make relative to data_dir when called with data_dir
-        # FIXED_CATALOG_FILES are rooted at repo data/; when data_dir differs, map by basename
+        # FIXED_CATALOG_FILES are rooted at repo data/; when data_dir differs,
+        # map by basename strictly inside data_dir (no repo fallback, CI-safe).
         if rel.parent.name == "data" or str(rel).startswith("data/"):
-            p = base / rel.name if base.name == "data" else base / rel.name
-            # try both: if base is data dir, join basename; else join full rel
-            candidates = [base / rel.name, Path(rel)]
-            chosen = None
-            for c in candidates:
-                if c.exists():
-                    chosen = c
-                    break
-            p = chosen if chosen is not None else (base / rel.name)
+            p = base / rel.name
         else:
             p = base / rel
         key = rel.name  # stable key

@@ -11,9 +11,13 @@ DATA_DIR = Path("data")
 
 class TestBenchmarkAliasConservative:
     def setup_method(self):
+        aa_path = DATA_DIR / "artificial_analysis_models.json"
+        md_path = DATA_DIR / "models_dev_catalog.json"
+        if not (aa_path.exists() and md_path.exists()):
+            pytest.skip("real catalog data missing (gitignored live snapshot; not in repo)")
         self.cache = BenchmarkDataCache()
-        aa = ArtificialAnalysisCatalog(DATA_DIR / "artificial_analysis_models.json")
-        md = ModelsDevCatalog(DATA_DIR / "models_dev_catalog.json")
+        aa = ArtificialAnalysisCatalog(aa_path)
+        md = ModelsDevCatalog(md_path)
         self.cache.collect_from_local(aa, md)
 
     def test_coding_prefix_stripped(self):

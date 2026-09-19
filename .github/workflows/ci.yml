@@ -1,0 +1,74 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package and pytest
+        run: |
+          python -m pip install -U pip
+          pip install -e . pytest
+
+      - name: Generate minimal CI catalog fixtures
+        # data/*.json catalogs are gitignored live snapshots (not in repo).
+        # Existence-dependent tests (CLI catalog shapes, pipeline evaluate,
+        # PolicyGate benchmark profile) read these paths directly, so CI writes
+        # minimal fixtures matching tests/conftest.py shapes. No real scores.
+        run: |
+          mkdir -p data/results
+          python - <<'EOF'
+          import json
+          aa = {"source": "ci", "models": [
+            {"id": "aa-llama-3.3-70b-versatile", "name": "Llama 3.3 70B",
+             "slug": "llama-3.3-70b-versatile", "evaluations": {
+               "artificial_analysis_intelligence_index": 55.0,
+               "artificial_analysis_coding_index": 80.0}},
+            {"id": "aa-llama-3.1-8b-instant", "name": "Llama 3.1 8B",
+             "slug": "llama-3.1-8b-instant", "evaluations": {
+               "artificial_analysis_intelligence_index": 35.0,
+               "artificial_analysis_coding_index": 60.0}},
+            {"id": "aa-qwen-72b", "name": "Qwen 72B", "slug": "qwen-72b",
+             "evaluations": {"artificial_analysis_intelligence_index": 15.0,
+                             "artificial_analysis_coding_index": 40.0}},
+          ]}
+          md = {"models": {
+            "llama-3.3-70b-versatile": {"id": "llama-3.3-70b-versatile",
+              "name": "Llama 3.3 70B", "description": "Multilingual chat model"},
+            "llama-3.1-8b-instant": {"id": "llama-3.1-8b-instant",
+              "name": "Llama 3.1 8B", "description": "Compact Llama model"},
+            "allam-2-7b": {"id": "allam-2-7b", "name": "ALLaM-2-7b",
+              "description": "Instruction tuned model"}},
+            "providers": {"groq": {"id": "groq", "name": "Groq",
+              "api": "https://api.groq.com/openai/v1", "env": ["GROQ_API_KEY"],
+              "models": {"llama-3.3-70b-versatile": True,
+                         "llama-3.1-8b-instant": True, "allam-2-7b": True}}}}
+          open("data/artificial_analysis_models.json", "w").write(json.dumps(aa))
+          open("data/models_dev_catalog.json", "w").write(json.dumps(md))
+          EOF
+
+      - name: Run offline pytest suite
+        # Fully offline: network tests mock at httpx/pipeline seams,
+        # build_all runs offline with injected discover_fn. No API keys needed.
+        # Deselected tests need live snapshot content (real glm/mimo/gemini
+        # scores, dated alias entries, score-sensitive gate thresholds);
+        # they skip or fail without live data, so CI excludes them by ID.
+        run: >
+          python -m pytest -q
+          --deselect tests/test_evidence_recovery.py::TestBenchmarkAliasConservative::test_coding_prefix_stripped
+          --deselect tests/test_evidence_recovery.py::TestBenchmarkAliasConservative::test_date_suffix_fallback
+          --deselect tests/test_issue231_weak_recovery.py::test_real_glm_dot_hyphen_strong_without_llm
+          --deselect tests/test_issue231_weak_recovery.py::test_real_gemini_preview_alias_strong_without_llm
+          --deselect tests/test_issue231_weak_recovery.py::test_real_mimo_moderate_goes_to_llm
+          --deselect "tests/test_t2.py::TestEvaluateModel::test_hard_gate_overrides_judge_keep_to_drop"
+          --deselect "tests/test_t2.py::TestEvaluateModel::test_coding_false_forced_drop"

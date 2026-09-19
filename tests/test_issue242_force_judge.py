@@ -241,15 +241,15 @@ class TestPlumbing:
         low = src.lower()
         assert "judge budget" in low or "costs judge" in low
 
-    def test_discover_script_parses_flag(self):
-        import sys
+    def test_discover_cli_parses_flag(self):
+        from llm_discovery.cli import _build_parser
 
-        sys.path.insert(0, "scripts")
-        from discover import parse_args
-        from llm_discovery.config import load_config
-
-        # load minimal config via tmp providers file is complex; just check parser default via build_all main
-        from llm_discovery.build_all import main as _  # noqa: ensure import ok
+        p = _build_parser()
+        a = p.parse_args(["discover", "groq"])
+        assert a.force_judge is False
+        b = p.parse_args(["discover", "groq", "--force-judge"])
+        assert b.force_judge is True
+        assert b.provider == "groq"
 
     def test_scoped_forced_run_writes_only_subset(self, tmp_path):
         from llm_discovery.build_all import build_all

@@ -20,9 +20,13 @@ from llm_discovery.pipeline import (
     evaluate_model,
     pick_tracer_model,
 )
+from llm_discovery.cli import UsageError, _build_parser
 from llm_discovery.results import save_yaml_result, YAML_SCHEMA_KEYS
 from llm_discovery.resolver import normalize_model_id, resolve_model
-from scripts.discover import parse_args
+
+
+def parse_discover(argv: list[str]):
+    return _build_parser().parse_args(["discover", *argv])
 
 
 # T1: max / flash / drop / error tiering (pure)
@@ -474,38 +478,31 @@ class TestConfig:
         assert groq.secret == "GROQ_API_KEY"
 
 
-# discover.py argv parsing (pure)
+# discover argv parsing (pure, CLI surface per ADR 0010 #1)
 class TestParseArgs:
     def test_takes_provider_arg(self):
-        config = load_config()
-        args = parse_args(["groq"], config)
+        args = parse_discover(["groq"])
         assert args.provider == "groq"
         assert args.all is False
-        assert args.all_providers is False
 
-    def test_defaults_to_first_provider(self):
-        config = load_config()
-        args = parse_args([], config)
-        assert args.provider == config.providers[0].name
+    def test_bare_means_all_providers(self):
+        args = parse_discover([])
+        assert args.provider is None
 
-    def test_rejects_unknown_provider(self):
-        config = load_config()
-        with pytest.raises(SystemExit):
-            parse_args(["nonexistent-provider"], config)
+    def test_unknown_provider_parses(self):
+        args = parse_discover(["nonexistent-provider"])
+        assert args.provider == "nonexistent-provider"
 
     def test_all_flag(self):
-        config = load_config()
-        args = parse_args(["groq", "--all"], config)
+        args = parse_discover(["groq", "--all"])
         assert args.all is True
 
-    def test_all_providers_flag(self):
-        config = load_config()
-        args = parse_args(["--all-providers"], config)
-        assert args.all_providers is True
+    def test_all_providers_flag_dropped(self):
+        with pytest.raises(UsageError):
+            parse_discover(["--all-providers"])
 
     def test_workers_default(self):
-        config = load_config()
-        args = parse_args(["groq"], config)
+        args = parse_discover(["groq"])
         assert args.workers == 4
 
 

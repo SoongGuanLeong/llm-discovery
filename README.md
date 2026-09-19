@@ -67,18 +67,18 @@ cp .env.example .env
 infisical export --projectId "$LLM_SHARED_PROJECT_ID" --env dev --format json | jq length
 infisical export --projectId "$LLM_DISCOVERY_PROJECT_ID" --env dev --format json | jq length
 # run with injected env:
-infisical run -- .venv/bin/python scripts/discover.py groq --all
+infisical run -- .venv/bin/python -m llm_discovery discover groq --all
 ```
 
 No provider or judge keys are hardcoded. See `config/providers.yaml` for the full provider list and secret names.
 
 ## Catalog data sources
 
-Discovery resolves every provider model against two offline snapshots in `data/` (gitignored, refreshed via `refresh_catalogs.py`):
+Discovery resolves every provider model against two offline snapshots in `data/` (gitignored, refreshed via `llm-discovery refresh`):
 
 | Source | Snapshot | Origin | Refresh |
 |---|---|---|---|
-| **models.dev** | `data/models_dev_catalog.json` | `https://models.dev/catalog.json` (public, no key) | `scripts/refresh_catalogs.py` / `python -m llm_discovery.refresh` |
+| **models.dev** | `data/models_dev_catalog.json` | `https://models.dev/catalog.json` (public, no key) | `llm-discovery refresh` / `python -m llm_discovery.refresh` |
 | **Artificial Analysis** | `data/artificial_analysis_models.json` | `https://artificialanalysis.ai/api/v2/data/llms/models` (header `x-api-key: $AA_API_KEY`) | same; requires `AA_API_KEY` |
 | **Benchmarks** | `data/benchmarks.json` | Rebuilt locally via `BenchmarkDataCache.collect_from_local(aa, models_dev)` — no network | same |
 
@@ -96,20 +96,20 @@ All runs load secrets from env (or Infisical if configured) and write results to
 
 ```bash
 # Tracer: evaluate ONE model for a provider (deterministic pick, cheapest smoke test)
-.venv/bin/python scripts/discover.py groq
-.venv/bin/python scripts/discover.py kilo_ai
+.venv/bin/python -m llm_discovery discover groq
+.venv/bin/python -m llm_discovery discover kilo_ai
 
 # Batch: evaluate ALL models for one provider, in parallel (T3)
-.venv/bin/python scripts/discover.py groq --all
-.venv/bin/python scripts/discover.py kilo_ai --all
-.venv/bin/python scripts/discover.py openrouter --all --workers 4   # default 4
+.venv/bin/python -m llm_discovery discover groq --all
+.venv/bin/python -m llm_discovery discover kilo_ai --all
+.venv/bin/python -m llm_discovery discover openrouter --all --workers 4   # default 4
 
 # All providers: evaluate every configured provider (each provider in parallel)
-.venv/bin/python scripts/discover.py --all-providers
-.venv/bin/python scripts/discover.py --all-providers --workers 4
+.venv/bin/python -m llm_discovery discover
+.venv/bin/python -m llm_discovery discover --workers 4
 
 # Help — shows configured providers from config/providers.yaml
-.venv/bin/python scripts/discover.py --help
+.venv/bin/python -m llm_discovery discover --help
 ```
 
 ### What happens per run
@@ -167,7 +167,7 @@ error:
 - `drop_llm` — LLM-judged non-coding (free-model-rule drops are excluded from YAML entirely).
 - `error` — judge/transport failures (not drops).
 
-Tracer mode (`discover.py <provider>` without `--all`) writes a single-record YAML with the same keys at the top level (`provider, model_id, decision, tier, ...`) via `SingleModelWriter`.
+Tracer mode (`discover <provider>` without `--all`) writes a single-record YAML with the same keys at the top level (`provider, model_id, decision, tier, ...`) via `SingleModelWriter`.
 
 Programmatic writers: `src/llm_discovery/results.py:ProviderBatchWriter` / `SingleModelWriter` and shims `save_provider_result()` / `save_yaml_result()`.
 
@@ -207,18 +207,18 @@ One-command refresh of all JSON snapshots (`data/artificial_analysis_models.json
 
 ```bash
 # all three (requires AA_API_KEY for Artificial Analysis)
-infisical run -- .venv/bin/python scripts/refresh_catalogs.py
+infisical run -- .venv/bin/python -m llm_discovery refresh
 # or
 export AA_API_KEY=aa_xxx  # or ARTIFICIAL_ANALYSIS_API_KEY
-.venv/bin/python scripts/refresh_catalogs.py
+.venv/bin/python -m llm_discovery refresh
 
 # alternatives (same logic):
 .venv/bin/python -m llm_discovery.refresh
 .venv/bin/python -m llm_discovery.cli refresh
 
 # dry-run, or subset
-.venv/bin/python scripts/refresh_catalogs.py --dry-run
-.venv/bin/python scripts/refresh_catalogs.py --only models_dev benchmarks
+.venv/bin/python -m llm_discovery refresh --dry-run
+.venv/bin/python -m llm_discovery refresh --only models_dev benchmarks
 ```
 
 - AA source: `https://artificialanalysis.ai/api/v2/data/llms/models` (header `x-api-key: $AA_API_KEY`)
@@ -229,7 +229,7 @@ export AA_API_KEY=aa_xxx  # or ARTIFICIAL_ANALYSIS_API_KEY
 
 ### Automated refresh (systemd timer, issue #140)
 
-A daily user timer (`config/quadlet/refresh-catalogs.service` + `.timer`, `OnCalendar=daily`, diff-before-copy) can run `scripts/refresh_catalogs.py` from the repo root with the repo venv python (models.dev needs no key).
+A daily user timer (`config/quadlet/refresh-catalogs.service` + `.timer`, `OnCalendar=daily`, diff-before-copy) can run `python -m llm_discovery refresh` from the repo root with the repo venv python (models.dev needs no key).
 
 ```bash
 systemctl --user status refresh-catalogs.timer   # next run + last status

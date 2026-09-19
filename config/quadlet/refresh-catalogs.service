@@ -6,9 +6,9 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-# Paths materialized by scripts/setup.sh (repo root + venv python) at install time.
+# Paths materialized at install time (repo root + venv python).
 WorkingDirectory={{REPO_ROOT}}
-ExecStart={{VENV_PYTHON}} scripts/refresh_catalogs.py
-# AA API key file, written by setup.sh from Infisical (0600, '-': optional).
+ExecStart={{VENV_PYTHON}} -m llm_discovery refresh
+# AA API key file, written from Infisical (0600, '-': optional).
 # models.dev refresh needs no key; AA degrades to a logged error when absent.
 EnvironmentFile=-{{AA_KEY_FILE}}

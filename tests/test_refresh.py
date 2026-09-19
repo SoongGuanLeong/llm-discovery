@@ -178,11 +178,11 @@ def test_refresh_dry_run_no_write(tmp_path: Path):
 
 
 def test_cli_refresh_help():
-    from llm_discovery.cli import build_parser
-    parser = build_parser()
+    from llm_discovery.cli import _build_parser
+    parser = _build_parser()
     # should not raise
     ns = parser.parse_args(["refresh", "--dry-run", "--only", "benchmarks"])
-    assert ns.catalog == "refresh"
+    assert ns.group == "refresh"
     assert ns.dry_run is True
 
 

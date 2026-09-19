@@ -147,11 +147,11 @@ def test_max_age_zero_disables_gate(tmp_path):
 
 
 def test_cli_build_all_parses_catalog_flags():
-    from llm_discovery.cli import build_parser
-    ns = build_parser().parse_args(["build-all", "--no-catalog-refresh", "--catalog-max-age-days", "0"])
-    assert ns.catalog == "build-all"
+    from llm_discovery.cli import _build_parser
+    ns = _build_parser().parse_args(["build", "--no-catalog-refresh", "--catalog-max-age-days", "0"])
+    assert ns.group == "build"
     assert ns.no_catalog_refresh is True
     assert ns.catalog_max_age_days == 0
-    ns2 = build_parser().parse_args(["build-all"])
+    ns2 = _build_parser().parse_args(["build"])
     assert ns2.no_catalog_refresh is False
     assert ns2.catalog_max_age_days == 28

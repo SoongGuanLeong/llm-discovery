@@ -13,6 +13,9 @@ dependencies = [
     "uvicorn>=0.29",
 ]
 
+[project.scripts]
+llm-discovery = "llm_discovery.cli:main"
+
 [build-system]
 requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"

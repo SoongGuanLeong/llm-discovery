@@ -225,12 +225,12 @@ class TestPlumbing:
         assert sig.parameters["force_judge"].default is False
 
     def test_cli_parses_flag(self):
-        from llm_discovery.cli import build_parser
+        from llm_discovery.cli import _build_parser
 
-        p = build_parser()
-        a = p.parse_args(["build-all"])
+        p = _build_parser()
+        a = p.parse_args(["build"])
         assert a.force_judge is False
-        b = p.parse_args(["build-all", "--force-judge", "--providers", "agnes"])
+        b = p.parse_args(["build", "--force-judge", "--providers", "agnes"])
         assert b.force_judge is True
         assert b.providers == ["agnes"]
         # cost guard: help warns about judge spend

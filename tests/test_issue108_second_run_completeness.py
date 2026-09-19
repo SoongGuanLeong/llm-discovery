@@ -440,7 +440,7 @@ class TestPipelineCacheHitAvoidsLLM:
                 raise AssertionError("LLM should not be called on cache hit")
         from unittest.mock import patch
         fake_res = Mock(aa_model={"id": "keeper-llm", "name": "Keeper LLM", "slug": "keeper-llm", "evaluations": {"artificial_analysis_intelligence_index": 60}, "pricing": {"price_1m_blended_3_to_1": 0.5, "price_1m_input_tokens": 0.3, "price_1m_output_tokens": 0.9}})
-        with patch("llm_discovery.pipeline.resolve_model", return_value=fake_res):
+        with patch("llm_discovery.model_matching.resolve_model", return_value=fake_res):
             result = evaluate_model(model={"id": "keeper-llm"}, provider_name="test-provider", aa=FakeAA(), models_dev=FakeMD(), evaluator=ExplodingEvaluator(), min_score=24, max_score=45, cache=cache, store=store)
         assert result["cached"] is True
         assert result["tier"] is not None
@@ -514,7 +514,7 @@ class TestEvaluatorCoordinatorDirect:
                 raise AssertionError("LLM must not be called on strong_hit")
         from unittest.mock import patch
         fake_res = Mock(aa_model={"id": "keeper-direct", "name": "Keeper Direct", "slug": "keeper-direct", "evaluations": {"artificial_analysis_intelligence_index": 62}, "pricing": {"price_1m_blended_3_to_1": 0.4, "price_1m_input_tokens": 0.2, "price_1m_output_tokens": 0.8}})
-        with patch("llm_discovery.pipeline.resolve_model", return_value=fake_res):
+        with patch("llm_discovery.model_matching.resolve_model", return_value=fake_res):
             coord = EvaluatorCoordinator(provider_name="test-provider", aa=FakeAA(), models_dev=FakeMD(), evaluator=ExplodingEvaluator(), min_score=24, max_score=45, cache=cache, store=store)
             result = coord.evaluate({"id": "keeper-direct"})
         assert result["cached"] is True
@@ -601,12 +601,12 @@ class TestEvaluatorCoordinatorDirect:
                 raise AssertionError("LLM must not be called on cache hit for llm7")
         from unittest.mock import patch
         fake_res = Mock(aa_model={"id": "llm7-model", "name": "LLM7", "slug": "llm7-model", "evaluations": {"artificial_analysis_intelligence_index": 60}, "pricing": {"price_1m_blended_3_to_1": 0.5}})
-        with patch("llm_discovery.pipeline.resolve_model", return_value=fake_res):
+        with patch("llm_discovery.model_matching.resolve_model", return_value=fake_res):
             coord = EvaluatorCoordinator(provider_name="llm7", aa=FakeAA(), models_dev=FakeMD(), evaluator=ExplodingEvaluator(), min_score=24, max_score=45, cache=cache, store=store)
             result = coord.evaluate({"id": "llm7-model", "tier": "turbo"})
         assert result["tier"] == "flash"
         assert result["cached"] is True
-        with patch("llm_discovery.pipeline.resolve_model", return_value=fake_res):
+        with patch("llm_discovery.model_matching.resolve_model", return_value=fake_res):
             coord2 = EvaluatorCoordinator(provider_name="other-provider", aa=FakeAA(), models_dev=FakeMD(), evaluator=ExplodingEvaluator(), min_score=24, max_score=45, cache=cache, store=store)
             result2 = coord2.evaluate({"id": "llm7-model", "tier": "turbo"})
         assert result2["tier"] is not None
@@ -641,7 +641,7 @@ class TestEvaluatorCoordinatorDirect:
             def evaluate(self, *a, **kw):
                 raise AssertionError("Second provider churn must hit cache, no LLM")
         from unittest.mock import patch
-        with patch("llm_discovery.pipeline.resolve_model", return_value=fake_res):
+        with patch("llm_discovery.model_matching.resolve_model", return_value=fake_res):
             coord_b = EvaluatorCoordinator(provider_name="provider-b", aa=FakeAA(), models_dev=FakeMD(), evaluator=ExplodingEvaluator(), min_score=24, max_score=45, cache=cache, store=store)
             result = coord_b.evaluate({"id": raw_id_provider_b})
         assert result["cached"] is True
@@ -789,7 +789,7 @@ class TestCatalogStaleBehavior:
             catalog_stale=True,
         )
         fake_res = Mock(aa_model={"id": "keeper-direct", "name": "Keeper Direct", "slug": "keeper-direct", "evaluations": {"artificial_analysis_intelligence_index": 62}, "pricing": {"price_1m_blended_3_to_1": 0.5, "price_1m_input_tokens": 0.3, "price_1m_output_tokens": 0.9}})
-        with patch("llm_discovery.pipeline.resolve_model", return_value=fake_res):
+        with patch("llm_discovery.model_matching.resolve_model", return_value=fake_res):
             result = coordinator.evaluate({"id": "keeper-direct"})
 
         # LLM must NOT be called: strong cached keep is reused even though stale.
@@ -846,7 +846,7 @@ class TestCatalogStaleBehavior:
         )
         from unittest.mock import Mock, patch
         fake_res = Mock(aa_model={"id": "keeper-direct", "name": "Keeper Direct", "slug": "keeper-direct", "evaluations": {"artificial_analysis_intelligence_index": 62}, "pricing": {"price_1m_blended_3_to_1": 0.5, "price_1m_input_tokens": 0.3, "price_1m_output_tokens": 0.9}})
-        with patch("llm_discovery.pipeline.resolve_model", return_value=fake_res):
+        with patch("llm_discovery.model_matching.resolve_model", return_value=fake_res):
             result = coordinator.evaluate({"id": "keeper-direct"})
 
         # Should have used cache

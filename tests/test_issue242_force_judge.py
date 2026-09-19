@@ -112,7 +112,7 @@ class TestCoordinatorBypass:
                 "pricing": {"price_1m_blended_3_to_1": 0.5},
             }
         )
-        with patch("llm_discovery.pipeline.resolve_model", return_value=fake_res):
+        with patch("llm_discovery.model_matching.resolve_model", return_value=fake_res):
             coord = EvaluatorCoordinator(
                 provider_name="agnes",
                 aa=_FakeAA(),
@@ -139,7 +139,7 @@ class TestCoordinatorBypass:
                 "pricing": {"price_1m_blended_3_to_1": 0.5},
             }
         )
-        with patch("llm_discovery.pipeline.resolve_model", return_value=fake_res):
+        with patch("llm_discovery.model_matching.resolve_model", return_value=fake_res):
             coord = EvaluatorCoordinator(
                 provider_name="agnes",
                 aa=_FakeAA(),

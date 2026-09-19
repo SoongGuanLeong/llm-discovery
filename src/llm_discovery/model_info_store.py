@@ -37,13 +37,6 @@ BENCHMARK_TTL_MIN_DAYS: int = 60
 # Key normalization
 # ---------------------------------------------------------------------------
 
-def _normalize_model_id_stepfun(model_id: str) -> str:
-    """Shim kept for backwards compat; delegate to canonical_key."""
-    from .evidence_identity import canonical_key
-    # canonical_key already handles stepfun -> step and free stripping
-    return canonical_key(model_id)
-
-
 def normalize_store_key(model_id: str) -> str:
     """Canonical store key via evidence_identity.canonical_key.
 
@@ -55,10 +48,6 @@ def normalize_store_key(model_id: str) -> str:
         return ""
     return canonical_key(model_id)
 
-
-def normalized_key_with_matcher(model_id: str) -> str:
-    """Shim: legacy alias for normalize_store_key (kept during expand-contract)."""
-    return normalize_store_key(model_id)
 
 # ---------------------------------------------------------------------------
 # Pricing aggregation
@@ -721,7 +710,6 @@ STORE_SCHEMA_DOC = """
 
 __all__ = [
     "normalize_store_key",
-    "normalized_key_with_matcher",
     "is_pricing_outlier",
     "aggregate_pricing",
     "merge_records",

@@ -7,13 +7,15 @@ while the resolver (T6/#29) WIP is reconciled separately.
 """
 from types import SimpleNamespace
 
-from llm_discovery.evidence import (
-    BenchmarkEvidence,
+from llm_discovery.evidence_category import (
     EvidenceCategory,
-    EvidenceCollector,
-    EvidencePacket,
     EvidencePolarity,
     EvidenceSource,
+)
+from llm_discovery.evidence_collector import EvidenceCollector
+from llm_discovery.evidence_packet import (
+    BenchmarkEvidence,
+    EvidencePacket,
     ProviderClaim,
 )
 
@@ -34,7 +36,7 @@ def _resolution(aa_model):
 
 # Acceptance: standalone factory deleted; collector exists with collect().
 def test_build_evidence_packet_deleted_collector_exists():
-    import llm_discovery.evidence as ev
+    import llm_discovery.evidence_collector as ev
     assert not hasattr(ev, "build_evidence_packet")
     assert hasattr(EvidenceCollector, "collect")
     assert callable(getattr(EvidenceCollector, "collect"))
@@ -165,7 +167,7 @@ def test_pipeline_uses_evidence_collector(monkeypatch, aa_catalog, models_dev):
     # Use moderate model so LLM is consulted per #219 (strong would bypass)
     fake_aa_model = aa_catalog.get_by_id("aa-llama-3.1-8b-instant")
     monkeypatch.setattr(
-        "llm_discovery.pipeline.resolve_model",
+        "llm_discovery.model_matching.resolve_model",
         lambda *a, **k: SimpleNamespace(aa_model=fake_aa_model),
     )
 

@@ -111,7 +111,7 @@ class EvaluatorCoordinator:
     def evaluate(self, model: dict[str, Any]) -> dict[str, Any]:
         """Judge one model and apply tiering."""
         model_id = model["id"]
-        from .pipeline import resolve_model as _resolve
+        from .model_matching import resolve_model as _resolve
         resolution = _resolve(model_id, self.aa, self.models_dev, self.cache)
         # Canonical cache identity shared by the Keeper and Candidate stores (issue #222)
         cache_key: str | None = None
@@ -188,11 +188,6 @@ class EvaluatorCoordinator:
                         "coding_assessment": None,
                     }
         from .evidence_collector import EvidenceCollector
-        # keep pipeline imports for test patch compat (patched in tests)
-        from .pipeline import _is_vision_only as _pipeline_is_vision_only  # noqa: F401
-        from .pipeline import _is_coding_capable as _pipeline_is_coding_capable  # noqa: F401
-        from .pipeline import _is_cheap_or_free as _pipeline_is_cheap_or_free  # noqa: F401
-        from .pipeline import deterministic_drop_record as _pipeline_deterministic_drop  # noqa: F401
         packet = EvidenceCollector(self.provider_name).collect(model, self.cache, self.models_dev, resolution)
         if packet.is_specialized():
             if self._is_vision_only(packet.deterministic_flags) and self._is_coding_capable(resolution, self.cache, model_id, self.provider_name) and self._is_cheap_or_free(resolution, model_id, self.models_dev):
@@ -303,7 +298,7 @@ class EvaluatorCoordinator:
             if rec_verified is None and rec_resolution and getattr(rec_resolution, "aa_model", None) is None:
                 try:
                     from .evidence_identity import resolve_canonical_variants
-                    from .model_resolver import resolve_model as _rm
+                    from .model_matching import resolve_model as _rm
                     for var, _, _ in resolve_canonical_variants(model_id)[:6]:
                         if var == model_id:
                             continue
@@ -687,7 +682,7 @@ class EvaluatorCoordinator:
         if resolution is None:
             # Need catalogs; caller should pass resolution. Fallback tries empty matcher.
             try:
-                from .model_resolver import resolve_model as _rm
+                from .model_matching import resolve_model as _rm
                 resolution = _rm(raw_model_id, None, None, cache)
             except Exception:
                 resolution = None
@@ -1032,9 +1027,6 @@ class EvaluatorCoordinator:
             "evidence": [reason],
             "coding_assessment": None,
         }
-
-    # alias for pipeline compat (underscore prefix)
-    _deterministic_drop_record = deterministic_drop_record
 
     def _deterministic_router_record(self, model_id: str, resolution: Any, packet: Any) -> dict[str, Any]:
         """Router models deterministic keep flash strong without LLM (spec #219)."""
@@ -1506,36 +1498,3 @@ def build_cached_strong_record(
     coord = EvaluatorCoordinator(provider_name=pn, aa=None, models_dev=None, evaluator=None, min_score=min_score, max_score=max_score, cache=cache)
     return coord._build_cached_strong_record(rid, cached, fresh_pricing_obs, fresh_bm, resolution, cache, min_score, max_score)
 def build_cached_keep_record(*a, **k): return build_cached_strong_record(*a, **k)
-
-# --- Record factory shims (Ticket 03) -- expand-contract ---
-def _llm_error_record(model_id: str, exc: Exception, coding_score: float = 0.0, benchmarks: dict | None = None) -> dict[str, Any]:
-    return EvaluatorCoordinator(provider_name="", aa=None, models_dev=None, evaluator=None, min_score=24.0, max_score=45.0)._llm_error_record(model_id, exc, coding_score, benchmarks)
-
-def deterministic_drop_record(model_id: str, reason: str, cache=None) -> dict[str, Any]:
-    return EvaluatorCoordinator(provider_name="", aa=None, models_dev=None, evaluator=None, min_score=24.0, max_score=45.0, cache=cache).deterministic_drop_record(model_id, reason, cache)
-
-_deterministic_drop_record = deterministic_drop_record
-
-def _auto_free_record(provider_name: str) -> dict[str, Any]:
-    return EvaluatorCoordinator(provider_name=provider_name, aa=None, models_dev=None, evaluator=None, min_score=24.0, max_score=45.0)._auto_free_record(provider_name)
-
-def _aa_score(aa_model: dict[str, Any] | None) -> float | None:
-    return EvaluatorCoordinator._aa_score(aa_model)
-
-def _aa_match(resolution: Any) -> dict[str, Any] | None:
-    return EvaluatorCoordinator._aa_match(resolution)
-
-def _aa_candidates(resolution: Any) -> list[dict[str, Any]]:
-    return EvaluatorCoordinator._aa_candidates(resolution)
-
-def _is_vision_only(flags: list[str]) -> bool:
-    return EvaluatorCoordinator._is_vision_only(flags)
-
-def _is_vision_free_model(model_id: str, resolution: Any, models_dev: Any) -> bool:
-    return EvaluatorCoordinator._is_vision_free_model(model_id, resolution, models_dev)
-
-def _is_cheap_or_free(resolution: Any, model_id: str, models_dev: Any) -> bool:
-    return EvaluatorCoordinator._is_cheap_or_free(resolution, model_id, models_dev)
-
-def _is_coding_capable(resolution: Any, cache: Any, model_id: str, provider_name: str) -> bool:
-    return EvaluatorCoordinator._is_coding_capable(resolution, cache, model_id, provider_name)

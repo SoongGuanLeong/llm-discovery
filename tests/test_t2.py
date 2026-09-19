@@ -22,7 +22,7 @@ from llm_discovery.pipeline import (
 )
 from llm_discovery.cli import UsageError, _build_parser
 from llm_discovery.results import save_yaml_result, YAML_SCHEMA_KEYS
-from llm_discovery.resolver import normalize_model_id, resolve_model
+from llm_discovery.model_matching import normalize_model_id, resolve_model
 
 
 def parse_discover(argv: list[str]):

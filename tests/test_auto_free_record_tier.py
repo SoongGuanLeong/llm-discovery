@@ -6,23 +6,26 @@ synthetic `auto:free` record. That record used to claim `tier: "max"`, which bot
 put a routing fallback in the strategic-reserve band and contradicted the router
 override in `policy_gate` (`_is_router_model` forces flash). It is now flash.
 
-Seams: EvaluatorCoordinator._auto_free_record, pipeline._auto_free_record,
+Seams: EvaluatorCoordinator._auto_free_record (the only definition),
 ProviderBatchWriter.write (issue #247 gate demotion bypass for routers/auto-free).
 """
 from llm_discovery.evaluator import EvaluatorCoordinator
-from llm_discovery.pipeline import _auto_free_record
 from llm_discovery.policy_gate import _is_router_model
 
 
-def test_auto_free_record_is_keep_flash():
-    rec = EvaluatorCoordinator(
-        provider_name="bazaarlink",
+def _auto_free(provider_name="bazaarlink"):
+    return EvaluatorCoordinator(
+        provider_name=provider_name,
         aa=None,
         models_dev=None,
         evaluator=None,
         min_score=24.0,
         max_score=45.0,
-    )._auto_free_record("bazaarlink")
+    )._auto_free_record(provider_name)
+
+
+def test_auto_free_record_is_keep_flash():
+    rec = _auto_free()
 
     assert rec["provider_model_id"] == "auto:free"
     assert rec["decision"] == "keep"
@@ -32,7 +35,7 @@ def test_auto_free_record_is_keep_flash():
 
 
 def test_pipeline_auto_free_record_matches():
-    rec = _auto_free_record("bazaarlink")
+    rec = _auto_free()
 
     assert rec["decision"] == "keep"
     assert rec["tier"] == "flash"
@@ -53,7 +56,7 @@ def test_write_keeps_auto_free_record():
     """
     from llm_discovery.results import ProviderBatchWriter
 
-    rec = _auto_free_record("bazaarlink")
+    rec = _auto_free()
     rec["pricing"] = None
     out = ProviderBatchWriter().write(
         {"provider": "bazaarlink", "keep": [rec], "drop": [], "error": []},

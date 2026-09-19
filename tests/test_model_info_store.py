@@ -2,7 +2,6 @@
 import pytest
 from llm_discovery.model_info_store import (
     normalize_store_key,
-    normalized_key_with_matcher,
     is_pricing_outlier,
     aggregate_pricing,
     merge_records,
@@ -54,11 +53,13 @@ class TestNormalizeStoreKey:
         assert normalize_store_key("groq/llama-3.3-70b-versatile") == normalize_store_key("openrouter/llama-3.3-70b-versatile")
         assert normalize_store_key("a/gpt-4o:free") == normalize_store_key("b/gpt-4o")
 
-    def test_with_matcher_folds_dots(self):
-        k1 = normalized_key_with_matcher("qwen3.8-flash")
-        k2 = normalized_key_with_matcher("qwen-3.8-flash")
-        assert k1
-        assert k2
+    def test_with_matcher_alias_retired(self):
+        # The matcher-flavoured alias is gone; normalize_store_key is the only
+        # store-key interface and preserves the version dot.
+        k1 = normalize_store_key("qwen3.8-flash")
+        k2 = normalize_store_key("qwen-3.8-flash")
+        assert k1 == "qwen3.8-flash"
+        assert k2 == "qwen-3.8-flash"
 
 
 class TestPricingAggregation:

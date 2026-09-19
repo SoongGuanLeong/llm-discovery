@@ -7,7 +7,7 @@ import httpx
 from pydantic import ValidationError as PydanticValidationError
 
 from .evaluation import ModelEvaluation, ModelEvaluationRequest
-from .evidence import EvidencePacket
+from .evidence_packet import EvidencePacket
 from .judge_transport import (
     CAT_MALFORMED_JSON,
     CAT_TOOL,

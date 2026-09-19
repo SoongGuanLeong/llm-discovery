@@ -4,19 +4,22 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from llm_discovery.benchmarks import BenchmarkDataCache
-import llm_discovery.pipeline as pip
+from llm_discovery.evaluator import EvaluatorCoordinator
 from llm_discovery.pipeline import (
     VISION_AA_CODING_MIN,
     VISION_AA_INTEL_MIN,
     VISION_BENCH_MIN,
     VISION_CHEAP_THRESHOLD,
     VISION_CODING_SCORE_MIN,
-    _is_coding_capable,
-    _is_cheap_or_free,
-    _is_vision_free_model,
-    _is_vision_only,
     evaluate_model,
 )
+
+# The vision predicates are defined on EvaluatorCoordinator; pipeline's
+# one-line delegators were deleted in issue #286.
+_is_vision_only = EvaluatorCoordinator._is_vision_only
+_is_vision_free_model = EvaluatorCoordinator._is_vision_free_model
+_is_cheap_or_free = EvaluatorCoordinator._is_cheap_or_free
+_is_coding_capable = EvaluatorCoordinator._is_coding_capable
 
 
 class _FakeModelsDev:
@@ -103,7 +106,7 @@ def test_coding_capable_via_cache_swe():
 
 
 def test_evaluate_vision_coding_cheap_bypasses_drop():
-    with patch.object(pip, "resolve_model", lambda *a, **k: _res({"price_1m_blended_3_to_1": 0.8}, {"artificial_analysis_coding_index": 68.1})):
+    with patch("llm_discovery.model_matching.resolve_model", lambda *a, **k: _res({"price_1m_blended_3_to_1": 0.8}, {"artificial_analysis_coding_index": 68.1})):
         md = _FakeModelsDev({"qwen3.8-27b": {"id": "qwen3.8-27b", "name": "Qwen", "description": "vision-language model for coding"}})
         rec = evaluate_model({"id": "Qwen/Qwen3.8-27B"}, "modelscope", None, md, _FakeEval(), 24.0, 45.0, cache=None)
         assert rec["decision"] == "keep"
@@ -111,7 +114,7 @@ def test_evaluate_vision_coding_cheap_bypasses_drop():
 
 
 def test_evaluate_vision_coding_expensive_stays_dropped():
-    with patch.object(pip, "resolve_model", lambda *a, **k: _res({"price_1m_blended_3_to_1": 5.0}, {"artificial_analysis_coding_index": 68.1})):
+    with patch("llm_discovery.model_matching.resolve_model", lambda *a, **k: _res({"price_1m_blended_3_to_1": 5.0}, {"artificial_analysis_coding_index": 68.1})):
         md = _FakeModelsDev({"qwen3.8-27b": {"id": "qwen3.8-27b", "name": "Qwen", "description": "vision-language model for coding"}})
         rec = evaluate_model({"id": "Qwen/Qwen3.8-27B"}, "modelscope", None, md, _FakeEval(), 24.0, 45.0, cache=None)
         assert rec["decision"] == "drop"
@@ -119,14 +122,14 @@ def test_evaluate_vision_coding_expensive_stays_dropped():
 
 
 def test_evaluate_vision_not_coding_cheap_stays_dropped():
-    with patch.object(pip, "resolve_model", lambda *a, **k: _res({"price_1m_blended_3_to_1": 0.7}, {"artificial_analysis_coding_index": 20, "artificial_analysis_intelligence_index": 14})):
+    with patch("llm_discovery.model_matching.resolve_model", lambda *a, **k: _res({"price_1m_blended_3_to_1": 0.7}, {"artificial_analysis_coding_index": 20, "artificial_analysis_intelligence_index": 14})):
         md = _FakeModelsDev({"qwen3-vl": {"id": "qwen3-vl", "name": "Qwen", "description": "vision-language instruct model"}})
         rec = evaluate_model({"id": "Qwen/Qwen3-VL-235B-A22B-Instruct"}, "modelscope", None, md, _FakeEval(), 24.0, 45.0, cache=None)
         assert rec["decision"] == "drop"
 
 
 def test_evaluate_embedding_stays_dropped_even_if_coding_cheap():
-    with patch.object(pip, "resolve_model", lambda *a, **k: _res({"price_1m_blended_3_to_1": 0.3}, {"artificial_analysis_coding_index": 70})):
+    with patch("llm_discovery.model_matching.resolve_model", lambda *a, **k: _res({"price_1m_blended_3_to_1": 0.3}, {"artificial_analysis_coding_index": 70})):
         rec = evaluate_model({"id": "Qwen/Qwen3-Embedding-8B"}, "modelscope", None, _FakeModelsDev({}), _FakeEval(), 24.0, 45.0, cache=None)
         assert rec["decision"] == "drop"
 
@@ -135,7 +138,7 @@ def test_evaluate_null_pricing_free_id_with_swe_bypasses():
     cache = BenchmarkDataCache(cache_path=Path("/tmp/test_vision_free.json"))
     cache._data = {"my-model-free": {"benchmarks": {"swe_bench_verified": {"score": 61.7}}, "raw_benchmarks": []}}
     cache._loaded = True
-    with patch.object(pip, "resolve_model", lambda *a, **k: SimpleNamespace(aa_model=None)):
+    with patch("llm_discovery.model_matching.resolve_model", lambda *a, **k: SimpleNamespace(aa_model=None)):
         md = _FakeModelsDev({"my-model-free": {"id": "my-model-free", "name": "my", "description": "vision-language model for coding"}})
         rec = evaluate_model({"id": "my-model-free"}, "prov", None, md, _FakeEval(), 24.0, 45.0, cache=cache)
         assert rec["decision"] == "keep"
@@ -145,7 +148,7 @@ def test_evaluate_null_pricing_not_free_stays_dropped():
     cache = BenchmarkDataCache(cache_path=Path("/tmp/test_vision_null.json"))
     cache._data = {"Qwen/Qwen3.8-27B": {"benchmarks": {"swe_bench_verified": {"score": 61.7}}, "raw_benchmarks": []}}
     cache._loaded = True
-    with patch.object(pip, "resolve_model", lambda *a, **k: SimpleNamespace(aa_model=None)):
+    with patch("llm_discovery.model_matching.resolve_model", lambda *a, **k: SimpleNamespace(aa_model=None)):
         md = _FakeModelsDev({"qwen3.8-27b": {"id": "qwen3.8-27b", "name": "Qwen", "description": "vision-language model for coding"}})
         rec = evaluate_model({"id": "Qwen/Qwen3.8-27B"}, "modelscope", None, md, _FakeEval(), 24.0, 45.0, cache=cache)
         assert rec["decision"] == "drop"

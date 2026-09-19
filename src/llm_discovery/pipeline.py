@@ -1,7 +1,7 @@
 """End-to-end discovery pipeline — thin coordinator.
 
 evaluate_model is now <30 lines coordinating four seamed adapters:
-  EvidenceCollector.collect(), ModelResolver.resolve(), Judge.evaluate(), PolicyGate.apply()
+  EvidenceCollector.collect(), model_matching.resolve_model(), Judge.evaluate(), PolicyGate.apply()
 
 Other entry points (discover_single, discover_provider, discover_all_providers)
 retain isolation but delegate per-model work to evaluate_model.
@@ -23,7 +23,6 @@ from .evidence_collector import EvidenceCollector
 from .judge import Judge
 from .gate import _is_router_model_id, is_accurate_enough
 from .model_info_store import ModelInfoStore
-from .model_resolver import ModelResolver, resolve_model
 from .categorize import categorize_model
 from .policy_gate import PolicyGate
 from .secrets import load_all_secrets, load_discovery_secrets, load_shared_secrets  # noqa: keep aliases for patch compat
@@ -47,22 +46,6 @@ VISION_BENCH_MIN = 50.0
 # issue #232: bounded web recovery — at most this many targeted web searches
 # per judge evaluation (first-party model card/docs, then benchmark evidence).
 JUDGE_MAX_SEARCHES = 2
-
-
-def _is_vision_only(flags: list[str]) -> bool:
-    return EvaluatorCoordinator._is_vision_only(flags)
-
-
-def _is_vision_free_model(model_id: str, resolution: Any, models_dev: Any) -> bool:
-    return EvaluatorCoordinator._is_vision_free_model(model_id, resolution, models_dev)
-
-
-def _is_cheap_or_free(resolution: Any, model_id: str, models_dev: Any) -> bool:
-    return EvaluatorCoordinator._is_cheap_or_free(resolution, model_id, models_dev)
-
-
-def _is_coding_capable(resolution: Any, cache: Any, model_id: str, provider_name: str) -> bool:
-    return EvaluatorCoordinator._is_coding_capable(resolution, cache, model_id, provider_name)
 
 
 def _build_alternate_judge_route(config: Any) -> Any:
@@ -131,17 +114,6 @@ def evaluate_model(
         force_judge=force_judge,
     )
     return coord.evaluate(model)
-def _llm_error_record(model_id: str, exc: Exception, coding_score: float = 0.0, benchmarks: dict = None) -> dict[str, Any]:
-    """Judge failure → decision=error, tier=error (NOT drop). Delegates to EvaluatorCoordinator."""
-    return EvaluatorCoordinator(provider_name="", aa=None, models_dev=None, evaluator=None, min_score=24.0, max_score=45.0)._llm_error_record(model_id, exc, coding_score, benchmarks)
-
-
-def deterministic_drop_record(model_id: str, reason: str, cache=None) -> dict[str, Any]:
-    """Pre-filter drop (specialised / non-coding models). Delegates to EvaluatorCoordinator."""
-    return EvaluatorCoordinator(provider_name="", aa=None, models_dev=None, evaluator=None, min_score=24.0, max_score=45.0, cache=cache).deterministic_drop_record(model_id, reason, cache)
-
-
-_deterministic_drop_record = deterministic_drop_record
 
 
 def _resolve_provider_config(provider_name: str, config: Any) -> Any:
@@ -157,31 +129,17 @@ def _resolve_provider_config(provider_name: str, config: Any) -> Any:
     )
 
 
-def _aa_score(aa_model: dict[str, Any] | None) -> float | None:
-    return EvaluatorCoordinator._aa_score(aa_model)
-
-
-def _aa_match(resolution: Any) -> dict[str, Any] | None:
-    """The deterministic AA match handed to the judge as verified context. Delegates to EvaluatorCoordinator."""
-    return EvaluatorCoordinator._aa_match(resolution)
-
-
-def _aa_candidates(resolution: Any) -> list[dict[str, Any]]:
-    """Legacy: deterministic AA match(es) for backward compatibility. Delegates to EvaluatorCoordinator."""
-    return EvaluatorCoordinator._aa_candidates(resolution)
-
-
 def pick_tracer_model(
     models: list[dict[str, Any]],
     aa: Any,
     min_score: float,
 ) -> dict[str, Any]:
     """Deterministically pick ONE provider model to trace."""
-    from .model_resolver import resolve_model as _resolve
+    from .model_matching import resolve_model as _resolve
 
     scored: list[tuple[float, str, dict[str, Any]]] = []
     for model in sorted(models, key=lambda m: m["id"]):
-        score = _aa_score(_resolve(model["id"], aa).aa_model)
+        score = EvaluatorCoordinator._aa_score(_resolve(model["id"], aa).aa_model)
         if score is not None:
             scored.append((score, model["id"], model))
     if not scored:
@@ -190,11 +148,6 @@ def pick_tracer_model(
     pool = preferred or scored
     pool.sort(key=lambda t: (-t[0], t[1]))
     return pool[0][2]
-
-
-def _auto_free_record(provider_name: str) -> dict[str, Any]:
-    """Auto-free provider: skip evaluation, return auto:free routing recommendation. Delegates to EvaluatorCoordinator."""
-    return EvaluatorCoordinator(provider_name=provider_name, aa=None, models_dev=None, evaluator=None, min_score=24.0, max_score=45.0)._auto_free_record(provider_name)
 
 
 def discover_single(
@@ -212,7 +165,14 @@ def discover_single(
     provider_config = _resolve_provider_config(provider_name, config)
     provider = resolve_provider(provider_config, models_dev)
     if provider.discovery_strategy == "bazaarlink":
-        return _auto_free_record(provider_name)
+        return EvaluatorCoordinator(
+            provider_name=provider_name,
+            aa=aa,
+            models_dev=models_dev,
+            evaluator=None,
+            min_score=config.artificial_analysis.min_score,
+            max_score=config.artificial_analysis.max_score,
+        )._auto_free_record()
     load_all_secrets(config.infisical)
     judge_secret_name = getattr(config.judge_llm, "secret", None)
     llm_api_key: str | None = None
@@ -345,7 +305,14 @@ def discover_provider(
     if provider.discovery_strategy == "bazaarlink":
         print(f"[{provider_name}] bazaarlink strategy -> auto:free")
         return {
-            "keep": [_auto_free_record(provider_name)],
+            "keep": [EvaluatorCoordinator(
+                provider_name=provider_name,
+                aa=aa,
+                models_dev=models_dev,
+                evaluator=None,
+                min_score=config.artificial_analysis.min_score,
+                max_score=config.artificial_analysis.max_score,
+            )._auto_free_record()],
             "drop": [],
             "error": [],
         }
@@ -471,7 +438,7 @@ def discover_provider(
             try:
                 evaluation = future.result()
             except Exception as exc:  # noqa: BLE001 — catch-all for thread errors
-                evaluation = _llm_error_record(model["id"], exc)
+                evaluation = coordinator._llm_error_record(model["id"], exc)
             decision = evaluation["decision"]
             tier = evaluation.get("tier", "?")
             print(f"[{provider_name}] [{completed}/{len(eval_models)}] {decision.upper():4} {tier:5} {model['id']}")

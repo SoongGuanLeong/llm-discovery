@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>llm-discovery — free coding LLMs, wired into your gateway</title>
+<meta name="description" content="Finds the best free coding LLMs across providers and wires them into your gateway.">
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --green: #3fb950;
+    --blue: #58a6ff;
+    --amber: #d29922;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    padding: 0 20px 96px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 16px;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code { overflow-wrap: anywhere; }
+  h1, h2, h3 { line-height: 1.25; font-weight: 600; }
+
+  header.top {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    padding: 20px 0;
+    border-bottom: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 13px;
+  }
+  header.top .name { color: var(--green); }
+  header.top .name::before { content: "$ "; color: var(--muted); }
+
+  .hero { padding: 64px 0 40px; }
+  .hero h1 {
+    margin: 0 0 20px;
+    font-size: clamp(26px, 5.2vw, 44px);
+    letter-spacing: -0.5px;
+  }
+  .hero h1 .accent { color: var(--green); }
+  .hero p.lede {
+    margin: 0 0 28px;
+    max-width: 62ch;
+    color: var(--muted);
+    font-size: clamp(15px, 2vw, 17px);
+  }
+  .cta { display: flex; flex-wrap: wrap; gap: 12px; }
+  .btn {
+    display: inline-block;
+    padding: 10px 18px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+  }
+  .btn.primary { background: var(--green); border-color: var(--green); color: #05210c; font-weight: 600; }
+  .btn:hover { text-decoration: none; border-color: var(--green); }
+  .btn.primary:hover { filter: brightness(1.08); }
+
+  section { padding: 36px 0; border-top: 1px solid var(--border); }
+  section > h2 {
+    margin: 0 0 8px;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 1.4px;
+    color: var(--muted);
+  }
+  section > h2::before { content: "# "; color: var(--green); }
+  section p { max-width: 68ch; }
+  .dim { color: var(--muted); }
+
+  ul.problems { list-style: none; margin: 20px 0 0; padding: 0; }
+  ul.problems li {
+    position: relative;
+    padding: 14px 16px 14px 40px;
+    margin-bottom: 10px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  ul.problems li::before {
+    content: "✗";
+    position: absolute;
+    left: 16px;
+    color: var(--amber);
+  }
+  ul.problems strong { color: var(--text); }
+
+  ol.steps { list-style: none; margin: 24px 0 0; padding: 0; counter-reset: step; }
+  ol.steps li {
+    position: relative;
+    margin: 0 0 0 22px;
+    padding: 0 0 22px 30px;
+    border-left: 1px solid var(--border);
+  }
+  ol.steps li:last-child { border-left-color: transparent; padding-bottom: 0; }
+  ol.steps li::before {
+    counter-increment: step;
+    content: counter(step);
+    position: absolute;
+    left: -13px;
+    top: 0;
+    width: 26px;
+    height: 26px;
+    display: grid;
+    place-items: center;
+    background: var(--panel);
+    border: 1px solid var(--green);
+    border-radius: 50%;
+    color: var(--green);
+    font-size: 13px;
+  }
+  ol.steps h3 { margin: 2px 0 4px; font-size: 16px; color: var(--text); }
+  ol.steps p { margin: 0; color: var(--muted); font-size: 14px; }
+
+  pre {
+    margin: 20px 0 0;
+    padding: 18px;
+    overflow-x: auto;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+  pre .k { color: var(--blue); }
+  pre .s { color: var(--amber); }
+  pre .p { color: var(--green); }
+  .caption { margin: 10px 0 0; color: var(--muted); font-size: 13px; }
+
+  .gateway {
+    margin-top: 20px;
+    padding: 18px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--amber);
+    border-radius: 6px;
+  }
+  .gateway p { margin: 0; }
+
+  footer {
+    padding: 32px 0 0;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 13px;
+  }
+  footer a { color: var(--muted); text-decoration: underline; }
+
+  .proto-bar {
+    position: fixed;
+    left: 50%;
+    bottom: 16px;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    background: #000;
+    border: 1px solid #6e7681;
+    border-radius: 999px;
+    box-shadow: 0 6px 24px rgba(0,0,0,.5);
+    font-size: 12px;
+    color: #c9d1d9;
+    white-space: nowrap;
+  }
+  .proto-bar .tag { color: var(--amber); }
+  .proto-bar a { color: #c9d1d9; }
+  .proto-bar a.here { color: var(--green); font-weight: 700; }
+
+  @media (max-width: 560px) {
+    .hero { padding-top: 44px; }
+    header.top { flex-direction: column; gap: 4px; }
+    .proto-bar { font-size: 11px; padding: 7px 12px; gap: 8px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <span class="name">llm-discovery</span>
+    <span>CLI · Python 3.12 · MIT</span>
+  </header>
+
+  <div class="hero">
+    <h1>Finds the best <span class="accent">free coding LLMs</span> across providers and wires them into your gateway.</h1>
+    <p class="lede">llm-discovery scans the providers you configure, judges every model for coding relevance, and exports a curated keep-list as gateway combos. One CLI, from discovery to a live route.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/SoongGuanLeong/llm-discovery#5-minute-golden-path">Read the Golden Path</a>
+      <a class="btn" href="https://github.com/SoongGuanLeong/llm-discovery">View the source</a>
+    </div>
+  </div>
+
+  <section>
+    <h2>The problem</h2>
+    <p>Free coding models are everywhere. Finding them is the work. Which models are free this week, which of those can actually write code, and which are worth routing to — that answer lives across a dozen model lists, pricing pages, and benchmark sites, and it changes constantly.</p>
+    <ul class="problems">
+      <li><strong>Free tiers are buried.</strong> Provider model lists don't say which entries are free, and the tags move without notice.</li>
+      <li><strong>A model list is not a shortlist.</strong> Names and sizes say nothing about coding quality.</li>
+      <li><strong>Wiring the survivors is manual.</strong> Copying keepers into a gateway drifts the moment a provider updates.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>How it works</h2>
+    <ol class="steps">
+      <li>
+        <h3>Configure</h3>
+        <p>List your providers in <code>config/providers.yaml</code>: a name, a base URL, and the env var holding its key.</p>
+      </li>
+      <li>
+        <h3>Discover</h3>
+        <p>Enumerate every provider's <code>/models</code> endpoint and drop non-free entries before spending a single judge token.</p>
+      </li>
+      <li>
+        <h3>Judge</h3>
+        <p>Resolve each model against models.dev and Artificial Analysis, then score coding relevance with an LLM judge.</p>
+      </li>
+      <li>
+        <h3>Build</h3>
+        <p>Keep what passes the Accurate-Enough Gate, cache it for 14 days, and re-judge only what changed.</p>
+      </li>
+      <li>
+        <h3>Export</h3>
+        <p>Partition keepers into <code>flash</code> / <code>max</code> / <code>contributor_free</code> combos and apply them to your gateway.</p>
+      </li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>What comes out</h2>
+    <p class="dim">A real excerpt from the export payload: one combo per non-empty tier, keep-all, <code>auto</code> strategy.</p>
+<pre><span class="p">[</span>
+  <span class="p">{</span>
+    <span class="k">"name"</span>: <span class="s">"contributor_free"</span>,
+    <span class="k">"strategy"</span>: <span class="s">"auto"</span>,
+    <span class="k">"models"</span>: <span class="p">[</span>
+      <span class="p">{</span> <span class="k">"provider"</span>: <span class="s">"bazaarlink"</span>, <span class="k">"model"</span>: <span class="s">"auto:free"</span> <span class="p">}</span>,
+      <span class="p">{</span> <span class="k">"provider"</span>: <span class="s">"groq"</span>, <span class="k">"model"</span>: <span class="s">"contributor-model-free"</span> <span class="p">}</span>
+    <span class="p">]</span>
+  <span class="p">}</span>,
+  <span class="p">{</span>
+    <span class="k">"name"</span>: <span class="s">"flash"</span>,
+    <span class="k">"strategy"</span>: <span class="s">"auto"</span>,
+    <span class="k">"models"</span>: <span class="p">[</span>
+      <span class="p">{</span> <span class="k">"provider"</span>: <span class="s">"groq"</span>, <span class="k">"model"</span>: <span class="s">"llama-3.3-70b-versatile"</span> <span class="p">}</span>
+    <span class="p">]</span>
+  <span class="p">}</span>
+<span class="p">]</span></pre>
+    <p class="caption">Excerpt from <code>data/derived/examples/omniroute_combos.example.json</code>.</p>
+  </section>
+
+  <section>
+    <h2>Run it</h2>
+    <p>llm-discovery is a CLI, and it is not a gateway. It finds the models and configures the OmniRoute gateway you already run — so the last step needs a reachable gateway and a management key. Everything before that is local.</p>
+    <div class="gateway">
+      <p>The <strong>5-minute Golden Path</strong> in the README walks the whole chain: <code>doctor</code>, <code>set-key</code>, <code>providers list</code>, <code>discover</code>, <code>build</code>, <code>export</code>. <a href="https://github.com/SoongGuanLeong/llm-discovery#5-minute-golden-path">Read the Golden Path →</a></p>
+    </div>
+  </section>
+
+  <footer>
+    <p>llm-discovery · MIT licensed · <a href="https://github.com/SoongGuanLeong/llm-discovery">github.com/SoongGuanLeong/llm-discovery</a></p>
+  </footer>
+
+</div>
+
+<nav class="proto-bar" aria-label="Prototype variants">
+  <span class="tag">PROTOTYPE</span>
+  <span>variant</span>
+  <a class="here" href="index.html">A · terminal</a>
+  <a href="variant-b.html">B · editorial</a>
+  <a href="variant-c.html">C · product</a>
+</nav>
+</body>
+</html>

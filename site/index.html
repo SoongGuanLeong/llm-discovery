@@ -205,9 +205,8 @@
     max-width: calc(100vw - 24px);
     padding: 8px 14px;
     background: #fff;
-    border: 1px solid var(--rule);
     border-radius: 10px;
-    box-shadow: 0 6px 24px rgba(20,23,26,.12);
+    box-shadow: inset 0 0 0 1px var(--rule), 0 6px 24px rgba(20,23,26,.12);
     font-family: var(--mono);
     font-size: 12px;
     color: var(--muted);
@@ -215,7 +214,7 @@
   }
   .proto-bar .tag { color: var(--accent); letter-spacing: 1px; }
   .proto-bar a { color: var(--muted); }
-  .proto-bar a.here { color: var(--ink); font-weight: 700; }
+  .proto-bar a.here { color: var(--ink); }
 
   @media (max-width: 640px) {
     body { font-size: 16.5px; }

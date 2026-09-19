@@ -26,6 +26,10 @@ _Avoid_: coverage, bench score
 Pre-probe free/paid split for pay-per-token gateways that publish a public console pricing endpoint. A model is free when its pricing row carries a free tag or a zero model ratio; a decisive mixed split filters discovery before the live probe, which cannot distinguish free from funded-paid on such gateways. Absent or non-mixed endpoint data falls back to the live probe. No model names are hardcoded.
 _Avoid_: console filter, pricing probe
 
+**Free Rule**:
+The single provider-scoped predicate answering whether a model is free. A model is free when its provider signals it: a free id marker (`:free`/`-free`/`_free`/`/free` suffix or `free/` prefix), zero pricing, an `access_tier` of free, or a named provider flag (kilo `isFree`, navy `premium` false, llm7 `tier` turbo, agnes `-flash`). The provider is an explicit input, so a fix for one provider cannot change another provider's result. The Pricing-Endpoint Filter is one input to this rule, not a synonym for it.
+_Avoid_: free-model rule, free filter
+
 **Auto-Free Provider**:
 A provider whose discovery strategy yields one synthetic `auto:free` record instead of per-model discovery, because its catalogue is a routing endpoint rather than a model list. Its record is always decision keep, tier flash.
 _Avoid_: auto provider, free router

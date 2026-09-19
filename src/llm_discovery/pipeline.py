@@ -25,6 +25,7 @@ from .gate import _is_router_model_id, is_accurate_enough
 from .model_info_store import ModelInfoStore
 from .categorize import categorize_model
 from .policy_gate import PolicyGate
+from .sibling import batch_has_older_kept_sibling, store_has_older_kept_sibling
 from .secrets import load_all_secrets, load_discovery_secrets, load_shared_secrets  # noqa: keep aliases for patch compat
 from .search_throttle import PROBE_CACHE_DEFAULT_PATH, get_search_accounting, make_cached_search
 
@@ -268,70 +269,6 @@ def discover_single(
     return coordinator.evaluate(model)
 
 
-# --- Sibling heuristic: same-batch predicate ---------------------------------
-# Hoisted from the inline copy in discover_provider so #291 can characterize it
-# against policy_gate._has_older_kept_sibling before unifying the two.
-_SIBLING_NUM_RE = re.compile(r"\d+(?:[\.\-]\d+)+")
-
-
-def _sibling_num(v: str) -> str:
-    m = _SIBLING_NUM_RE.search(v or "")
-    return m.group(0) if m else ""
-
-
-def _sibling_ver_tuple(v: str):
-    parts = re.split(r"[.\-]", v)
-    out = []
-    for p in parts:
-        mm = re.match(r"(\d+)", p)
-        if mm:
-            out.append(int(mm.group(1)))
-    return tuple(out)
-
-
-def _sibling_base(mid: str) -> str:
-    from .model_matching import ModelNormalizer
-
-    norm = ModelNormalizer.normalize(mid)
-    base = _SIBLING_NUM_RE.sub("", norm)
-    return re.sub(r"-+", "-", base).strip("-")
-
-
-def _batch_has_older_kept_sibling(
-    mid: str,
-    kept: list[dict[str, Any]],
-    self_evaluation: dict[str, Any] | None = None,
-) -> bool:
-    """Same-batch older-kept-sibling check over result["keep"] records."""
-    from .model_matching import ModelNormalizer
-
-    cur_num = _sibling_num(mid)
-    if not cur_num:
-        try:
-            cur_num = _sibling_num(ModelNormalizer.extract_signature(mid).version)
-        except Exception:
-            return False
-    if not cur_num:
-        return False
-    cur_ver = _sibling_ver_tuple(cur_num)
-    cur_base = _sibling_base(mid)
-    for k in kept:
-        if k is self_evaluation:
-            continue
-        kmid = k.get("provider_model_id") or k.get("model_id") or ""
-        if _sibling_base(kmid) != cur_base:
-            continue
-        try:
-            k_num = _sibling_num(ModelNormalizer.extract_signature(kmid).version) or _sibling_num(kmid)
-        except Exception:
-            k_num = _sibling_num(kmid)
-        if not k_num:
-            continue
-        if _sibling_ver_tuple(k_num) < cur_ver:
-            return True
-    return False
-
-
 def discover_provider(
     provider_name: str,
     config: Any,
@@ -538,12 +475,11 @@ def discover_provider(
             if tier not in ("uncertain", "drop"):
                 continue
             mid = evaluation.get("provider_model_id") or evaluation.get("model_id") or ""
-            promoted = _batch_has_older_kept_sibling(mid, kept, evaluation)
+            promoted = batch_has_older_kept_sibling(mid, kept)
             # also check store for older kept (covers cross-batch)
             if not promoted and store is not None:
                 try:
-                    from llm_discovery.policy_gate import _has_older_kept_sibling
-                    if _has_older_kept_sibling(mid, store):
+                    if store_has_older_kept_sibling(mid, store):
                         promoted = True
                 except Exception:
                     pass

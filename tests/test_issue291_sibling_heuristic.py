@@ -1,4 +1,5 @@
-"""Issue #291 — unify the sibling heuristic (phase 4 of #285).
+"""Issue #291 — unify the sibling heuristic (phase 4 of #285); issue #294 —
+single-component versions.
 
 The characterization baseline below was recorded, before unification, from the
 two implementations this change collapses:
@@ -8,6 +9,12 @@ two implementations this change collapses:
 
 Both now go through ``llm_discovery.sibling``. The corpus is the record that
 the unification is not a silent behaviour change.
+
+#294 then deliberately changes two of those answers (single-component
+signature versions now parse) and adds coverage for single-component ids and
+the ``step-*`` context-length family. ``BEHAVIOUR_DELTA`` names the changed
+rows; the rest of the historical corpus is asserted unchanged, and no row may
+regress from ``True`` to ``False``.
 """
 from __future__ import annotations
 
@@ -52,30 +59,76 @@ CHARACTERIZATION_CORPUS = [
     ("phi-4", "phi-3.5", False, False),
 ]
 
+# #294 — the rows whose answer changes versus the historical record above, and
+# their new answers. Single-component signature versions now parse, so a
+# single-component keeper/version participates in the comparison. Only rows
+# where the shared prefix already differs flip; the mixed-format ``gpt-4.1`` /
+# ``gpt-4`` row keeps its historical ``False`` (the shared prefix is equal).
+BEHAVIOUR_DELTA = {
+    ("phi-4", "phi-3.5"): True,  # (4,) vs (3, 5): shared prefix 4 > 3
+    ("o3-mini", "o1-mini"): True,  # (3,) vs (1,): same family "o", variant "mini"
+}
+
+# Rows #294 adds: single-component ids, the ``step-*`` context-length family,
+# and the mixed-arity rule. (candidate, keeper, expected).
+ADDITIONAL_CORPUS = [
+    ("gpt-5", "gpt-4", True),  # single-component keeper now parses
+    ("gpt-4", "gpt-5", False),
+    ("gpt-4.1", "gpt-4", False),  # mixed-arity: shared prefix (4,) == (4,)
+    ("phi-3.5", "phi-4", False),
+    ("step-2-16k", "step-1-8k", True),  # context-length family, no regression
+    ("step-1-8k", "step-2-16k", False),
+    ("claude-sonnet-4-5", "claude-sonnet-4", False),  # keeper has no version
+    ("mistral-7b", "mistral-8x7b", False),  # raw-id fallback stays narrow
+    ("mistral-8x7b", "mistral-7b", False),
+    ("llama-3.3-70b", "llama-3.3-8b", False),  # parameter size not a version
+    ("gpt-5", "gpt-5", False),
+]
+
 
 def test_characterization_corpus_covers_the_divergence():
     """The record must exercise the divergence, or reconciling it is vacuous."""
     assert any(store != batch for _, _, store, batch in CHARACTERIZATION_CORPUS)
 
 
-def test_unified_predicate_matches_the_gate_semantics_on_every_row():
-    """The store/gate path must be unchanged by the unification."""
+def test_behaviour_delta_is_exactly_the_single_component_rows():
+    """#294 changes these answers and no others."""
     from llm_discovery import sibling
 
-    for candidate, keeper, store_answer, _batch_answer in CHARACTERIZATION_CORPUS:
-        got = sibling.has_older_kept_sibling(candidate, [keeper])
-        assert got is store_answer, (candidate, keeper, got, store_answer)
+    changed = {
+        (candidate, keeper)
+        for candidate, keeper, store_answer, _batch in CHARACTERIZATION_CORPUS
+        if sibling.has_older_kept_sibling(candidate, [keeper]) is not store_answer
+    }
+    assert changed == set(BEHAVIOUR_DELTA)
 
 
-def test_unified_predicate_preserves_every_agreeing_row():
-    """Where the two old implementations agreed, the unified one still agrees."""
+def test_no_historical_row_regresses_from_true_to_false():
+    """A row the gate used to promote must still be promoted (#294 criterion)."""
     from llm_discovery import sibling
 
-    for candidate, keeper, store_answer, batch_answer in CHARACTERIZATION_CORPUS:
-        if store_answer != batch_answer:
-            continue
+    for candidate, keeper, store_answer, _batch in CHARACTERIZATION_CORPUS:
+        if store_answer:
+            assert sibling.has_older_kept_sibling(candidate, [keeper]) is True, (candidate, keeper)
+
+
+def test_contract_holds_on_the_historical_corpus():
+    """Historical answers, overridden by the stated #294 delta."""
+    from llm_discovery import sibling
+
+    for candidate, keeper, store_answer, _batch in CHARACTERIZATION_CORPUS:
+        expected = BEHAVIOUR_DELTA.get((candidate, keeper), store_answer)
         got = sibling.has_older_kept_sibling(candidate, [keeper])
-        assert got is batch_answer, (candidate, keeper, got, batch_answer)
+        assert got is expected, (candidate, keeper, got, expected)
+
+
+def test_additional_corpus_rows():
+    """Single-component ids, the step-* family, and the mixed-arity rule."""
+    from llm_discovery import sibling
+
+    for candidate, keeper, expected in ADDITIONAL_CORPUS:
+        got = sibling.has_older_kept_sibling(candidate, [keeper])
+        assert got is expected, (candidate, keeper, got, expected)
 
 
 def test_batch_adapter_reconciles_the_parameter_size_divergence():

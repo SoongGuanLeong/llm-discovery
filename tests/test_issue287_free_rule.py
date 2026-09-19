@@ -209,6 +209,22 @@ def test_split_matches_the_discovery_call_site_on_batches(label, provider, model
     assert [m["id"] for m in new_drop] == [m["id"] for m in old_drop]
 
 
+@pytest.mark.parametrize("label,provider,models", SPLIT_BATCHES, ids=[b[0] for b in SPLIT_BATCHES])
+def test_apply_free_model_rule_marks_exactly_the_split_drop_set(label, provider, models):
+    """The legacy mutating helper's drop markers must equal split()'s dropped set."""
+    batch = [dict(m) for m in models]
+    out = pipeline._apply_free_model_rule(batch, provider)
+    assert out is batch  # legacy helper mutates and returns the same list
+    marked = [m["id"] for m in out if m.get("_deterministic_drop")]
+    _keep, dropped = free_rule.split([dict(m) for m in models], provider)
+    assert marked == [m["id"] for m in dropped]
+    for m in out:
+        if m["id"] in marked:
+            assert m.get("_drop_reason")
+        else:
+            assert "_deterministic_drop" not in m
+
+
 def test_split_returns_all_when_nothing_is_free():
     models = [{"id": "a"}, {"id": "b"}]
     keep, dropped = free_rule.split(models)

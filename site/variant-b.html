@@ -69,7 +69,7 @@
   .hero p.lede { margin: 0 0 18px; color: var(--muted); font-size: 18px; }
   .hero .read { font-family: var(--mono); font-size: 14px; }
 
-  figure.pipeline { margin: 0; }
+  figure.pipeline { margin: 0; max-width: 340px; }
   figure.pipeline svg { display: block; width: 100%; height: auto; }
   figure.pipeline figcaption {
     margin-top: 10px;
@@ -177,7 +177,6 @@
   @media (max-width: 760px) {
     body { font-size: 17px; }
     .hero { grid-template-columns: 1fr; gap: 32px; padding-top: 40px; }
-    figure.pipeline { max-width: 420px; }
     .proto-bar { font-size: 11px; padding: 7px 12px; gap: 8px; }
   }
   @media (max-width: 420px) {
@@ -201,7 +200,7 @@
       <p class="read"><a href="https://github.com/SoongGuanLeong/llm-discovery#5-minute-golden-path">Read the 5-minute Golden Path →</a></p>
     </div>
     <figure class="pipeline">
-      <svg viewBox="0 0 420 380" role="img" aria-labelledby="pipe-title pipe-desc">
+      <svg viewBox="0 0 300 382" role="img" aria-labelledby="pipe-title pipe-desc">
         <title id="pipe-title">The llm-discovery pipeline</title>
         <desc id="pipe-desc">Five steps: configure providers, discover models, judge coding relevance, build the keep-list, export gateway combos.</desc>
         <defs>
@@ -210,39 +209,44 @@
           </marker>
         </defs>
 
-        <rect x="10" y="10" width="400" height="58" rx="4" fill="#f2ede2" stroke="#ddd5c6"/>
-        <circle cx="38" cy="39" r="14" fill="#8c2f1b"/>
-        <text x="38" y="44" text-anchor="middle" font-family="Georgia, serif" font-size="14" fill="#fbf9f4">1</text>
-        <text x="66" y="35" font-family="Georgia, serif" font-size="15" font-weight="700" fill="#1c1a17">Configure</text>
-        <text x="66" y="55" font-family="monospace" font-size="12" fill="#6b645a">providers.yaml — name, URL, secret</text>
-        <line x1="38" y1="68" x2="38" y2="82" stroke="#8c2f1b" marker-end="url(#arrow)"/>
+        <rect x="8" y="10" width="284" height="64" rx="4" fill="#f2ede2" stroke="#ddd5c6"/>
+        <circle cx="34" cy="42" r="13" fill="#8c2f1b"/>
+        <text x="34" y="47" text-anchor="middle" font-family="Georgia, serif" font-size="13" fill="#fbf9f4">1</text>
+        <text x="58" y="33" font-family="Georgia, serif" font-size="15" font-weight="700" fill="#1c1a17">Configure</text>
+        <text x="58" y="51" font-family="monospace" font-size="13" fill="#6b645a">providers.yaml</text>
+        <text x="58" y="66" font-family="monospace" font-size="13" fill="#6b645a">name, URL, secret env var</text>
+        <line x1="34" y1="74" x2="34" y2="86" stroke="#8c2f1b" marker-end="url(#arrow)"/>
 
-        <rect x="10" y="86" width="400" height="58" rx="4" fill="#f2ede2" stroke="#ddd5c6"/>
-        <circle cx="38" cy="115" r="14" fill="#8c2f1b"/>
-        <text x="38" y="120" text-anchor="middle" font-family="Georgia, serif" font-size="14" fill="#fbf9f4">2</text>
-        <text x="66" y="111" font-family="Georgia, serif" font-size="15" font-weight="700" fill="#1c1a17">Discover</text>
-        <text x="66" y="131" font-family="monospace" font-size="12" fill="#6b645a">/models, free-only, no judge spend</text>
-        <line x1="38" y1="144" x2="38" y2="158" stroke="#8c2f1b" marker-end="url(#arrow)"/>
+        <rect x="8" y="86" width="284" height="64" rx="4" fill="#f2ede2" stroke="#ddd5c6"/>
+        <circle cx="34" cy="118" r="13" fill="#8c2f1b"/>
+        <text x="34" y="123" text-anchor="middle" font-family="Georgia, serif" font-size="13" fill="#fbf9f4">2</text>
+        <text x="58" y="109" font-family="Georgia, serif" font-size="15" font-weight="700" fill="#1c1a17">Discover</text>
+        <text x="58" y="127" font-family="monospace" font-size="13" fill="#6b645a">each provider's /models</text>
+        <text x="58" y="142" font-family="monospace" font-size="13" fill="#6b645a">non-free dropped first</text>
+        <line x1="34" y1="150" x2="34" y2="162" stroke="#8c2f1b" marker-end="url(#arrow)"/>
 
-        <rect x="10" y="162" width="400" height="58" rx="4" fill="#f2ede2" stroke="#ddd5c6"/>
-        <circle cx="38" cy="191" r="14" fill="#8c2f1b"/>
-        <text x="38" y="196" text-anchor="middle" font-family="Georgia, serif" font-size="14" fill="#fbf9f4">3</text>
-        <text x="66" y="187" font-family="Georgia, serif" font-size="15" font-weight="700" fill="#1c1a17">Judge</text>
-        <text x="66" y="207" font-family="monospace" font-size="12" fill="#6b645a">models.dev + AA + LLM judge</text>
-        <line x1="38" y1="220" x2="38" y2="234" stroke="#8c2f1b" marker-end="url(#arrow)"/>
+        <rect x="8" y="162" width="284" height="64" rx="4" fill="#f2ede2" stroke="#ddd5c6"/>
+        <circle cx="34" cy="194" r="13" fill="#8c2f1b"/>
+        <text x="34" y="199" text-anchor="middle" font-family="Georgia, serif" font-size="13" fill="#fbf9f4">3</text>
+        <text x="58" y="185" font-family="Georgia, serif" font-size="15" font-weight="700" fill="#1c1a17">Judge</text>
+        <text x="58" y="203" font-family="monospace" font-size="13" fill="#6b645a">models.dev + AA + LLM judge</text>
+        <text x="58" y="218" font-family="monospace" font-size="13" fill="#6b645a">coding relevance scored</text>
+        <line x1="34" y1="226" x2="34" y2="238" stroke="#8c2f1b" marker-end="url(#arrow)"/>
 
-        <rect x="10" y="238" width="400" height="58" rx="4" fill="#f2ede2" stroke="#ddd5c6"/>
-        <circle cx="38" cy="267" r="14" fill="#8c2f1b"/>
-        <text x="38" y="272" text-anchor="middle" font-family="Georgia, serif" font-size="14" fill="#fbf9f4">4</text>
-        <text x="66" y="263" font-family="Georgia, serif" font-size="15" font-weight="700" fill="#1c1a17">Build</text>
-        <text x="66" y="283" font-family="monospace" font-size="12" fill="#6b645a">gate + 14-day cache, re-judge deltas</text>
-        <line x1="38" y1="296" x2="38" y2="310" stroke="#8c2f1b" marker-end="url(#arrow)"/>
+        <rect x="8" y="238" width="284" height="64" rx="4" fill="#f2ede2" stroke="#ddd5c6"/>
+        <circle cx="34" cy="270" r="13" fill="#8c2f1b"/>
+        <text x="34" y="275" text-anchor="middle" font-family="Georgia, serif" font-size="13" fill="#fbf9f4">4</text>
+        <text x="58" y="261" font-family="Georgia, serif" font-size="15" font-weight="700" fill="#1c1a17">Build</text>
+        <text x="58" y="279" font-family="monospace" font-size="13" fill="#6b645a">Accurate-Enough Gate</text>
+        <text x="58" y="294" font-family="monospace" font-size="13" fill="#6b645a">14-day record cache</text>
+        <line x1="34" y1="302" x2="34" y2="314" stroke="#8c2f1b" marker-end="url(#arrow)"/>
 
-        <rect x="10" y="314" width="400" height="58" rx="4" fill="#fbf9f4" stroke="#8c2f1b" stroke-width="2"/>
-        <circle cx="38" cy="343" r="14" fill="#8c2f1b"/>
-        <text x="38" y="348" text-anchor="middle" font-family="Georgia, serif" font-size="14" fill="#fbf9f4">5</text>
-        <text x="66" y="339" font-family="Georgia, serif" font-size="15" font-weight="700" fill="#1c1a17">Export</text>
-        <text x="66" y="359" font-family="monospace" font-size="12" fill="#6b645a">flash / max / contributor_free combos</text>
+        <rect x="8" y="314" width="284" height="64" rx="4" fill="#fbf9f4" stroke="#8c2f1b" stroke-width="2"/>
+        <circle cx="34" cy="346" r="13" fill="#8c2f1b"/>
+        <text x="34" y="351" text-anchor="middle" font-family="Georgia, serif" font-size="13" fill="#fbf9f4">5</text>
+        <text x="58" y="337" font-family="Georgia, serif" font-size="15" font-weight="700" fill="#1c1a17">Export</text>
+        <text x="58" y="355" font-family="monospace" font-size="13" fill="#6b645a">tier combos:</text>
+        <text x="58" y="370" font-family="monospace" font-size="13" fill="#6b645a">flash, max, contributor_free</text>
       </svg>
       <figcaption>The pipeline</figcaption>
     </figure>

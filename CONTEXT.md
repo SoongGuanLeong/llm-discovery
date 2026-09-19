@@ -27,7 +27,7 @@ Pre-probe free/paid split for pay-per-token gateways that publish a public conso
 _Avoid_: console filter, pricing probe
 
 **Free Rule**:
-The single provider-scoped predicate answering whether a model is free. A model is free when its provider signals it: a free id marker (`:free`/`-free`/`_free`/`/free` suffix or `free/` prefix), zero pricing, an `access_tier` of free, or a named provider flag (kilo `isFree`, navy `premium` false, llm7 `tier` turbo, agnes `-flash`). The provider is an explicit input, so a fix for one provider cannot change another provider's result. The Pricing-Endpoint Filter is one input to this rule, not a synonym for it.
+The single provider-scoped predicate answering whether a model is free. A model is free when its provider signals it: a free id marker (`:free`/`-free`/`_free`/`/free` suffix or `free/` prefix), zero pricing, an `access_tier` of free, or a named provider flag (kilo `isFree`, navy `premium` false, llm7 `tier` turbo, agnes `-flash`). The provider is an explicit input, so a fix for one provider cannot change another provider's result. The Pricing-Endpoint Filter is one input to this rule, not a synonym for it. Discovery and the Keeper gate's pricing floor both consume this rule rather than answering for themselves.
 _Avoid_: free-model rule, free filter
 
 **Auto-Free Provider**:

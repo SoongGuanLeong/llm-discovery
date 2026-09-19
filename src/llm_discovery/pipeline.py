@@ -18,10 +18,11 @@ from pathlib import Path
 from typing import Any
 
 # Thin coordinator seams — 4 adapters (12 → 4 explicit seam imports)
+from . import free_rule
 from .discovery import discover_cloudflare_models, discover_models
 from .evidence_collector import EvidenceCollector
 from .judge import Judge
-from .gate import _is_router_model_id, is_accurate_enough
+from .gate import is_accurate_enough
 from .model_info_store import ModelInfoStore
 from .categorize import categorize_model
 from .policy_gate import PolicyGate
@@ -608,130 +609,47 @@ def provider_error_result(name: str, exc: Exception) -> dict[str, list[dict[str,
 _provider_error_result = provider_error_result
 
 
-# "free/" is the prefix form (apinex: free/claude-opus-4.6); the rest are suffix forms.
-FREE_MARKERS = (":free", "-free", "_free", "/free", "free/")
+# The Free Rule lives in ``free_rule`` (one definition). These pipeline names
+# are thin delegates kept for call-site and test compatibility; the decision is
+# no longer answered here (#288). ``FREE_MARKERS`` is aliased, not copied.
+FREE_MARKERS = free_rule.FREE_MARKERS
 
 
 def _is_pricing_free(model: dict[str, Any]) -> bool:
-    """Generic pricing==0 free detection (no hardcoded model names).
-
-    Only checks prompt/completion/input/output pricing, not ancillary
-    fields like request/image/web_search which are 0 for many paid models
-    (e.g. kilo). Covers prompt/input/output/blended and flattened prices.
-    """
-    pricing = model.get("pricing")
-    # Only check relevant pricing keys, not every value in dict
-    relevant_keys = ("prompt", "completion", "input", "output", "input_cache_read", "input_cache_write", "price", "prices", "cost", "price_1m_input_tokens", "price_1m_output_tokens", "price_1m_blended_3_to_1", "prompt_price", "completion_price", "input_price", "output_price")
-    if isinstance(pricing, dict):
-        for k, v in pricing.items():
-            if k not in relevant_keys and "prompt" not in k and "completion" not in k and "input" not in k and "output" not in k and "price" not in k:
-                continue
-            try:
-                if float(v) == 0:
-                    # Need to ensure it's actually prompt/completion/input/output, not request/image
-                    # For kilo, efficient has prompt -1, free has 0, so this distinguishes
-                    return True
-            except (ValueError, TypeError):
-                continue
-    for _k in relevant_keys:
-        val = model.get(_k)
-        if val is not None:
-            try:
-                if float(val) == 0:
-                    return True
-            except (ValueError, TypeError):
-                continue
-        if isinstance(pricing, dict) and _k in pricing:
-            try:
-                if float(pricing[_k]) == 0:
-                    return True
-            except (ValueError, TypeError):
-                continue
-    return False
+    """Delegate to :func:`free_rule._is_pricing_free` (Free Rule, #288)."""
+    return free_rule._is_pricing_free(model)
 
 
 def _is_access_tier_free(model: dict[str, Any]) -> bool:
-    """Check access_tier == free (xkiro: access_tier free vs paid/premium)."""
-    tier = model.get("access_tier")
-    if isinstance(tier, str) and tier.strip().lower() == "free":
-        return True
-    return False
+    """Delegate to :func:`free_rule._is_access_tier_free` (Free Rule, #288)."""
+    return free_rule._is_access_tier_free(model)
 
 
 def _is_free_model(model: dict[str, Any] | str, provider_name: str | None = None) -> bool:
-    """Return True if model is free (provider-aware, no hardcoded model names).
+    """Delegate to :func:`free_rule.is_free` (Free Rule, #288).
 
-    Generic: id contains any FREE_MARKERS (suffix :free/-free/_free//free or
-    prefix free/) OR pricing == 0 OR access_tier == free.
-    navy_ai: marker OR premium is False (identity check) OR pricing == 0.
-    llm7: tier==turbo OR marker OR pricing == 0.
-    agnes: marker OR -flash suffix OR pricing == 0.
-    xkiro: access_tier == "free" OR pricing == 0. The earlier keep-all
-    exemption was withdrawn (issue #266): xkiro's free credits are usable only
-    on free-tier models, so paid/premium models must not be evaluated.
-    All other providers (bai, bestvirtualgoods, vyceai, nvidia_nim,
-    ollama_cloud, etc): marker OR pricing == 0 OR access_tier free — no hardcoded allowlists.
-    Missing/None/string premium -> marker/pricing fallback. Str model -> marker-only.
+    Provider is an explicit input so a fix for one provider cannot change
+    another provider's result.
     """
-    if isinstance(model, dict):
-        # kilo: isFree flag is authoritative when a real model descriptor is given
-        if model.get("isFree") is True:
-            return True
-        model_id = str(model.get("id", ""))
-        is_marker = any(marker in model_id for marker in FREE_MARKERS)
-        if is_marker:
-            return True
-
-        # Provider-specific flags (non-name signals)
-        if provider_name == "navy_ai" and model.get("premium") is False:
-            return True
-        if provider_name == "llm7" and model.get("tier") == "turbo":
-            return True
-        if provider_name == "agnes" and "-flash" in model_id:
-            return True
-
-        # Generic pricing == 0 — applies to ALL providers (replaces hardcoded BVG list and vyceai/xkiro scoping)
-        if _is_pricing_free(model):
-            return True
-        if _is_access_tier_free(model):
-            return True
-
-        return False
-    model_id = str(model)
-    return any(marker in model_id for marker in FREE_MARKERS)
+    return free_rule.is_free(model, provider_name)
 
 
 def _has_free_name(models: list[dict[str, Any]], provider_name: str | None = None) -> bool:
-    """Return True if any model qualifies as free under provider rule."""
-    return any(_is_free_model(m, provider_name) for m in models)
+    """Delegate to :func:`free_rule.has_free` (Free Rule, #288)."""
+    return free_rule.has_free(models, provider_name)
 
 
 def _split_by_free_rule(
     models: list[dict[str, Any]],
     provider_name: str = "",
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Split models into (keep, dropped) by free-model rule (provider-aware).
+    """Delegate to :func:`free_rule.split` (Free Rule, #288).
 
-    Generic (default): if any id contains a free marker OR pricing == 0,
-    only free models kept (pricing check replaces hardcoded allowlists).
-    navy_ai: marker OR premium is False OR pricing == 0.
-    llm7: tier==turbo OR marker OR pricing == 0.
-    agnes: -flash suffix OR marker OR pricing == 0.
-    xkiro: access_tier == "free" OR pricing == 0 (free-only; the earlier keep-all
-    exemption was withdrawn in issue #266 — xkiro's free credits are usable only
-    on free-tier models).
-    All other providers: marker OR pricing == 0 (generic, no hardcoded names).
-    Default provider_name="" => generic marker/pricing, zero regression.
-    Dropped models must NOT be sent to LLM nor written to YAML — free filter
-    always runs before LLM judgement.
+    Dropped models must NOT be sent to LLM nor written to YAML — the free
+    filter always runs before LLM judgement. When nothing is free the whole
+    list is kept and nothing dropped (same list object).
     """
-    # Normalize provider_name for _is_free_model (None vs "" both generic)
-    pn = provider_name or None
-    if not _has_free_name(models, pn):
-        return models, []
-    free_models = [m for m in models if _is_free_model(m, pn)]
-    non_free = [m for m in models if m not in free_models]
-    return free_models, non_free
+    return free_rule.split(models, provider_name)
 
 
 def _apply_free_model_rule(
@@ -924,9 +842,10 @@ def _fetch_pricing_free_ids(base_url: str, timeout: float = PRICING_ENDPOINT_TIM
     """Fetch the console pricing endpoint and return ids of truly-free models.
 
     Tries the /api/pricing console endpoint on both the API host and the web
-    host (base_url host with the 'api.' prefix stripped). A row is free when
-    its tags contain 'free' or its model_ratio is 0. Returns None when the
-    endpoint is absent or unparsable so callers fall back to the live probe.
+    host (base_url host with the 'api.' prefix stripped). A row is free per
+    :func:`free_rule.pricing_row_is_free` (tags contain 'free' or model_ratio
+    is 0). Returns None when the endpoint is absent or unparsable so callers
+    fall back to the live probe.
     """
     try:
         import httpx
@@ -957,12 +876,7 @@ def _fetch_pricing_free_ids(base_url: str, timeout: float = PRICING_ENDPOINT_TIM
             name = row.get("model_name") or row.get("id") or row.get("model")
             if not isinstance(name, str) or not name:
                 continue
-            tags = row.get("tags")
-            tags_free = isinstance(tags, str) and "free" in tags.lower()
-            tags_free = tags_free or (isinstance(tags, list) and any(isinstance(t, str) and "free" in t.lower() for t in tags))
-            ratio = row.get("model_ratio")
-            ratio_free = isinstance(ratio, (int, float)) and ratio == 0
-            if tags_free or ratio_free:
+            if free_rule.pricing_row_is_free(row):
                 free_ids.add(name)
         return free_ids
     return None

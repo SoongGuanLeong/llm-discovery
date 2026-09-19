@@ -8,7 +8,7 @@ Strong via is_accurate_enough; moderate needs AA match plus pricing plus coverag
 Floors (issue #247):
 - evidence_level in {strong, moderate}
 - coding_score != null
-- pricing present OR free-marker (:free/-free/_free//free or blended==0)
+- pricing present OR free under the Free Rule (``free_rule.is_free``; issue #288)
 - strong: aa_model_id present OR supplement bench >=50 with http URL;
   moderate: aa_model_id present required (no supplement fallback)
 - benchmark_coverage >=0.25 (KEY_SIGNALS: aa_intelligence, swe_bench_verified, livecodebench, humaneval)
@@ -18,11 +18,24 @@ Floors (issue #247):
 Gate operates on provider keep record dicts (YAML or pipeline evaluation) before
 store.put / merge_records. Store slim v2 holds only benchmarks+pricing+_meta;
 gate fields are not persisted, so check must happen at source.
+
+Free Rule reconciliation (#288)
+------------------------------
+Floor 3's free branch used to be ``gate._is_free_model_id`` — a narrower,
+case-insensitive regex anchored at the end of the id — plus a blended-only
+zero-price check. That is why a model could be free on the discovery path and
+paid inside the gate (#285 problem 2; the divergence is recorded row by row in
+``tests/test_issue287_free_rule.py``). #288 deletes that copy: floor 3 now calls
+:func:`free_rule.is_free` with the record (its ``model_id`` supplied as ``id``)
+and the provider, so the gate adopts the discovery answer. The gate no longer
+has a free predicate of its own.
 """
 from __future__ import annotations
 
 import re
 from typing import Any
+
+from . import free_rule
 
 HALLUCINATED_DENYLIST = {"tokenmix.ai", "callsphere.ai", "benchlm"}
 
@@ -62,42 +75,34 @@ def _is_hallucinated_evidence(evidence: list[str] | None) -> bool:
     return any(d in joined for d in HALLUCINATED_DENYLIST)
 
 
-def _is_free_model_id(model_id: str | None) -> bool:
-    if not model_id:
-        return False
-    lower = model_id.strip().lower()
-    return bool(re.search(r"(?:[:/_-]|^)free$", lower))
-
-
 def _is_router_model_id(model_id: str | None) -> bool:
-    if not model_id:
-        return False
-    lower = model_id.strip().lower()
-    if lower in ("kilo-auto/free", "openrouter/free"):
-        return True
-    if "router" in lower:
-        return True
-    if "auto" in lower and "free" in lower:
-        return True
-    return False
+    """Delegate to :func:`free_rule.is_router` (one router definition, #288)."""
+    return free_rule.is_router(model_id)
 
 
-def is_accurate_enough(record: dict[str, Any]) -> tuple[bool, str]:
+def is_accurate_enough(record: dict[str, Any], provider: str | None = None) -> tuple[bool, str]:
     """ADR 0006 Accurate-Enough Gate predicate.
 
     Returns (ok, reason). Reason empty when ok, otherwise first failing floor.
     Operates on provider keep record dict (same shape as ProviderBatchWriter._to_record
     or PolicyGate.apply output).
+
+    provider is optional and provider-scoped (Free Rule, #288): when omitted it
+    falls back to ``record["provider"]``. A model that is free on the discovery
+    path is free here — floor 3 asks :func:`free_rule.is_free` instead of
+    answering for itself. Callers that pass only the record keep working.
     """
     d = record if isinstance(record, dict) else {}
+    if provider is None:
+        provider = d.get("provider")
     model_id = d.get("model_id") or d.get("provider_model_id") or ""
     # Router/auto-free early pass (ADR 0006): routing fallbacks are always keep
     # but never coding Keepers — they carry no coding_score/pricing/AA signal by
-    # design, so the coding-Keeper floors do not apply. `_is_router_model_id`
+    # design, so the coding-Keeper floors do not apply. :func:`free_rule.is_router`
     # covers the synthetic `auto:free` (bazaarlink) plus `kilo-auto/free`,
     # `openrouter/free`, and any `*router*` id. Returns the policy reason so the
     # caller can tag these separately from coding Keeper passes.
-    if _is_router_model_id(model_id):
+    if free_rule.is_router(model_id):
         return True, "router"
     evidence_level = d.get("evidence_level")
     coding_score = d.get("coding_score")
@@ -125,7 +130,9 @@ def is_accurate_enough(record: dict[str, Any]) -> tuple[bool, str]:
     # Floor 2: coding_score != null
     if coding_score is None:
         return False, "coding_score is null"
-    # Floor 3: pricing present OR free-marker
+    # Floor 3: pricing present OR free under the Free Rule (#288).
+    # The record's model_id is supplied as ``id`` so id markers are seen; the
+    # rest of the record carries pricing/isFree/access_tier/premium/tier.
     has_pricing = False
     if isinstance(pricing, dict):
         # empty dict {} counts as missing
@@ -140,7 +147,7 @@ def is_accurate_enough(record: dict[str, Any]) -> tuple[bool, str]:
             has_pricing = False
     elif pricing is not None:
         has_pricing = True
-    is_free = _is_free_model_id(model_id) or (pricing_blended == 0)
+    is_free = free_rule.is_free({**d, "id": model_id}, provider)
     if not has_pricing and not is_free:
         return False, "pricing missing and not free"
     # Floor 4: strong allows aa_model_id or supplement >=50 with http URL;

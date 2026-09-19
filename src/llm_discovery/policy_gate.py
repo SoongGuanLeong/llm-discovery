@@ -14,27 +14,20 @@ Keeps pipeline <30 lines and isolates policy bugs to this module.
 """
 from typing import Any
 
+from . import free_rule
 from .benchmarks import build_benchmark_profile, compute_coding_score, has_critical_weakness
 from .categorize import categorize_model
 from .sibling import store_has_older_kept_sibling
 
 
 def _is_router_model(model_id: str) -> bool:
-    """Router models (e.g. kilo-auto/free, openrouter/free) are always kept.
+    """Delegate to :func:`free_rule.is_router` (one router definition, #288).
 
-    Routers are meta-models that delegate to free candidates; they have no
-    coding benchmarks but must appear in the keep list for routing.
+    Router models (e.g. kilo-auto/free, openrouter/free) are meta-models that
+    delegate to free candidates; they have no coding benchmarks but must appear
+    in the keep list for routing.
     """
-    lower = model_id.lower()
-    # Exact router ids + generic router substring
-    if lower in ("kilo-auto/free", "openrouter/free"):
-        return True
-    if "router" in lower:
-        return True
-    # kilo auto-routing pattern
-    if "auto" in lower and "free" in lower:
-        return True
-    return False
+    return free_rule.is_router(model_id)
 
 
 def _aa_score(aa_model: dict[str, Any] | None) -> float | None:

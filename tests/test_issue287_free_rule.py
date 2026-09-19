@@ -121,6 +121,12 @@ ROUTER_CORPUS = [
     "gpt-4",
     "",
     "free/claude-opus-4.6",
+    # Negative rows that isolate the auto+free branch: "auto" without "free"
+    # and "free" without "auto" are both not routers. Without these a mutation
+    # that drops either half of the branch survives the corpus.
+    "kilo-auto",
+    "auto-select",
+    "free-tier",
 ]
 
 # --------------------------------------------------------------------------
@@ -248,6 +254,20 @@ def test_router_corpus_covers_the_router_shapes():
     assert free_rule.is_router("some-router-x") is True
     assert free_rule.is_router("auto:free") is True
     assert free_rule.is_router("gpt-4") is False
+
+
+def test_router_auto_branch_requires_both_auto_and_free():
+    """The auto+free branch is a conjunction, not either half alone.
+
+    Pins each side independently so a mutation dropping one half fails here:
+    "auto" alone and "free" alone are not routers, together they are.
+    """
+    for auto_only in ("kilo-auto", "auto-select", "autocomplete"):
+        assert free_rule.is_router(auto_only) is False, auto_only
+    for free_only in ("free-tier", "model-free", "free/"):
+        assert free_rule.is_router(free_only) is False, free_only
+    for both in ("auto:free", "myauto/free", "auto-free"):
+        assert free_rule.is_router(both) is True, both
 
 
 # --------------------------------------------------------------------------

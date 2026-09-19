@@ -13,6 +13,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from . import free_rule
+
 # Level ordering: none < weak < moderate < strong (mirrors PolicyGate._max_evidence_level)
 LEVEL_ORDER = {"none": 0, "weak": 1, "moderate": 2, "strong": 3}
 
@@ -29,13 +31,11 @@ _URL_RE = re.compile(r"https?://[^\s\)]+")  # same family as verified_claim guar
 
 
 def _is_router(model_id: str) -> bool:
-    """Router meta-models are force-strong; never part of a weak sample."""
-    try:
-        from .policy_gate import _is_router_model
-        return _is_router_model(model_id)
-    except Exception:
-        lower = model_id.lower()
-        return "router" in lower or ("auto" in lower and "free" in lower)
+    """Router meta-models are force-strong; never part of a weak sample.
+
+    Delegate to :func:`free_rule.is_router` (one router definition, #288).
+    """
+    return free_rule.is_router(model_id)
 
 
 def _is_specialized_id(model_id: str) -> bool:

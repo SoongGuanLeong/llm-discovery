@@ -2,30 +2,24 @@
 from __future__ import annotations
 import re
 
+from .free_rule import strip_free_suffix
+
 def canonical_key(model_id: str) -> str:
     if not model_id:
         return ""
     v = model_id.lower().strip()
     # strip free suffix first (covers slash case minimax-m3/free)
-    v = re.sub(r"[:/_-]free$", "", v)
+    v = strip_free_suffix(v)
     # handle stepfun -> step compat (store keys)
     if v.startswith("stepfun-"):
         v = "step-" + v[len("stepfun-"):]
     elif v.startswith("stepfun/"):
         v = "step/" + v[len("stepfun/"):]
-    # then strip provider prefix via rsplit
-    # but keep bare if provider prefix is part of free handling? already stripped
-    # handle bare after slash
-    # need to handle case where v is still like "minimax-m3" after free strip
-    # rsplit after free strip ensures minimax-m3/free -> minimax-m3
-    # for quantized provider namespaces, keep last segment
-    if "/" in v:
-        # if v still contains slash after free strip, take last segment (provider namespace)
-        v = v.rsplit("/", 1)[-1]
-        v = re.sub(r"[:/_-]free$", "", v)
-    else:
-        v = v.rsplit("/", 1)[-1]
-        v = re.sub(r"[:/_-]free$", "", v)
+    # then take the last segment (provider namespace) and strip a free marker
+    # it may still expose: rsplit after the first strip means
+    # minimax-m3/free -> minimax-m3 and a-free/free -> a
+    v = v.rsplit("/", 1)[-1]
+    v = strip_free_suffix(v)
     for pref in ("coding-", "xiaomi-"):
         if v.startswith(pref):
             v = v[len(pref):]

@@ -23,6 +23,12 @@ Research #81 audited 122 keeps across 17 providers: 111 strong (0.23 benchmark_c
 - evidence contains at least one `http` URL
 - model_id is not UUID-shaped and not in hallucinated denylist (`tokenmix.ai`, `callsphere.ai`, `benchlm`)
 
+Amended by #288: floor 3's free branch is now the provider-scoped Free Rule
+(`free_rule.is_free`, called with the record and provider) rather than a
+gate-local free-marker regex. The discovery answer wins, so a model free on the
+discovery path is free in the gate. The floor stays a disjunction —
+"pricing present OR free".
+
 Failing any floor means Candidate, not Keeper, even if `decision == keep`. Slim v2 store holds only Keepers; gate still decides keep before put, but slim record does not persist the gate fields.
 
 ### 4. TTL — per-record, 14 days

@@ -6,6 +6,7 @@ from typing import Any
 
 from .evidence_category import EvidenceCategory, EvidencePolarity, EvidenceSource
 from .evidence_packet import BenchmarkEvidence, EvidencePacket, ProviderClaim
+from .free_rule import strip_free_suffix
 
 
 def classify_benchmark_score(source: EvidenceSource, value: float | None) -> EvidencePolarity:
@@ -94,8 +95,7 @@ class EvidenceCollector:
         md_model = models_dev.get_model(model_id_lower)
         # Canonical variant fallback via evidence_identity (free, minimax-m3, stepfun-, dot/hyphen, suffix, dated, etc.)
         if md_model is None:
-            import re
-            stripped = re.sub(r"[:/_-]free$", "", model_id_lower)
+            stripped = strip_free_suffix(model_id_lower)
             if stripped != model_id_lower:
                 md_model = models_dev.get_model(stripped)
                 if md_model is None:

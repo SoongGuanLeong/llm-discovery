@@ -1,10 +1,16 @@
 """Free rule — one predicate for "is this model free?" and "is this a router?".
 
-Phase 2 of #285 / issue #287 (the expand step). This module is additive: nothing
-imports it yet. ``pipeline``, ``gate``, ``policy_gate`` and ``search_budget``
-keep their own copies until #288 migrates them onto this interface and #292
-deletes the copies. Behaviour here is absorbed verbatim from the call sites it
-will replace, so the migration is a move, not a rule change.
+Issue #287 added this module (Phase 2 of #285, the expand step); issue #288
+wired the free/router callers onto it and issue #289 migrated the free-suffix
+strip onto :func:`strip_free_suffix`. ``pipeline``, ``gate``, ``policy_gate``
+and ``search_budget`` no longer answer the free/router question themselves —
+their old private names are thin delegates to this module, and ``FREE_MARKERS``
+is aliased rather than copied. The free/router predicates were absorbed verbatim
+from the call sites they replaced, so that half of the migration is a move, not
+a rule change. The free-suffix half (#289) is deliberately not a pure move:
+:func:`strip_free_suffix` anchors the strip, so ``evidence_utils.clean_evidence``
+no longer rewrites ids where ``free`` is not a trailing marker (``model-freedom``
+previously became ``modeldom``). ``canonical_key`` output is unchanged.
 
 The free rule is *provider-scoped*: :func:`is_free` takes the provider name as
 an explicit input, so a fix for one provider cannot change another provider's
@@ -24,40 +30,54 @@ absorbed from ``pipeline._is_free_model``, are:
 Every other provider is generic: a :data:`FREE_MARKERS` id marker, zero pricing
 in the recognised pricing shapes, or an ``access_tier`` of ``free``.
 
-Documented divergence from the Keeper gate (#287)
--------------------------------------------------
-``gate._is_free_model_id`` is one of the nine pre-consolidation free-rule copies
-but uses a different, narrower predicate: a case-insensitive regex anchored at
-the end of the id, ``(?:[:/_-]|^)free$``. It therefore misses the apinex
-``free/`` prefix, non-terminal markers (``foo-free-bar``), and every
+The Keeper gate's free branch (#288)
+------------------------------------
+``gate._is_free_model_id`` was one of the nine pre-consolidation free-rule
+copies but used a different, narrower predicate: a case-insensitive regex
+anchored at the end of the id, ``(?:[:/_-]|^)free$``. It therefore missed the
+apinex ``free/`` prefix, non-terminal markers (``foo-free-bar``), and every
 non-id signal (``isFree``, ``premium``, ``tier``, ``access_tier``, pricing); it
-also matches ids the discovery rule rejects (``GPT-4:FREE``, bare ``free``)
-because it lowercases. Its floor-3 pricing check reads only a blended price, so
-it misses the prompt/completion/input/output shapes the discovery rule accepts.
-That gap is why a model can be free on the discovery path and paid inside the
-gate (#285 problem 2); ADR 0006 §3 records the gate's narrower free-marker
-exception this widens. This module keeps the discovery semantics; the gate's
-narrower set is recorded row by row in ``tests/test_issue287_free_rule.py`` and
-closed by #288, which makes ``is_accurate_enough`` call :func:`is_free`. No
-divergence is left implicit.
+also matched ids the discovery rule rejects (``GPT-4:FREE``, bare ``free``)
+because it lowercased. Its floor-3 pricing check read only a blended price, so
+it missed the prompt/completion/input/output shapes the discovery rule accepts.
+That gap is why a model could be free on the discovery path and paid inside the
+gate (#285 problem 2); ADR 0006 §3's narrower free-marker exception is widened
+by the amendment recorded there.
+
+#288 deleted that copy: ``gate.is_accurate_enough`` floor 3 now calls
+:func:`is_free` with the record (its ``model_id`` supplied as ``id``) and the
+provider, so the gate adopts the discovery answer. The reconciliation is pinned
+row by row in ``tests/test_issue287_free_rule.py`` — the pre-#288 divergence is
+closed, and the only remaining gate-vs-rule difference is the gate floor being
+"pricing present OR free", which is not a second free rule.
 
 The pricing-endpoint signal is an input to the free rule, not a second rule:
 :func:`pricing_row_is_free` is the per-row decision behind the
 **Pricing-Endpoint Filter** term in ``CONTEXT.md``. The live-probe split is
-network I/O, not a predicate, and stays in ``pipeline`` for the migration
-issues to wire through.
-
-This module is additive by design (the expand half of #285 Phase 2): it copies
-the call sites' behaviour verbatim so #288 can migrate onto it and #292 can
-delete the copies. ``FREE_MARKERS`` is therefore duplicated in ``pipeline``
-until #292; the two must not be edited independently before then.
+network I/O, not a predicate, and stays in ``pipeline``.
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 # "free/" is the prefix form (apinex: free/claude-opus-4.6); the rest are suffix forms.
 FREE_MARKERS = (":free", "-free", "_free", "/free", "free/")
+
+
+def strip_free_suffix(text: str) -> str:
+    """Strip one trailing free marker from *text*.
+
+    Removes ``:free``, ``-free``, ``_free`` or ``/free`` at the end of the
+    string, case-insensitively. This is the one home for the free-suffix strip
+    shared by ``evidence_identity.canonical_key``, ``evidence_utils.clean_evidence``,
+    the ``model_matching`` alias lookup and ``evidence_collector`` (issue #289).
+    The strip is anchored: a marker in the middle (``foo-free-bar``) and the
+    ``free/`` prefix form (apinex: ``free/claude-opus-4.6``) are left for the
+    caller to handle.
+    """
+    return re.sub(r"[:/_-]free$", "", text, flags=re.IGNORECASE)
+
 
 # Pricing keys that actually describe a per-token price. Ancillary fields
 # (request, image, web_search) are 0 for many paid models (e.g. kilo), so they
@@ -196,7 +216,8 @@ def is_router(model_id: str | None) -> bool:
     union is unchanged (verified over the router corpus and a brute-force id
     space). The three copies agree on every corpus row; the only difference is
     input handling — ``policy_gate._is_router_model`` would raise on ``None`` —
-    and this function resolves that to ``False``. #288 removes the copies.
+    and this function resolves that to ``False``. #288 replaced those copies
+    with delegates to this function.
     """
     if not model_id:
         return False
@@ -212,9 +233,8 @@ def pricing_row_is_free(row: dict[str, Any]) -> bool:
     """Per-row predicate behind the Pricing-Endpoint Filter.
 
     A console pricing row is free when its ``tags`` carry ``free`` (string or
-    list) or its ``model_ratio`` is ``0``. This is the decision
-    ``pipeline._fetch_pricing_free_ids`` makes inline today; it is one input to
-    the free rule, not a separate rule.
+    list) or its ``model_ratio`` is ``0``. This is one input to the free rule,
+    not a separate rule; ``pipeline._fetch_pricing_free_ids`` calls it per row.
     """
     if not isinstance(row, dict):
         return False

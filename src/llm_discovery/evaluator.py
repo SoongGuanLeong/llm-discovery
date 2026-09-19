@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from .gate import _is_router_model_id, is_accurate_enough
+from .gate import is_accurate_enough
 from .judge import Judge
 from .search_throttle import bump_judge_call
 from .model_info_store import (
@@ -265,7 +265,7 @@ class EvaluatorCoordinator:
             result = self._deterministic_strong_record(model_id, resolution, _profile, packet)
             if self.store is not None and result.get("decision") == "keep":
                 try:
-                    ok, _ = is_accurate_enough(result)
+                    ok, _ = is_accurate_enough(result, self.provider_name)
                     if ok:
                         self._persist(model_id, resolution, result)
                 except Exception:
@@ -392,7 +392,7 @@ class EvaluatorCoordinator:
                 result["evidence_status"] = "recovered"
                 if self.store is not None and result.get("decision") == "keep":
                     try:
-                        ok, _ = is_accurate_enough(result)
+                        ok, _ = is_accurate_enough(result, self.provider_name)
                         if ok:
                             self._persist(model_id, rec_resolution, result)
                     except Exception:
@@ -442,7 +442,7 @@ class EvaluatorCoordinator:
                         _llm_lvl = str(llm_res.get("evidence_level", "")).strip().lower()
                         if self.store is not None and _llm_lvl not in ("weak", "none") and llm_res.get("decision") == "keep":
                             try:
-                                ok, _ = is_accurate_enough(llm_res)
+                                ok, _ = is_accurate_enough(llm_res, self.provider_name)
                                 if ok:
                                     self._persist(model_id, llm_resolution, llm_res)
                             except Exception:
@@ -509,7 +509,7 @@ class EvaluatorCoordinator:
         # strong/moderate keep/drop store writes stay exactly as before.
         if self.store is not None and _llm_lvl not in ("weak", "none") and result.get("decision") == "keep":
             try:
-                ok, _ = is_accurate_enough(result)
+                ok, _ = is_accurate_enough(result, self.provider_name)
                 if ok:
                     self._persist(model_id, resolution, result)
             except Exception:

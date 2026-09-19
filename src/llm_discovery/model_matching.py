@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 from difflib import SequenceMatcher
 
+from .free_rule import strip_free_suffix
+
 
 def normalize_model_id(value: str) -> str:
     """Normalize via shared canonical layer."""
@@ -486,8 +488,8 @@ class ModelMatcher:
             if hit:
                 return ModelResolution(provider_model_id=provider_model_id, aa_model=hit[0], method="alias_deepseek-new")
         # Strip free suffix before alias lookup so mimo-v2.5-free hits mimo-v2.5 entry (issue #50)
-        stripped_slug = re.sub(r"[:/_-]free$", "", provider_slug, flags=re.IGNORECASE)
-        stripped_base = re.sub(r"[:/_-]free$", "", base_slug, flags=re.IGNORECASE)
+        stripped_slug = strip_free_suffix(provider_slug)
+        stripped_base = strip_free_suffix(base_slug)
         # Strip AiHubMix vendor prefix (coding-, xiaomi-) for alias lookup
         prefix_stripped_slug = re.sub(r"^(coding-|xiaomi-)", "", stripped_slug, flags=re.IGNORECASE)
         prefix_stripped_base = re.sub(r"^(coding-|xiaomi-)", "", stripped_base, flags=re.IGNORECASE)

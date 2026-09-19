@@ -35,6 +35,10 @@ Candidates: provider-aware vs generic premium check, signature change vs new hel
   - Deprecate str-only call path but keep compat.
 - No new helper name; single seam.
 
+Amended by #288/#292: the seam moved to `free_rule.is_free` / `free_rule.has_free` /
+`free_rule.split`, all taking the provider explicitly. The pipeline names above
+were thin delegates and are deleted; the provider-scoped behaviour is unchanged.
+
 ### 5. Config + generalisation (Q5)
 - No new \u0060discovery_strategy\u0060 for now. Navy keeps generic \u0060discover_models\u0060; \u0060_split_by_free_rule\u0060 provider-aware via param suffices.
 - \u0060discover_provider\u0060 / \u0060discover_single_provider\u0060 pass \u0060provider_name\u0060 into free rule.

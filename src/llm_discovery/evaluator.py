@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from . import free_rule
 from .gate import is_accurate_enough
 from .judge import Judge
 from .search_throttle import bump_judge_call
@@ -20,7 +21,7 @@ from .model_info_store import (
 from .candidate_store import CANDIDATE_TTL_DAYS, CandidateRecord
 from .categorize import categorize_model
 from .judge_transport import JudgeError
-from .policy_gate import PolicyGate, _is_router_model
+from .policy_gate import PolicyGate
 
 TTL_DAYS = 28
 
@@ -232,7 +233,7 @@ class EvaluatorCoordinator:
                 reason = packet.deterministic_flags[0] if packet.deterministic_flags else "specialized"
                 return self.deterministic_drop_record(model_id, reason, self.cache)
         # --- Router deterministic keep before Judge (spec #219) ---
-        if _is_router_model(model_id):
+        if free_rule.is_router(model_id):
             result = self._deterministic_router_record(model_id, resolution, packet)
             # store drop/keep mirroring post-Judge path
             self._persist(model_id, resolution, result)
@@ -901,7 +902,7 @@ class EvaluatorCoordinator:
         # Router override (mirrors PolicyGate.apply): routing meta-models carry no
         # coding/AA signal by design, so categorize_model would return "uncertain"
         # on this cache-hit path. Routers are always keep + flash (ADR 0006).
-        if _is_router_model(raw_model_id):
+        if free_rule.is_router(raw_model_id):
             cached_decision = "keep"
             deterministic_coding = True
             tier = "flash"
@@ -1327,7 +1328,7 @@ class EvaluatorCoordinator:
 
         Always decision=keep, tier=flash: an auto-free record is a routing
         fallback, not a strategic reserve, so it lands in the same band as
-        other router keeps (`policy_gate._is_router_model`).
+        other router keeps (`free_rule.is_router`).
         """
         pn = provider_name if provider_name is not None else self.provider_name
         return {

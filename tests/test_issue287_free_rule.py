@@ -1,43 +1,32 @@
-"""Issue #287 — differential corpus for the free-rule module (phase 2 of #285).
+"""Free-rule corpus — the behaviour contract for the single Free Rule.
 
-``llm_discovery.free_rule`` is the single Free Rule definition; #288 wired
-``pipeline``, ``gate``, ``policy_gate`` and ``search_budget`` onto it (their old
-names are thin delegates). This test asserts, row by row, that the module
-reproduces each of the nine pre-consolidation free-rule call sites and that the
-Keeper gate's floor 3 now adopts the discovery answer, so consolidating them
-cannot change which models are free.
+``llm_discovery.free_rule`` is the one Free Rule definition. Issue #287 added
+the module with a differential corpus against the nine pre-consolidation call
+sites; #288 wired the callers onto it and #292 deleted the superseded copies, so
+the corpus now pins ``free_rule``'s own answers rather than comparing copies.
+The recorded answers are unchanged — the module was absorbed verbatim from the
+call sites it replaced, so this remains the consolidation's acceptance gate.
 
-Call sites compared
--------------------
-Discovery family — must agree exactly, provider included:
-  * ``pipeline._is_free_model``         -> ``free_rule.is_free``
-  * ``pipeline._has_free_name``         -> ``free_rule.has_free``
-  * ``pipeline._split_by_free_rule``    -> ``free_rule.split``
-  * ``pipeline._is_pricing_free``       -> the pricing branch inside ``is_free``
-  * ``pipeline._is_access_tier_free``   -> the access-tier branch
-  * ``pipeline._fetch_pricing_free_ids``-> ``free_rule.pricing_row_is_free``
-
-Router — the three copies must agree:
-  * ``gate._is_router_model_id``, ``policy_gate._is_router_model``,
-    ``search_budget._is_router``        -> ``free_rule.is_router``
-
-Keeper gate — reconciled by #288 (was the one genuine disagreement):
-  * gate floor 3 now asks ``free_rule.is_free`` with the record and provider.
-
-Before #288 the gate had its own narrower predicate (``gate._is_free_model_id``
-plus a blended-only zero-price check): a model free on the discovery path could
-be paid inside the gate — the #285 defect. #288 deleted that copy and floor 3
-adopts the discovery answer. The pre-#288 diverging rows are recorded below and
-pinned as *closed*: gate and free rule agree on every id row. The remaining
-gate-vs-rule differences in the pricing table are the gate's
-"pricing present OR free" floor, not a second free rule.
+Covered here
+------------
+* ``free_rule.is_free`` / ``has_free`` / ``split`` over every provider branch
+  (kilo, navy_ai, llm7, agnes, xkiro, apinex) plus the pricing/access-tier
+  shapes and the free-marker forms.
+* ``free_rule.is_router`` over the router corpus, including the negative rows
+  that isolate the auto+free branch.
+* The Keeper gate's floor 3, which adopts the Free Rule (a model free on the
+  discovery path is free inside the gate — the #285 defect). The remaining
+  gate-vs-rule differences in the pricing table are the gate's
+  "pricing present OR free" floor, not a second free rule.
+* The Pricing-Endpoint Filter, whose per-row predicate lives in ``free_rule``
+  while the network I/O stays in ``pipeline``.
 """
 from __future__ import annotations
 
 import httpx
 import pytest
 
-from llm_discovery import free_rule, gate, pipeline, policy_gate, search_budget
+from llm_discovery import free_rule, gate, pipeline
 
 # --------------------------------------------------------------------------
 # Free predicate corpus: every provider branch plus the pricing/access-tier
@@ -114,22 +103,22 @@ SPLIT_BATCHES = [
 # --------------------------------------------------------------------------
 # Router corpus
 # --------------------------------------------------------------------------
+# (model_id, expected_router). The negative rows isolate the auto+free
+# branch: "auto" without "free" and "free" without "auto" are both not routers.
+# Without these a mutation that drops either half of the branch survives.
 ROUTER_CORPUS = [
-    "kilo-auto/free",
-    "openrouter/free",
-    "some-router-x",
-    "auto:free",
-    "myauto/free",
-    "ROUTER",
-    "gpt-4",
-    "",
-    "free/claude-opus-4.6",
-    # Negative rows that isolate the auto+free branch: "auto" without "free"
-    # and "free" without "auto" are both not routers. Without these a mutation
-    # that drops either half of the branch survives the corpus.
-    "kilo-auto",
-    "auto-select",
-    "free-tier",
+    ("kilo-auto/free", True),
+    ("openrouter/free", True),
+    ("some-router-x", True),
+    ("auto:free", True),
+    ("myauto/free", True),
+    ("ROUTER", True),
+    ("gpt-4", False),
+    ("", False),
+    ("free/claude-opus-4.6", False),
+    ("kilo-auto", False),
+    ("auto-select", False),
+    ("free-tier", False),
 ]
 
 # (model_id, expected_free) — the discovery free-rule answer. Before #288 the
@@ -195,53 +184,46 @@ def test_corpus_covers_every_free_marker():
 
 
 @pytest.mark.parametrize("label,model,provider,expected", FREE_CORPUS, ids=_IDS)
-def test_is_free_matches_the_discovery_call_site(label, model, provider, expected):
+def test_is_free_matches_the_recorded_answer(label, model, provider, expected):
     assert free_rule.is_free(model, provider) is expected
-    assert pipeline._is_free_model(model, provider) is expected
 
 
 @pytest.mark.parametrize("label,model,provider,expected", FREE_CORPUS, ids=_IDS)
-def test_has_free_matches_the_discovery_call_site(label, model, provider, expected):
+def test_has_free_matches_the_recorded_answer(label, model, provider, expected):
     assert free_rule.has_free([model], provider) is expected
-    assert pipeline._has_free_name([model], provider) is expected
 
 
 @pytest.mark.parametrize("label,model,provider,expected", FREE_CORPUS, ids=_IDS)
-def test_split_matches_the_discovery_call_site(label, model, provider, expected):
-    new_keep, new_drop = free_rule.split([model], provider or "")
-    old_keep, old_drop = pipeline._split_by_free_rule([model], provider or "")
-    assert [m["id"] for m in new_keep] == [m["id"] for m in old_keep]
-    assert [m["id"] for m in new_drop] == [m["id"] for m in old_drop]
+def test_split_matches_the_recorded_answer(label, model, provider, expected):
+    """Paired with a known-paid sentinel: a free row keeps only itself.
 
-
-@pytest.mark.parametrize("label,model,provider,expected", FREE_CORPUS, ids=_IDS)
-def test_pricing_and_access_tier_branches_match(label, model, provider, expected):
-    assert free_rule._is_pricing_free(model) is pipeline._is_pricing_free(model)
-    assert free_rule._is_access_tier_free(model) is pipeline._is_access_tier_free(model)
-
-
-@pytest.mark.parametrize("label,provider,models", SPLIT_BATCHES, ids=[b[0] for b in SPLIT_BATCHES])
-def test_split_matches_the_discovery_call_site_on_batches(label, provider, models):
-    new_keep, new_drop = free_rule.split(list(models), provider)
-    old_keep, old_drop = pipeline._split_by_free_rule(list(models), provider)
-    assert [m["id"] for m in new_keep] == [m["id"] for m in old_keep]
-    assert [m["id"] for m in new_drop] == [m["id"] for m in old_drop]
+    The sentinel is never free for any provider branch (no marker, no pricing,
+    no access_tier/premium/tier), so ``any_free`` is True iff the corpus row is
+    free. When nothing is free the whole list is kept (documented behaviour).
+    """
+    sentinel = {"id": "sentinel-paid"}
+    keep, dropped = free_rule.split([dict(model), sentinel], provider or "")
+    if expected:
+        assert [m["id"] for m in keep] == [model["id"]]
+        assert [m["id"] for m in dropped] == ["sentinel-paid"]
+    else:
+        assert [m["id"] for m in keep] == [model["id"], "sentinel-paid"]
+        assert dropped == []
 
 
 @pytest.mark.parametrize("label,provider,models", SPLIT_BATCHES, ids=[b[0] for b in SPLIT_BATCHES])
-def test_apply_free_model_rule_marks_exactly_the_split_drop_set(label, provider, models):
-    """The legacy mutating helper's drop markers must equal split()'s dropped set."""
-    batch = [dict(m) for m in models]
-    out = pipeline._apply_free_model_rule(batch, provider)
-    assert out is batch  # legacy helper mutates and returns the same list
-    marked = [m["id"] for m in out if m.get("_deterministic_drop")]
-    _keep, dropped = free_rule.split([dict(m) for m in models], provider)
-    assert marked == [m["id"] for m in dropped]
-    for m in out:
-        if m["id"] in marked:
-            assert m.get("_drop_reason")
-        else:
-            assert "_deterministic_drop" not in m
+def test_split_partitions_on_the_is_free_predicate(label, provider, models):
+    """When something is free the split partitions; when nothing is, all is kept."""
+    pn = provider or None
+    any_free = any(free_rule.is_free(m, pn) for m in models)
+    keep, dropped = free_rule.split(list(models), provider)
+    if not any_free:
+        assert keep == models
+        assert dropped == []
+        return
+    assert all(free_rule.is_free(m, pn) for m in keep)
+    assert all(not free_rule.is_free(m, pn) for m in dropped)
+    assert sorted(m["id"] for m in keep + dropped) == sorted(m["id"] for m in models)
 
 
 def test_split_returns_all_when_nothing_is_free():
@@ -268,19 +250,14 @@ def test_provider_branch_is_scoped_to_its_provider():
 # --------------------------------------------------------------------------
 # Router call sites
 # --------------------------------------------------------------------------
-@pytest.mark.parametrize("model_id", ROUTER_CORPUS)
-def test_is_router_matches_every_router_call_site(model_id):
-    expected = free_rule.is_router(model_id)
-    assert gate._is_router_model_id(model_id) is expected
-    assert policy_gate._is_router_model(model_id) is expected
-    assert search_budget._is_router(model_id) is expected
+@pytest.mark.parametrize("model_id,expected", ROUTER_CORPUS, ids=[repr(r[0]) for r in ROUTER_CORPUS])
+def test_is_router_matches_the_recorded_answer(model_id, expected):
+    assert free_rule.is_router(model_id) is expected
 
 
-def test_is_router_matches_the_gate_on_none_and_empty():
+def test_is_router_is_false_on_none_and_empty():
     assert free_rule.is_router(None) is False
-    assert gate._is_router_model_id(None) is False
     assert free_rule.is_router("") is False
-    assert gate._is_router_model_id("") is False
 
 
 def test_router_corpus_covers_the_router_shapes():

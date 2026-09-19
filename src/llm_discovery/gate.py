@@ -21,9 +21,9 @@ gate fields are not persisted, so check must happen at source.
 
 Free Rule reconciliation (#288)
 ------------------------------
-Floor 3's free branch used to be ``gate._is_free_model_id`` — a narrower,
-case-insensitive regex anchored at the end of the id — plus a blended-only
-zero-price check. That is why a model could be free on the discovery path and
+Floor 3's free branch used to be an id-only regex (a narrower, case-insensitive
+one anchored at the end of the id) plus a blended-only zero-price check. That
+is why a model could be free on the discovery path and
 paid inside the gate (#285 problem 2; the divergence is recorded row by row in
 ``tests/test_issue287_free_rule.py``). #288 deletes that copy: floor 3 now calls
 :func:`free_rule.is_free` with the record (its ``model_id`` supplied as ``id``)
@@ -73,11 +73,6 @@ def _is_hallucinated_evidence(evidence: list[str] | None) -> bool:
         return False
     joined = " ".join(str(e) for e in evidence).lower()
     return any(d in joined for d in HALLUCINATED_DENYLIST)
-
-
-def _is_router_model_id(model_id: str | None) -> bool:
-    """Delegate to :func:`free_rule.is_router` (one router definition, #288)."""
-    return free_rule.is_router(model_id)
 
 
 def is_accurate_enough(record: dict[str, Any], provider: str | None = None) -> tuple[bool, str]:

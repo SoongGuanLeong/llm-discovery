@@ -1,10 +1,10 @@
 """Issue #62 — navy premium-flag regression (ADR 0004).
 
-Seams: discovery._normalize_models, pipeline._is_free_model/_split_by_free_rule
+Seams: discovery._normalize_models, free_rule.is_free/split
 Vertical slices, one test -> one impl already green (ba4c3cd). Permanent tests.
 """
 from llm_discovery.discovery import _normalize_models
-from llm_discovery.pipeline import _apply_free_model_rule, _has_free_name, _is_free_model, _split_by_free_rule
+from llm_discovery.free_rule import has_free, is_free, split
 from llm_discovery.evaluator import EvaluatorCoordinator
 
 
@@ -62,157 +62,155 @@ class TestNormalizeModelsPremium:
         assert out[0]["premium"] is False
 class TestIsFreeModelGeneric:
     def test_free_markers_are_free_generic(self):
-        # _is_free_model imported at top
-        assert _is_free_model({"id": "agnes:free"}) is True
-        assert _is_free_model({"id": "model-free"}) is True
-        assert _is_free_model({"id": "model_free"}) is True
-        assert _is_free_model({"id": "model/free"}) is True
+        # is_free imported at top
+        assert is_free({"id": "agnes:free"}) is True
+        assert is_free({"id": "model-free"}) is True
+        assert is_free({"id": "model_free"}) is True
+        assert is_free({"id": "model/free"}) is True
 
     def test_non_free_not_free_generic(self):
-        # _is_free_model imported at top
-        assert _is_free_model({"id": "gpt-4"}) is False
-        assert _is_free_model({"id": "llama-3.3-70b"}) is False
-        assert _is_free_model({"id": "premium-model"}) is False
+        # is_free imported at top
+        assert is_free({"id": "gpt-4"}) is False
+        assert is_free({"id": "llama-3.3-70b"}) is False
+        assert is_free({"id": "premium-model"}) is False
 
     def test_str_fallback_marker_only(self):
-        # _is_free_model imported at top
-        assert _is_free_model("model:free") is True
-        assert _is_free_model("model-free") is True
-        assert _is_free_model("gpt-4") is False
+        # is_free imported at top
+        assert is_free("model:free") is True
+        assert is_free("model-free") is True
+        assert is_free("gpt-4") is False
         # str with navy name still marker-only (no dict premium)
-        assert _is_free_model("gpt-4", provider_name="navy_ai") is False
-        assert _is_free_model("gpt-4:free", provider_name="navy_ai") is True
+        assert is_free("gpt-4", provider_name="navy_ai") is False
+        assert is_free("gpt-4:free", provider_name="navy_ai") is True
 
     def test_generic_premium_false_not_free(self):
-        # _is_free_model imported at top
+        # is_free imported at top
         # scoped: premium false only free for navy_ai
-        assert _is_free_model({"id": "gpt-4", "premium": False}) is False
-        assert _is_free_model({"id": "gpt-4", "premium": False}, provider_name="openai") is False
-        assert _is_free_model({"id": "gpt-4", "premium": False}, provider_name="") is False
-        assert _is_free_model({"id": "gpt-4", "premium": False}, provider_name=None) is False
+        assert is_free({"id": "gpt-4", "premium": False}) is False
+        assert is_free({"id": "gpt-4", "premium": False}, provider_name="openai") is False
+        assert is_free({"id": "gpt-4", "premium": False}, provider_name="") is False
+        assert is_free({"id": "gpt-4", "premium": False}, provider_name=None) is False
 class TestIsFreeModelNavy:
     def test_navy_premium_false_is_free(self):
-        # _is_free_model imported at top
-        assert _is_free_model({"id": "gpt-4", "premium": False}, provider_name="navy_ai") is True
+        # is_free imported at top
+        assert is_free({"id": "gpt-4", "premium": False}, provider_name="navy_ai") is True
         # marker + premium false still free
-        assert _is_free_model({"id": "gpt-4-free", "premium": False}, provider_name="navy_ai") is True
+        assert is_free({"id": "gpt-4-free", "premium": False}, provider_name="navy_ai") is True
 
     def test_navy_premium_true_not_free(self):
-        # _is_free_model imported at top
-        assert _is_free_model({"id": "gpt-4", "premium": True}, provider_name="navy_ai") is False
+        # is_free imported at top
+        assert is_free({"id": "gpt-4", "premium": True}, provider_name="navy_ai") is False
 
     def test_navy_missing_premium_not_free(self):
-        # _is_free_model imported at top
-        assert _is_free_model({"id": "gpt-4"}, provider_name="navy_ai") is False
-        assert _is_free_model({"id": "gpt-4", "premium": None}, provider_name="navy_ai") is False
+        # is_free imported at top
+        assert is_free({"id": "gpt-4"}, provider_name="navy_ai") is False
+        assert is_free({"id": "gpt-4", "premium": None}, provider_name="navy_ai") is False
 
     def test_navy_premium_string_and_zero_not_free(self):
-        # _is_free_model imported at top
+        # is_free imported at top
         # identity check: only False (bool) free
-        assert _is_free_model({"id": "gpt-4", "premium": "false"}, provider_name="navy_ai") is False
-        assert _is_free_model({"id": "gpt-4", "premium": 0}, provider_name="navy_ai") is False
-        assert _is_free_model({"id": "gpt-4", "premium": "False"}, provider_name="navy_ai") is False
+        assert is_free({"id": "gpt-4", "premium": "false"}, provider_name="navy_ai") is False
+        assert is_free({"id": "gpt-4", "premium": 0}, provider_name="navy_ai") is False
+        assert is_free({"id": "gpt-4", "premium": "False"}, provider_name="navy_ai") is False
 
     def test_navy_marker_wins_even_premium_true(self):
-        # _is_free_model imported at top
-        assert _is_free_model({"id": "gpt-4:free", "premium": True}, provider_name="navy_ai") is True
-        assert _is_free_model({"id": "gpt-4-free", "premium": True}, provider_name="navy_ai") is True
-        assert _is_free_model({"id": "model/free", "premium": True}, provider_name="navy_ai") is True
+        # is_free imported at top
+        assert is_free({"id": "gpt-4:free", "premium": True}, provider_name="navy_ai") is True
+        assert is_free({"id": "gpt-4-free", "premium": True}, provider_name="navy_ai") is True
+        assert is_free({"id": "model/free", "premium": True}, provider_name="navy_ai") is True
 
     def test_navy_marker_missing_premium_still_free(self):
-        # _is_free_model imported at top
-        assert _is_free_model({"id": "model:free"}, provider_name="navy_ai") is True
-        assert _is_free_model({"id": "model-free", "premium": None}, provider_name="navy_ai") is True
+        # is_free imported at top
+        assert is_free({"id": "model:free"}, provider_name="navy_ai") is True
+        assert is_free({"id": "model-free", "premium": None}, provider_name="navy_ai") is True
 class TestSplitByFreeRule:
     def test_generic_mixed_keeps_only_free(self):
-        # _split_by_free_rule imported at top
+        # split imported at top
         models = [{"id": "a:free"}, {"id": "b"}, {"id": "c-free"}]
-        keep, dropped = _split_by_free_rule(models)
+        keep, dropped = split(models)
         assert [m["id"] for m in keep] == ["a:free", "c-free"]
         assert [m["id"] for m in dropped] == ["b"]
 
     def test_generic_no_free_returns_all(self):
-        # _split_by_free_rule imported at top
+        # split imported at top
         models = [{"id": "a"}, {"id": "b"}]
-        keep, dropped = _split_by_free_rule(models)
+        keep, dropped = split(models)
         assert keep == models
         assert dropped == []
 
     def test_generic_all_free_returns_all(self):
-        # _split_by_free_rule imported at top
+        # split imported at top
         models = [{"id": "a:free"}, {"id": "b-free"}]
-        keep, dropped = _split_by_free_rule(models)
+        keep, dropped = split(models)
         assert len(keep) == 2
         assert dropped == []
 
     def test_navy_mixed_premium_and_marker(self):
-        # _split_by_free_rule imported at top
+        # split imported at top
         models = [
             {"id": "free-via-premium", "premium": False},
             {"id": "free-via-marker:free", "premium": True},
             {"id": "paid", "premium": True},
             {"id": "paid-no-premium"},
         ]
-        keep, dropped = _split_by_free_rule(models, provider_name="navy_ai")
+        keep, dropped = split(models, provider_name="navy_ai")
         # premium False and marker both free, others dropped
         assert [m["id"] for m in keep] == ["free-via-premium", "free-via-marker:free"]
         assert [m["id"] for m in dropped] == ["paid", "paid-no-premium"]
 
     def test_navy_all_non_free_returns_all(self):
-        # _split_by_free_rule imported at top
+        # split imported at top
         models = [{"id": "a", "premium": True}, {"id": "b"}]
-        keep, dropped = _split_by_free_rule(models, provider_name="navy_ai")
+        keep, dropped = split(models, provider_name="navy_ai")
         assert keep == models
         assert dropped == []
 
     def test_navy_premium_false_only_without_marker(self):
-        # _split_by_free_rule imported at top
+        # split imported at top
         models = [{"id": "gpt-4", "premium": False}, {"id": "gpt-4-paid", "premium": True}]
-        keep, dropped = _split_by_free_rule(models, provider_name="navy_ai")
+        keep, dropped = split(models, provider_name="navy_ai")
         assert [m["id"] for m in keep] == ["gpt-4"]
         assert [m["id"] for m in dropped] == ["gpt-4-paid"]
 
     def test_non_navy_premium_false_ignored_in_split(self):
-        # _split_by_free_rule imported at top
+        # split imported at top
         models = [{"id": "gpt-4", "premium": False}, {"id": "other"}]
         # openai provider should not treat premium false as free -> no free -> keep all
-        keep, dropped = _split_by_free_rule(models, provider_name="openai")
+        keep, dropped = split(models, provider_name="openai")
         assert keep == models
         assert dropped == []
 
-    def test_has_free_name_delegates(self):
-        # _has_free_name imported at top
-        assert _has_free_name([{"id": "a:free"}]) is True
-        assert _has_free_name([{"id": "a"}]) is False
-        assert _has_free_name([{"id": "a", "premium": False}], provider_name="navy_ai") is True
-        assert _has_free_name([{"id": "a", "premium": False}], provider_name="openai") is False
+    def test_has_free_detects_free_rows(self):
+        # has_free imported at top
+        assert has_free([{"id": "a:free"}]) is True
+        assert has_free([{"id": "a"}]) is False
+        assert has_free([{"id": "a", "premium": False}], provider_name="navy_ai") is True
+        assert has_free([{"id": "a", "premium": False}], provider_name="openai") is False
 
     def test_split_empty_provider_string_is_generic(self):
-        # _split_by_free_rule imported at top
+        # split imported at top
         models = [{"id": "a", "premium": False}, {"id": "b"}]
-        keep, dropped = _split_by_free_rule(models, provider_name="")
+        keep, dropped = split(models, provider_name="")
         assert keep == models  # generic, premium ignored
         assert dropped == []
-        keep2, dropped2 = _split_by_free_rule(models, provider_name=None)
-        # None passed via _has_free_name path internally? _split normalizes to None
-        # call directly with None should behave same as generic
-        # but signature default is "", test via _is_free_model equivalence
+        keep2, dropped2 = split(models, provider_name=None)
+        # split normalizes None to the generic (no provider) rule, same as ""
         assert keep2 == models
 class TestIsFreeModelLLM7:
     def test_llm7_turbo_is_free(self):
-        assert _is_free_model({"id": "DeepSeek-V4-Flash-0731", "tier": "turbo"}, provider_name="llm7") is True
-        assert _is_free_model({"id": "gemma4:31b", "tier": "turbo"}, provider_name="llm7") is True
+        assert is_free({"id": "DeepSeek-V4-Flash-0731", "tier": "turbo"}, provider_name="llm7") is True
+        assert is_free({"id": "gemma4:31b", "tier": "turbo"}, provider_name="llm7") is True
 
     def test_llm7_pro_is_not_free(self):
-        assert _is_free_model({"id": "claude-opus-5", "tier": "pro"}, provider_name="llm7") is False
-        assert _is_free_model({"id": "gpt-5.5", "tier": "pro"}, provider_name="llm7") is False
+        assert is_free({"id": "claude-opus-5", "tier": "pro"}, provider_name="llm7") is False
+        assert is_free({"id": "gpt-5.5", "tier": "pro"}, provider_name="llm7") is False
 
     def test_llm7_missing_tier_not_free(self):
-        assert _is_free_model({"id": "unknown-model"}, provider_name="llm7") is False
+        assert is_free({"id": "unknown-model"}, provider_name="llm7") is False
 
     def test_llm7_turbo_without_provider_not_free(self):
         # turbo alone not free without provider_name
-        assert _is_free_model({"id": "DeepSeek-V4-Flash-0731", "tier": "turbo"}) is False
+        assert is_free({"id": "DeepSeek-V4-Flash-0731", "tier": "turbo"}) is False
 
 
 class TestSplitByFreeRuleLLM7:
@@ -222,7 +220,7 @@ class TestSplitByFreeRuleLLM7:
             {"id": "claude-opus-5", "tier": "pro"},
             {"id": "gemma4:31b", "tier": "turbo"},
         ]
-        keep, dropped = _split_by_free_rule(models, provider_name="llm7")
+        keep, dropped = split(models, provider_name="llm7")
         assert [m["id"] for m in keep] == ["DeepSeek-V4-Flash-0731", "gemma4:31b"]
         assert [m["id"] for m in dropped] == ["claude-opus-5"]
 
@@ -231,7 +229,7 @@ class TestSplitByFreeRuleLLM7:
             {"id": "codestral-latest", "tier": "turbo"},
             {"id": "minimax-m2.7", "tier": "turbo"},
         ]
-        keep, dropped = _split_by_free_rule(models, provider_name="llm7")
+        keep, dropped = split(models, provider_name="llm7")
         assert len(keep) == 2
         assert dropped == []
 
@@ -240,7 +238,7 @@ class TestSplitByFreeRuleLLM7:
             {"id": "claude-opus-5", "tier": "pro"},
             {"id": "gpt-5.5", "tier": "pro"},
         ]
-        keep, dropped = _split_by_free_rule(models, provider_name="llm7")
+        keep, dropped = split(models, provider_name="llm7")
         assert keep == models
         assert dropped == []
 
@@ -249,28 +247,12 @@ class TestSplitByFreeRuleLLM7:
             {"id": "unknown-model"},
             {"id": "another-model"},
         ]
-        keep, dropped = _split_by_free_rule(models, provider_name="llm7")
+        keep, dropped = split(models, provider_name="llm7")
         assert keep == models
         assert dropped == []
 
 
 class TestProviderWiringAndNaraRouter:
-    def test_apply_free_rule_delegates(self):
-        from llm_discovery.pipeline import _apply_free_model_rule, _split_by_free_rule
-        models = [{"id": "a:free"}, {"id": "b"}]
-        out = _apply_free_model_rule(models.copy(), provider_name="")
-        # legacy mutates but returns same list; should mark dropped
-        # check b got drop marker
-        # use fresh copy to avoid cross-contamination
-        models2 = [{"id": "a:free"}, {"id": "b"}]
-        keep, dropped = _split_by_free_rule(models2)
-        assert len(keep) == 1
-        assert len(dropped) == 1
-        # _apply should have mutated non-free
-        # b is dropped -> has _drop_reason
-        mutated = [m for m in out if m["id"] == "b"]
-        assert mutated[0].get("_drop_reason") is not None
-
     def test_nararouter_not_affected_by_premium_rule(self, monkeypatch):
         # NaraRouter uses allowlist, not free markers/premium. Ensure navy premium logic doesn't leak.
         from llm_discovery.discovery import discover_nararouter_models, NARAROUTER_FREE_SNAPSHOT

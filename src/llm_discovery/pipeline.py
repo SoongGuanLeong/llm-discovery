@@ -268,6 +268,70 @@ def discover_single(
     return coordinator.evaluate(model)
 
 
+# --- Sibling heuristic: same-batch predicate ---------------------------------
+# Hoisted from the inline copy in discover_provider so #291 can characterize it
+# against policy_gate._has_older_kept_sibling before unifying the two.
+_SIBLING_NUM_RE = re.compile(r"\d+(?:[\.\-]\d+)+")
+
+
+def _sibling_num(v: str) -> str:
+    m = _SIBLING_NUM_RE.search(v or "")
+    return m.group(0) if m else ""
+
+
+def _sibling_ver_tuple(v: str):
+    parts = re.split(r"[.\-]", v)
+    out = []
+    for p in parts:
+        mm = re.match(r"(\d+)", p)
+        if mm:
+            out.append(int(mm.group(1)))
+    return tuple(out)
+
+
+def _sibling_base(mid: str) -> str:
+    from .model_matching import ModelNormalizer
+
+    norm = ModelNormalizer.normalize(mid)
+    base = _SIBLING_NUM_RE.sub("", norm)
+    return re.sub(r"-+", "-", base).strip("-")
+
+
+def _batch_has_older_kept_sibling(
+    mid: str,
+    kept: list[dict[str, Any]],
+    self_evaluation: dict[str, Any] | None = None,
+) -> bool:
+    """Same-batch older-kept-sibling check over result["keep"] records."""
+    from .model_matching import ModelNormalizer
+
+    cur_num = _sibling_num(mid)
+    if not cur_num:
+        try:
+            cur_num = _sibling_num(ModelNormalizer.extract_signature(mid).version)
+        except Exception:
+            return False
+    if not cur_num:
+        return False
+    cur_ver = _sibling_ver_tuple(cur_num)
+    cur_base = _sibling_base(mid)
+    for k in kept:
+        if k is self_evaluation:
+            continue
+        kmid = k.get("provider_model_id") or k.get("model_id") or ""
+        if _sibling_base(kmid) != cur_base:
+            continue
+        try:
+            k_num = _sibling_num(ModelNormalizer.extract_signature(kmid).version) or _sibling_num(kmid)
+        except Exception:
+            k_num = _sibling_num(kmid)
+        if not k_num:
+            continue
+        if _sibling_ver_tuple(k_num) < cur_ver:
+            return True
+    return False
+
+
 def discover_provider(
     provider_name: str,
     config: Any,
@@ -459,26 +523,6 @@ def discover_provider(
     # --- Sibling heuristic post-pass: promote newer versions without aa_score if older kept exists ---
     # Handles same-batch siblings where older keep not yet in store during gate evaluation
     try:
-        import re
-        from llm_discovery.model_matching import ModelNormalizer
-        from llm_discovery.categorize import categorize_model
-        _num_re = re.compile(r"\d+(?:[\.\-]\d+)+")
-        def _num(v: str) -> str:
-            m = _num_re.search(v or "")
-            return m.group(0) if m else ""
-        def _ver_tuple(v: str):
-            parts = re.split(r"[.\-]", v)
-            out=[]
-            for p in parts:
-                mm=re.match(r"(\d+)", p)
-                if mm:
-                    out.append(int(mm.group(1)))
-            return tuple(out)
-        def _base(mid: str) -> str:
-            norm = ModelNormalizer.normalize(mid)
-            base = _num_re.sub("", norm)
-            base = re.sub(r"-+", "-", base).strip("-")
-            return base
         # Build set of kept bases+versions
         kept = result.get("keep", [])
         # For each keep with uncertain tier and no aa_score/coding_score, check older kept
@@ -494,36 +538,7 @@ def discover_provider(
             if tier not in ("uncertain", "drop"):
                 continue
             mid = evaluation.get("provider_model_id") or evaluation.get("model_id") or ""
-            cur_num = _num(mid if mid else "")
-            # try via signature if direct numeric not found
-            if not cur_num:
-                try:
-                    sig = ModelNormalizer.extract_signature(mid)
-                    cur_num = _num(sig.version)
-                except Exception:
-                    continue
-            if not cur_num:
-                continue
-            cur_ver = _ver_tuple(cur_num)
-            cur_base = _base(mid)
-            promoted = False
-            for k in kept:
-                if k is evaluation:
-                    continue
-                kmid = k.get("provider_model_id") or k.get("model_id") or ""
-                k_base = _base(kmid)
-                if k_base != cur_base:
-                    continue
-                try:
-                    k_sig = ModelNormalizer.extract_signature(kmid)
-                    k_num = _num(k_sig.version) or _num(kmid)
-                except Exception:
-                    k_num = _num(kmid)
-                if not k_num:
-                    continue
-                if _ver_tuple(k_num) < cur_ver:
-                    promoted = True
-                    break
+            promoted = _batch_has_older_kept_sibling(mid, kept, evaluation)
             # also check store for older kept (covers cross-batch)
             if not promoted and store is not None:
                 try:

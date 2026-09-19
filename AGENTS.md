@@ -13,6 +13,17 @@
 
 ---
 
+## CLI control surface
+
+Single entrypoint: `llm-discovery` (`python -m llm_discovery` equivalent).
+Golden Path: `doctor` first, then `config set-key` → `providers list` →
+`discover` → `build` → `export dry-run` → `export apply` → verify.
+Full walkthrough: `README.md` 5-minute Golden Path; setup companion:
+`docs/omni-infi-guide.md`; contract: `docs/adr/0010-cli-replaces-ui-parity-contract.md`.
+No `ui/`, no HTTP server, no redundant `scripts/` entrypoints (retired #273).
+
+---
+
 ## Agent skills
 
 ### Issue tracker

@@ -4,8 +4,7 @@ Pure, deterministic helpers for the 20-model weak-sample 3-vs-5
 measurement: sample selection, per-model metric extraction, arm
 aggregation, and the adopt/keep decision rule.
 
-No LLM calls and no network here; the live runner lives in
-scripts/measure_search_budget.py and imports these seams.
+This module is self-contained: no network access and no LLM calls.
 """
 from __future__ import annotations
 

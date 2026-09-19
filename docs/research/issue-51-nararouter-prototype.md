@@ -33,6 +33,8 @@ Run it:
 .venv/bin/python scripts/nararouter_issue51_prototype.py [--diff]
 ~~~
 
+> **Superseded (#281):** `scripts/nararouter_issue51_prototype.py` was deleted; the allowlist it exercised is production `discovery.get_nararouter_free_allowlist`, reached through `llm-discovery discover`.
+
 ## Result 1 - paid-gated models excluded (issue #52 filter)
 
 The legacy free-rule (_split_by_free_rule) kept every id carrying a free marker,
@@ -133,6 +135,8 @@ tests/test_issue51_nararouter_prototype.py - 13 tests, all green, guarding:
 
 Full suite: 121 passed (108 baseline + 13 new), no regressions.
 
+> **Superseded (#281):** `tests/test_issue51_nararouter_prototype.py` was deleted; the retargeted guard tests live in `tests/test_issue51_nararouter_free_filter.py`.
+
 ## Artifacts
 
 - scripts/nararouter_issue51_prototype.py - runnable prototype
@@ -142,6 +146,8 @@ Full suite: 121 passed (108 baseline + 13 new), no regressions.
 - prototypes/issue51/filter_before_after.txt - filter before/after table
 - prototypes/issue51/run_transcript.txt - full run log
 - docs/research/issue-51-nararouter-prototype.md - this report
+
+> **Superseded (#281):** the two script/test paths above were deleted; the guard tests were retargeted to `tests/test_issue51_nararouter_free_filter.py`.
 
 Branch: issue-51/nararouter-prototype
 

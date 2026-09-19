@@ -251,6 +251,8 @@
 | **P2-11** | **YAML shape lint in CI** | E | New `scripts/lint_results.py` — assert each file has `provider, evaluated_at, keep, drop_llm, error`; UUID regex fail; evidence URL domain allowlist; cs_null rate <5% gate | S |
 | **P2-12** | **Pricing aggregation per ProviderBatchWriter** | C | `model_info_store.py:aggregate_pricing()` — call at batch write time to fill per_provider_overrides for duplicated models (laguna, minimax) | S |
 
+> **Superseded:** `scripts/lint_results.py` was never built; no lint entrypoint exists, so the P2-11 proposal has no current seam.
+
 **Recommended ticket slicing for Wayfinder:**
 
 - #84 (Cloudflare identity) ← P0-1

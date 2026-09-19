@@ -12,6 +12,7 @@ Regenerated Mistral report after resolver fix. Resolver now correctly maps `*-la
 ## Regeneration
 
 - Command: `MISTRAL_API_KEY=... AGNES_AI_API_KEY=... DISABLE_WEB_SEARCH=1 PYTHONPATH=src:. .venv/bin/python -u scripts/discover.py mistral --all`
+  > **Superseded (#273):** `scripts/discover.py` was deleted; re-run through the Golden Path — `llm-discovery discover` then `llm-discovery build`.
 - Secrets: loaded via Infisical (`LLM_SHARED_PROJECT_ID=7686072c-85c7-4b7e-96e5-5bad8086cf44` contains MISTRAL_API_KEY, AGNES_AI_API_KEY)
 - Output: `data/results/mistral.yaml` (gitignored, local)
   - 2026-09-03T08:22:24 — keep 2, drop 41, error 5, total 48

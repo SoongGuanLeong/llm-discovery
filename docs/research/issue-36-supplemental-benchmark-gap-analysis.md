@@ -199,6 +199,7 @@ Current `ALL_SIGNAL_WEIGHTS` has 12 entries; `humaneval` 0.20 is unused. Proposa
 4. Extend `EvidenceCategory`/`EvidenceSource` enums and `classify_benchmark_score` positive/negative thresholds for new sources.
 5. Tests for `_normalize_model_key` alts covering new leaderboard model name formats.
 6. No `live` eval cost; CI can refresh weekly via `scripts/refresh_benchmarks.py` (existing catalog refresh pattern).
+   > **Superseded:** `scripts/refresh_benchmarks.py` was never committed; catalog refresh runs through `llm-discovery refresh`.
 
 ### Risks
 

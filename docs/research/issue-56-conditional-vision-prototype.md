@@ -107,6 +107,8 @@ or `BenchmarkDataCache` via `build_benchmark_profile`).
 
 Run: `.venv/bin/python scripts/issue56_conditional_vision_prototype.py`
 
+> **Superseded:** `scripts/issue56_conditional_vision_prototype.py` no longer exists; the vision exception runs in production through `llm-discovery discover` (see `tests/test_vision_exception.py`).
+
 Artifact: `prototypes/issue56/before_after.json` (machine-readable).
 
 | case | model_id | vision_only | coding_capable | cheap_or_free | before | after | live evaluate_model |

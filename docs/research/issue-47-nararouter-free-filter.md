@@ -414,6 +414,7 @@ Ranked by reliability:
    }
    ```
    Snapshot date: 2026-09-03; refresh via `scripts/refresh_catalogs.py`-style or periodic fetch.
+   > **Superseded (#273):** `scripts/refresh_catalogs.py` was deleted; catalog refresh is now `llm-discovery refresh`.
 
 ### Proposed pipeline change (choice left to #46 implementer)
 

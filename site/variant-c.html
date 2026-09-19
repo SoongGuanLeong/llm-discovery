@@ -205,12 +205,17 @@
 
   .proto-bar {
     position: fixed;
-    left: 50%;
+    left: 12px;
+    right: 12px;
     bottom: 16px;
-    transform: translateX(-50%);
+    margin: 0 auto;
+    width: fit-content;
     display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
     align-items: center;
-    gap: 10px;
+    gap: 4px 10px;
+    max-width: calc(100vw - 24px);
     padding: 8px 14px;
     background: #0f172a;
     border-radius: 999px;
@@ -235,6 +240,9 @@
   @media (max-width: 560px) {
     .hero { padding-top: 48px; }
     .proto-bar { font-size: 11px; padding: 7px 12px; gap: 8px; }
+  }
+  @media (max-width: 420px) {
+    .proto-bar { border-radius: 14px; }
   }
 </style>
 </head>

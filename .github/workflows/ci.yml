@@ -5,6 +5,38 @@ on:
   pull_request:
 
 jobs:
+  # Landing-page validation gate (spec docs/specs/first-look.md, #307): catches
+  # base-path regressions before merge. Same checks run inline in pages.yml
+  # before upload so a failing page never deploys; duplication is deliberate.
+  site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate site/
+        run: |
+          python3 - <<'EOF'
+          import pathlib, re, sys
+          site = pathlib.Path("site")
+          errors = []
+          if not (site / "index.html").is_file():
+              errors.append("site/index.html missing (entry file at artifact top level)")
+          for h in sorted(site.glob("*.html")):
+              t = h.read_text()
+              for p in ('href="/', 'src="/', 'url(/'):
+                  if p in t:
+                      errors.append(f"{h.name}: root-absolute reference '{p}'")
+              for u in re.findall(r'(?:href|src)="([^"]+)"', t):
+                  if re.match(r'[A-Za-z][A-Za-z0-9+.-]*:', u) or u.startswith("#"):
+                      continue
+                  f = (site / u.split("#")[0].split("?")[0]).resolve()
+                  if not f.is_relative_to(site.resolve()) or not f.is_file():
+                      errors.append(f"{h.name}: local link '{u}' does not resolve under site/")
+          if errors:
+              sys.exit("site validation failed:\n  " + "\n  ".join(errors))
+          print("site validation passed")
+          EOF
+
   test:
     runs-on: ubuntu-latest
     steps:

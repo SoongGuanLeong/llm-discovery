@@ -63,15 +63,21 @@ note() { printf '  %s%s%s\n' "$DIM" "$1" "$RESET"; }
 warn() { printf '  %s⚠ %s%s\n' "$YELLOW" "$1" "$RESET"; }
 
 # open_url URL opens it in the human's browser, cross-platform incl. WSL.
+# Only the browser command's own output is silenced; the warnings must stay
+# visible, so they cannot sit inside a redirected group.
 open_url() {
-  local url="$1"
+  local url="$1" cmd=""
   printf '  %s↗ opening%s %s\n' "$GREEN" "$RESET" "$url"
-  { if   command -v wslview     >/dev/null 2>&1; then wslview "$url"
-    elif command -v explorer.exe >/dev/null 2>&1; then explorer.exe "$url"
-    elif command -v xdg-open    >/dev/null 2>&1; then xdg-open "$url"
-    elif command -v open        >/dev/null 2>&1; then open "$url"
-    else warn "couldn't open a browser; visit it manually: $url"; fi
-  } >/dev/null 2>&1 || warn "couldn't open a browser, so visit it manually: $url"
+  if   command -v wslview      >/dev/null 2>&1; then cmd=wslview
+  elif command -v explorer.exe >/dev/null 2>&1; then cmd=explorer.exe
+  elif command -v xdg-open     >/dev/null 2>&1; then cmd=xdg-open
+  elif command -v open         >/dev/null 2>&1; then cmd=open
+  fi
+  if [[ -z "$cmd" ]]; then
+    warn "couldn't open a browser; visit it manually: $url"
+  elif ! "$cmd" "$url" >/dev/null 2>&1; then
+    warn "couldn't open a browser, so visit it manually: $url"
+  fi
 }
 
 # pause "msg" waits for the human to confirm they've done the manual part.
@@ -233,8 +239,9 @@ step "Confirm the page renders with working styles/assets and that"
 step "links between index.html and the variant pages work."
 if confirm "Page is live and renders correctly?"; then
   note "Setup done. Future master pushes touching site/ will deploy automatically."
+  finish
 else
   warn "Check the failed run's logs; the validation gate message names the file."
+  say "Then fix the page or flip the settings, re-run workflow_dispatch, and re-run this wizard."
+  exit 1
 fi
-
-finish

@@ -54,7 +54,7 @@ systemctl --user status refresh-catalogs.timer   # next run + last status
 journalctl --user -u refresh-catalogs -f         # follow a run
 ```
 
-The timer is optional - manual refresh above always works. Independently, `build-all` checks catalog `fetched_at` before pricing re-average: if either catalog is older than 14 days it refreshes first (warn-only - a failed refresh never fails the build). Tune with `--catalog-max-age-days N` (0 disables) or `--no-catalog-refresh`.
+The timer is optional - manual refresh above always works. Independently, `build-all` checks catalog `fetched_at` before pricing re-average: if either catalog is older than 28 days it refreshes first (warn-only - a failed refresh never fails the build). Tune with `--catalog-max-age-days N` (0 disables) or `--no-catalog-refresh`.
 
 ## Query catalogs
 

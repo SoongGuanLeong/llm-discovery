@@ -31,7 +31,8 @@ key and reports reachability (HTTP 200 means reachable, not validated).
 `--json` is accepted before or after the subcommand - root-first is the canonical
 form - and produces exactly one envelope on stdout at exit: on success, on a
 usage error, on an exception, and on Ctrl-C. Progress, warnings and prompts stay
-on stderr, so a pipe is always parseable:
+on stderr, so a pipe is always parseable. The one exception is `--json --help`:
+argparse wins, so it prints the text help and exits `0` with no envelope.
 
 ```bash
 llm-discovery build --json 2>/dev/null | jq '.data.totals'

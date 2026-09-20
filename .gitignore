@@ -40,3 +40,6 @@ scripts/_probe_judge.py
 .tmp/
 .scratch/
 temp/
+
+# Agent CLI local settings (machine-specific)
+.qoder/

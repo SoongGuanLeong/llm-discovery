@@ -45,16 +45,11 @@ snapshot; there is no key-taking flag. The models.dev source alone
 - Backups: `data/*.json.bak` (prior snapshot copied before atomic rename)
 - Atomic: temp file + `fsync` + `replace` in same directory
 
-### Automated refresh (systemd timer, issue #140)
+### Staleness gate in `build-all`
 
-A daily user timer (`config/quadlet/refresh-catalogs.service` + `.timer`, `OnCalendar=daily`, diff-before-copy) runs `llm-discovery refresh` from the repo root with the repo venv python (models.dev needs no key).
+`build-all` checks catalog `fetched_at` before pricing re-average: if either catalog is older than 28 days it refreshes first (warn-only - a failed refresh never fails the build). Tune with `--catalog-max-age-days N` (0 disables) or `--no-catalog-refresh`.
 
-```bash
-systemctl --user status refresh-catalogs.timer   # next run + last status
-journalctl --user -u refresh-catalogs -f         # follow a run
-```
-
-The timer is optional - manual refresh above always works. Independently, `build-all` checks catalog `fetched_at` before pricing re-average: if either catalog is older than 28 days it refreshes first (warn-only - a failed refresh never fails the build). Tune with `--catalog-max-age-days N` (0 disables) or `--no-catalog-refresh`.
+Scheduling a periodic `llm-discovery refresh` is left to you - a cron entry or your own systemd unit. The repo ships no unit files.
 
 ## Query catalogs
 

@@ -65,7 +65,7 @@ Line numbers refer to today's `README.md`.
 | 206–236 | "How to run" + "What happens per run" | `docs/reference/cli.md`, under `discover` |
 | 238–290 | Output: location, schema, downstream handoff | `docs/reference/output.md` |
 | 291–316 | OmniRoute export | `docs/reference/export.md` |
-| 317–350 | Catalog refresh + systemd timer (#140) | `docs/reference/catalog.md` |
+| 317–350 | Catalog refresh + systemd timer (#140) | `docs/reference/catalog.md` (timer later retired; the staleness gate remains) |
 | 352–359 | "Query catalogs" | `docs/reference/catalog.md` |
 | 361–387 | "Interface decisions (why no UI, no server)" | **Deleted outright.** ADR 0010 holds it normatively; the README must not carry a second, drift-prone copy |
 

@@ -187,7 +187,7 @@ def test_cli_refresh_help():
 
 
 
-# --- issue #140: catalog freshness (systemd timer + staleness gate) ---
+# --- issue #140: catalog freshness (staleness gate) ---
 
 def test_catalog_fetched_age_days_fresh(tmp_path: Path):
     from llm_discovery.refresh import catalog_fetched_age_days

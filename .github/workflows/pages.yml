@@ -1,0 +1,70 @@
+name: Deploy landing page to GitHub Pages
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "site/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+# Per actions/deploy-pages README: Pages writes plus OIDC for the deployment
+# token; contents stays read-only (the artifact carries everything).
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Starter-template shape: one deployment at a time, never cancel a running one.
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Validation gate (spec docs/specs/first-look.md, #307): a failing page
+      # never deploys, even if CI elsewhere was ignored. Same checks run as the
+      # `site` job in ci.yml; the duplication keeps each file self-contained.
+      - name: Validate site/
+        run: |
+          python3 - <<'EOF'
+          import pathlib, re, sys
+          site = pathlib.Path("site")
+          errors = []
+          if not (site / "index.html").is_file():
+              errors.append("site/index.html missing (entry file at artifact top level)")
+          for h in sorted(site.glob("*.html")):
+              t = h.read_text()
+              for p in ('href="/', 'src="/', 'url(/'):
+                  if p in t:
+                      errors.append(f"{h.name}: root-absolute reference '{p}'")
+              for u in re.findall(r'(?:href|src)="([^"]+)"', t):
+                  if re.match(r'[A-Za-z][A-Za-z0-9+.-]*:', u) or u.startswith("#"):
+                      continue
+                  f = (site / u.split("#")[0].split("?")[0]).resolve()
+                  if not f.is_relative_to(site.resolve()) or not f.is_file():
+                      errors.append(f"{h.name}: local link '{u}' does not resolve under site/")
+          if errors:
+              sys.exit("site validation failed:\n  " + "\n  ".join(errors))
+          print("site validation passed")
+          EOF
+
+      # Included for base_path/base_url outputs; deliberately NOT `enablement: true`
+      # (enabling Pages needs a PAT, not GITHUB_TOKEN — see the one-time /wizard
+      # walkthrough in docs/wizards/pages-setup.md).
+      - uses: actions/configure-pages@v6
+
+      # Packages site/ verbatim; no build step, no .nojekyll, no CNAME.
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+      - uses: actions/deploy-pages@v5
+        id: deployment

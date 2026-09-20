@@ -37,11 +37,11 @@ _Avoid_: auto provider, free router
 ### Interfaces
 
 **Golden Path**:
-The end-to-end sequence a new user must complete: configure the OmniRoute key, discover a provider, build the store, export, apply to the gateway. Every interface is judged by whether it can walk this path from a fresh clone.
+The end-to-end sequence a new user must complete: configure the OmniRoute key, discover a provider, build the store, export, apply to the gateway. Every interface is judged by whether it can walk this path from a fresh clone. In the README it is presented under the web-standard heading "5-minute quickstart"; the term stays for internal docs.
 _Avoid_: happy path, main flow, quickstart
 
 **Catalog Path**:
-The keyless way to see real data before configuring anything: fetch the models.dev snapshot once with `llm-discovery refresh --only models_dev`, then query it with `catalog models …` and `catalog providers …`. Needs network for that one fetch but no management key, no provider keys, and no gateway; unlike the Golden Path it never writes results or touches the gateway. The `catalog aa` queries are not part of it — the Artificial Analysis snapshot needs `AA_API_KEY`.
+The keyless way to see real data before configuring anything: fetch the models.dev snapshot once with `llm-discovery refresh --only models_dev`, then query it with `catalog models …` and `catalog providers …`. Needs network for that one fetch but no management key, no provider keys, and no gateway; unlike the Golden Path it never writes results or touches the gateway. The `catalog aa` queries are not part of it — the Artificial Analysis snapshot needs `AA_API_KEY`. In the README it is presented under the web-standard heading "Catalog quickstart (no API key)"; the term stays for internal docs.
 _Avoid_: keyless path, offline mode, demo mode
 
 **Configured Provider**:

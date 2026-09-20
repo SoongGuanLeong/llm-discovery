@@ -57,7 +57,7 @@ def _readme() -> str:
 
 def test_golden_path_section_lists_steps_in_order():
     text = _readme()
-    assert "5-minute Golden Path" in text
+    assert "## 5-minute quickstart" in text
     positions = []
     for step in REQUIRED_STEPS:
         assert step in text, f"README missing golden step: {step}"
@@ -135,10 +135,10 @@ def test_catalog_path_precedes_golden_path_and_parses():
 
     parser = _build_parser()
     text = _readme()
-    assert "## Catalog Path" in text, "README missing the Catalog Path section"
-    start = text.index("## Catalog Path")
-    end = text.index("5-minute Golden Path")
-    assert start < end, "Catalog Path must come before the Golden Path heading"
+    assert "## Catalog quickstart (no API key)" in text, "README missing the catalog quickstart"
+    start = text.index("## Catalog quickstart (no API key)")
+    end = text.index("## 5-minute quickstart")
+    assert start < end, "catalog quickstart must come before the 5-minute quickstart"
     for step in CATALOG_STEPS:
         assert step in text, f"README missing Catalog Path command: {step}"
         pos = text.index(step)

@@ -9,7 +9,7 @@ ticket named in its heading; nothing here is speculative. Persisted prose, norma
 | #299 | Landing page look and copy | Settled — resolution comment on #299; production page rewrites the prototype |
 | #300 | README split, Catalog Path, reference docs | Settled — this file, below |
 | #303 | Repo metadata (description, topics, MIT license, homepage) | Not yet settled |
-| #302 | Pages deployment for `site/` | Not yet settled (builds on #301) |
+| #302 | Pages deployment for `site/` | Settled — this file, below |
 | #304 | Assemble and finalise this spec | Open |
 
 ---
@@ -160,3 +160,85 @@ changes when the split lands:
 5. The Interface decisions section is gone; ADR 0010 stays untouched as the normative record.
 6. CONTEXT.md carries the Catalog Path entry as quoted above.
 7. The test changes above are in; full suite green.
+
+---
+
+## Pages deployment for `site/` (#302)
+
+Builds on #301's research (`docs/research/issue-301-github-pages-actions.md`), which
+holds the mechanics: `upload-pages-artifact` + `deploy-pages` is the canonical pair, no
+build step, no `.nojekyll`, relative asset URLs. This section settles what the research
+left open: triggers, pins, the validation gate, and the one-time human settings.
+
+### The workflow: `.github/workflows/pages.yml`
+
+One file, hand-written, no generator:
+
+- **Trigger**: `push` to `master` with `paths: [site/**, .github/workflows/pages.yml]`, plus `workflow_dispatch`. The paths filter keeps code-only pushes from redeploying an unchanged page; `paths` does not apply to `workflow_dispatch`, so manual runs always execute.
+- **Permissions** (workflow level, per the deploy-pages README): `contents: read`, `pages: write`, `id-token: write`.
+- **Concurrency** (verbatim from the starter template's shape): `group: "pages"`, `cancel-in-progress: false`.
+- **Job `deploy`**: `environment: name: github-pages, url: ${{ steps.deployment.outputs.page_url }}`.
+- **Steps** (major-tag pins only, never `@main` — current majors verified by #301):
+  1. `actions/checkout@v7`
+  2. `actions/configure-pages@v6` — **included but with no `enablement: true`**: enabling Pages needs a PAT, not `GITHUB_TOKEN`; the manual flip below covers it. It is included for its `base_path`/`base_url` outputs should they ever matter.
+  3. `actions/upload-pages-artifact@v5` with `path: site` — packages `site/` verbatim; `site/index.html` must sit at the artifact top level. No build step.
+  4. `actions/deploy-pages@v5` with `id: deployment`.
+
+### The artifact: production page only
+
+The deployed tree is the production page and nothing else: `index.html`, its assets,
+and `preview.sh` (kept as an inert dev convenience; a plain text file ships harmlessly).
+The rejected prototype variants `variant-b.html` and `variant-c.html` **leave `site/`
+when the production page lands** — they stay on the `prototype/299-landing-page` branch
+as the primary sources for their directions (per #299). No `.nojekyll` (Jekyll is a
+branch-source feature, and `upload-pages-artifact@v5` drops dotfiles from artifacts
+anyway). No `CNAME`. Asset references are relative (`style.css`, never `/style.css`) —
+enforced by the validation gate below, not by convention.
+
+### The validation gate (landing-page CI)
+
+The map's fog item "whether CI should validate the landing page" is settled **yes**,
+lightweight. Three checks, ~15 lines of inline Python (matching `ci.yml`'s existing
+inline-heredoc style), living in two places:
+
+1. `ci.yml` — a `site` job running the checks on every push and PR, so a base-path
+   regression is caught before merge, not after deploy.
+2. `pages.yml` — the same checks inline at the top of the `deploy` job, before upload,
+   so a failing page never deploys even if CI elsewhere was ignored.
+
+The duplication is deliberate: each workflow file stays self-contained.
+
+The checks:
+
+- `site/index.html` exists (entry file at the artifact top level).
+- No root-absolute asset references: no `href="/`, `src="/`, or `url(/` in any
+  `site/*.html` — the exact regression a project page under `/llm-discovery/` invites.
+- Every local link (`href="..."`/`src="..."` not starting with a scheme or `#`) resolves
+  to a file that exists under `site/`.
+
+Deliberately not in scope: full HTML validity, external link checking, accessibility
+linting. If they ever land, they go in `ci.yml`'s `site` job, not the deploy path.
+
+### One-time human settings (prerequisites, not workflow steps)
+
+The workflow cannot perform these for itself; both are recorded in the implementation
+ticket's acceptance criteria and walked interactively via the `/wizard` skill at
+implementation time:
+
+1. Settings → Pages → Build and deployment → Source = **GitHub Actions**. The default
+   `GITHUB_TOKEN` cannot set this; the first workflow run fails until it is flipped.
+   Retry via `workflow_dispatch` after flipping.
+2. Deployment protection rule on the `github-pages` environment restricting deploys to
+   the default branch (`master`). Prevents a prototype branch from publishing.
+
+### Acceptance criteria (implementation ticket)
+
+1. `.github/workflows/pages.yml` exists with the trigger, permissions, concurrency,
+   environment, and step pins above.
+2. The validation gate exists in both `ci.yml` (new `site` job) and `pages.yml` (inline
+   before upload); a deliberately broken check (e.g. a root-absolute `href`) fails both.
+3. The two one-time settings are captured in a `/wizard` walkthrough; after flipping,
+   a `workflow_dispatch` run deploys the prototype page to
+   `https://soongguanleong.github.io/llm-discovery/` and it renders with working assets.
+4. The production-page ticket (from #299's direction) removes the variant pages from
+   `site/` before or with the deploy, leaving the artifact production-only.

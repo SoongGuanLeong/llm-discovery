@@ -40,6 +40,10 @@ _Avoid_: auto provider, free router
 The end-to-end sequence a new user must complete: configure the OmniRoute key, discover a provider, build the store, export, apply to the gateway. Every interface is judged by whether it can walk this path from a fresh clone.
 _Avoid_: happy path, main flow, quickstart
 
+**Catalog Path**:
+The keyless way to see real data before configuring anything: fetch the models.dev snapshot once with `llm-discovery refresh --only models_dev`, then query it with `catalog models …` and `catalog providers …`. Needs network for that one fetch but no management key, no provider keys, and no gateway; unlike the Golden Path it never writes results or touches the gateway. The `catalog aa` queries are not part of it — the Artificial Analysis snapshot needs `AA_API_KEY`.
+_Avoid_: keyless path, offline mode, demo mode
+
 **Configured Provider**:
 A provider entry in `config/providers.yaml` — a name, base URL, and secret env var this repo holds a key for. The set discovery and export iterate over.
 _Avoid_: provider, local provider

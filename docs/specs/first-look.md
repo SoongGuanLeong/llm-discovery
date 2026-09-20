@@ -166,15 +166,25 @@ changes when the split lands:
 
 ## Landing page look and copy (#299)
 
-Prototype: branch [`prototype/299-landing-page`](https://github.com/SoongGuanLeong/llm-discovery/tree/prototype/299-landing-page),
-directory `site/` — `/` is the chosen direction A; `variant-b.html` and `variant-c.html`
-are rejected directions B (paper/serif editorial) and C (centred product cards). All three
-are self-contained single files, inline CSS, no JavaScript, identical copy. Nothing merges
-as-is: the production ticket **rewrites** the prototype. B and C stay on the prototype
-branch as the primary sources for their directions; they leave `site/` when the production
-page lands (#302).
+> **Direction reversed (2026-09-20, PR #312).** After the prototype deployed live, the
+> maintainer chose **direction B (paper/serif editorial)** as the production page over the
+> originally locked direction A (mono/teal). `site/index.html` now serves editorial; the
+> mono and product-card variants are deleted from `site/` and survive only on the
+> `prototype/299-landing-page` branch. The visual-direction subsection below documents the
+> **superseded** direction A and is kept as design history, not as the current spec — the
+> live `site/index.html` is the source of truth for the shipped look. The **Copy** block
+> stays authoritative: all three variants shared identical copy and it is unchanged.
 
-### Visual direction — "terminal/editorial", minimal not hacker
+Prototype: branch [`prototype/299-landing-page`](https://github.com/SoongGuanLeong/llm-discovery/tree/prototype/299-landing-page),
+directory `site/`. Three directions were explored as self-contained single files (inline
+CSS, no JavaScript, identical copy): A mono/teal (`index.html`), B paper/serif editorial
+(`variant-b.html`), C centred product cards (`variant-c.html`). The ticket originally locked
+**A**; the production page that shipped is **B (editorial)** — see the reversal note above.
+Nothing merged as-is from the prototype branch: the production ticket promoted the editorial
+prototype to `site/index.html` and dropped the A/B/C switcher bar; the rejected variants
+left `site/` (#302 AC4).
+
+### Visual direction (superseded — direction A, kept as design history)
 
 - Near-white paper (`#fbfbfa`), ink text (`#14171a`), one desaturated teal accent
   (`#0e7490`) used only for links, step indices and the note rule. The neon-green-on-black

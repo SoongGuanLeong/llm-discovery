@@ -126,6 +126,7 @@ llm-discovery discover kilo_ai
 # Batch: evaluate ALL models for one provider, in parallel
 llm-discovery discover groq --all
 llm-discovery discover kilo_ai --all
+llm-discovery discover openrouter --all --workers 4   # default 4
 
 # All providers: evaluate every configured provider
 llm-discovery discover

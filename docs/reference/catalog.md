@@ -15,13 +15,7 @@ Discovery resolves every provider model against two offline snapshots in `data/`
 | **Artificial Analysis** | `data/artificial_analysis_models.json` | `https://artificialanalysis.ai/api/v2/data/llms/models` (header `x-api-key: $AA_API_KEY`) | same; requires `AA_API_KEY` |
 | **Benchmarks** | `data/benchmarks.json` | Rebuilt locally via `BenchmarkDataCache.collect_from_local(aa, models_dev)` - no network | same |
 
-Filtered catalogs can be queried offline without secrets:
-
-```bash
-llm-discovery catalog aa search "llama"
-llm-discovery catalog aa filter --min-score 50
-llm-discovery catalog models show <model-id>
-```
+Queries against these snapshots: see [Query catalogs](#query-catalogs).
 
 ## Catalog refresh (T6)
 

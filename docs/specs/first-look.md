@@ -5,12 +5,12 @@ ticket named in its heading; nothing here is speculative. Persisted prose, norma
 
 | Ticket | Section | Status |
 | --- | --- | --- |
-| #301 | Landing page deployment | Settled — see `docs/research/issue-301-github-pages-actions.md` (referenced from #298) |
-| #299 | Landing page look and copy | Settled — resolution comment on #299; production page rewrites the prototype |
+| #301 | Landing page deployment | Settled — see `docs/research/issue-301-github-pages-actions.md` on `origin/research/github-pages-actions`, referenced from #298 |
+| #299 | Landing page look and copy | Settled — this file, below; prototype on `prototype/299-landing-page`, production page rewrites it |
 | #300 | README split, Catalog Path, reference docs | Settled — this file, below |
 | #303 | Repo metadata (description, topics, MIT license, homepage) | Settled — this file, below; `LICENSE` file landed with the resolution |
 | #302 | Pages deployment for `site/` | Settled — this file, below |
-| #304 | Assemble and finalise this spec | Open |
+| #304 | Assemble and finalise this spec | Settled — this commit |
 
 ---
 
@@ -31,7 +31,7 @@ blocks: the Catalog Path and the Golden Path.
 | 1 | Title, badges, tagline | ~5 lines | `# llm-discovery`, the badge row, the existing one-paragraph description |
 | 2 | **Catalog Path** (new) | ~18 lines | Keyless first command, exact wording below |
 | 3 | **5-minute Golden Path** | ~60 lines | Intro, prerequisites paragraph (pointing at `docs/reference/cli.md` for the `config/providers.yaml` shape), the existing 8-step command block with one-line comments |
-| 4 | **Reference** | ~10 lines | Bullet list linking the four reference docs, `docs/omni-infi-guide.md`, the agents note, and the MIT licence |
+| 4 | **Reference** | ~10 lines | Bullet list linking the four reference docs, `docs/omni-infi-guide.md`, and the agents note |
 | 5 | Licence line | ~2 lines | MIT, linked (lands with #303's LICENSE file) |
 
 Target: roughly 95–110 lines, down from 387. No other commands appear in the README.
@@ -70,9 +70,10 @@ Line numbers refer to today's `README.md`.
 | 361–387 | "Interface decisions (why no UI, no server)" | **Deleted outright.** ADR 0010 holds it normatively; the README must not carry a second, drift-prone copy |
 
 The four reference docs carry no Golden Path walkthrough and no marketing copy; they are
-reference material, cross-linked from the README Reference list. Whether `docs/reference/`
-also gets an index page, and whether the reference docs link the landing page, is still
-open in #298's "Not yet specified" and is not decided here.
+reference material, cross-linked from the README Reference list. Decided in #304:
+`docs/reference/` gets **no index page** — the README Reference list is the sole index —
+and neither the README nor the reference docs cross-link the landing page; discovery of
+the live page runs through the repository's homepage field (#303).
 
 ### The offline claim: corrected wording
 
@@ -160,6 +161,57 @@ changes when the split lands:
 5. The Interface decisions section is gone; ADR 0010 stays untouched as the normative record.
 6. CONTEXT.md carries the Catalog Path entry as quoted above.
 7. The test changes above are in; full suite green.
+
+---
+
+## Landing page look and copy (#299)
+
+Prototype: branch [`prototype/299-landing-page`](https://github.com/SoongGuanLeong/llm-discovery/tree/prototype/299-landing-page),
+directory `site/` — `/` is the chosen direction A; `variant-b.html` and `variant-c.html`
+are rejected directions B (paper/serif editorial) and C (centred product cards). All three
+are self-contained single files, inline CSS, no JavaScript, identical copy. Nothing merges
+as-is: the production ticket **rewrites** the prototype. B and C stay on the prototype
+branch as the primary sources for their directions; they leave `site/` when the production
+page lands (#302).
+
+### Visual direction — "terminal/editorial", minimal not hacker
+
+- Near-white paper (`#fbfbfa`), ink text (`#14171a`), one desaturated teal accent
+  (`#0e7490`) used only for links, step indices and the note rule. The neon-green-on-black
+  draft was rejected as too "hacker"; the page is near-monochrome.
+- Monospace carries structure — the eyebrow, section labels, step numbers, hints, the
+  keep-list, the footer; system sans carries prose.
+- Left-aligned single measure, max 760px; thin `1px` rules between sections; no cards, no
+  shadows, no fills except the keep-list tint and the single solid CTA button.
+- Mobile: single column throughout. Problem rows collapse from label-plus-text to stacked
+  at 640px. The five-step strip is 5 columns above 640px, 2 columns down to 420px, 1
+  column below. Long inline paths wrap (`overflow-wrap: anywhere`); the JSON block scrolls
+  horizontally rather than wrapping.
+
+### Copy (locked)
+
+- **h1**: "Find the free coding models worth routing to."
+- **Subhead**: opens with the locked one-liner — *"Finds the best free coding LLMs across
+  providers and wires them into your gateway."* — followed by one supporting sentence on
+  what it does.
+- **CTAs**: "Read the Golden Path" (solid ink button) and "View the source" (quiet link).
+  One solid button and one quiet link only; a second primary action would require
+  re-deciding the hierarchy.
+- **Pipeline diagram**: a five-cell bordered CSS grid with monospace indices and short
+  hints, captioned "The pipeline" — not SVG. The hand-written SVG version was built as
+  variant B and rejected on maintenance and reflow grounds.
+- **Keep-list excerpt**: two of the three combos (`contributor_free`, `flash`) from the
+  committed fixture `data/derived/examples/omniroute_combos.example.json`, shown verbatim
+  under a line saying what it is, with the path cited in the caption.
+- **Gateway dependency** — the "Run it" section opens with, verbatim: *"llm-discovery is a
+  CLI, and it is not a gateway. It finds the models and configures the OmniRoute gateway
+  you already run — so the last step needs a reachable gateway and a management key."* The
+  only call to action is the link to the README's 5-minute Golden Path; **no commands
+  appear on the page**.
+- **Footer**: names the MIT licence and links the repository.
+
+The page's meta/social layer (Open Graph tags, favicon, preview image) is deferred to the
+production ticket — see Out of scope.
 
 ---
 
@@ -289,3 +341,29 @@ gh repo view --json description,homepageUrl,repositoryTopics,licenseInfo   # ver
    `LICENSE` blob.
 4. `homepageUrl` is the exact URL above; it serves the page once #302's deploy has run.
 5. Nothing set for the social preview; the landing-page meta-layer ticket owns it.
+
+---
+
+## Out of scope
+
+Carried from map #298, plus the fog items #304 closed:
+
+- **Rebuilding a product UI.** `ui/` was retired in ADR 0010; the landing page is static
+  documentation hosting, not an app.
+- **Committing catalog snapshots** so a fresh clone works with no network at all. Ruled
+  out in favour of the Catalog Path.
+- **Contributor onboarding** (`CONTRIBUTING.md`, issue templates). The audience is readers,
+  not contributors.
+- **Untracking `config/providers.yaml`.** Not a defect: AGENTS.md states the file is
+  committed by design so user edits survive resets, and it holds env-var names, never
+  secret values.
+- **The landing page's meta/social layer** — Open Graph tags, favicon, social preview
+  image, page title/description meta. Owned by the production landing-page ticket; GitHub
+  falls back to the repo card until then (#303).
+- **A `docs/reference/` index page.** Decided no — the README Reference list is the only
+  index (see #300).
+- **Cross-linking the landing page from the README or the reference docs.** Decided no —
+  discovery runs through the repository homepage field (#303).
+- **Heavier landing-page validation** — full HTML validity, external link checking,
+  accessibility linting. Not in the deploy path; if they land, they go in `ci.yml`'s
+  `site` job (#302).

@@ -37,3 +37,6 @@ Default triage labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-f
 ### Domain docs
 
 Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+Hand-off specs: wayfinder map hand-off specs live in `docs/specs/`, one file per map
+(e.g. `docs/specs/first-look.md`).

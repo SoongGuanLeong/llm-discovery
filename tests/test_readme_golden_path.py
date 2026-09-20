@@ -1,8 +1,9 @@
-"""#274: README golden path stays walkable from --help only.
+"""#274/#300: README regression harness for the first-look spec.
 
 Fails when README drifts from cli._build_parser, when the promoted
-guide is missing/unlinked, when AGENTS.md hides the CLI, or when
-retired ui/scripts spellings creep back into README.
+guide is missing/unlinked, when AGENTS.md hides the CLI, when
+retired ui/scripts spellings creep back into README, or when the
+#300 split regresses (badge row, Catalog Path placement, ADR copy).
 """
 from __future__ import annotations
 
@@ -23,6 +24,14 @@ REQUIRED_STEPS = [
     "llm-discovery build",
     "llm-discovery export dry-run",
     "llm-discovery export apply",
+]
+
+# #300: the Catalog Path — keyless first command, before the Golden Path.
+CATALOG_STEPS = [
+    "llm-discovery refresh --only models_dev",
+    "llm-discovery catalog models show <model-id>",
+    "llm-discovery catalog providers show <provider-id>",
+    "llm-discovery catalog providers models <provider-id>",
 ]
 
 # Retired surfaces that must not reappear as live instructions in README.
@@ -103,10 +112,50 @@ def test_no_stale_surfaces_in_readme():
             assert allowed, f"stale spelling in README line {i}: {line.strip()}"
 
 
-def test_interface_decisions_recorded():
+def test_badge_row_is_exactly_three_badges():
+    """#300: exactly three badges (CI, MIT, Python 3.12) directly under the title."""
+    lines = _readme().splitlines()
+    assert lines[0].strip() == "# llm-discovery"
+    i = 1
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    badges = []
+    while i < len(lines) and lines[i].startswith("[!["):
+        badges.append(lines[i])
+        i += 1
+    assert len(badges) == 3, f"expected exactly 3 badge lines, got {len(badges)}: {badges}"
+    assert "actions/workflows/ci.yml/badge.svg" in badges[0], "badge 1 must be CI"
+    assert "MIT" in badges[1] and "shields.io" in badges[1], "badge 2 must be the MIT licence"
+    assert "Python" in badges[2] and "3.12" in badges[2], "badge 3 must be Python 3.12"
+
+
+def test_catalog_path_precedes_golden_path_and_parses():
+    """#300: the Catalog Path block appears before the Golden Path and parses."""
+    from llm_discovery.cli import _build_parser
+
+    parser = _build_parser()
     text = _readme()
-    assert "0010" in text or "ADR 0010" in text
-    lowered = text.lower()
-    assert "no http" in lowered or "no new http" in lowered or "cli is the contract" in lowered
-    # Retired UI must read as retired, not as an option.
-    assert re.search(r"ui/.*(retired|removed|deleted)", lowered), "README must state ui/ retired"
+    assert "## Catalog Path" in text, "README missing the Catalog Path section"
+    start = text.index("## Catalog Path")
+    end = text.index("5-minute Golden Path")
+    assert start < end, "Catalog Path must come before the Golden Path heading"
+    for step in CATALOG_STEPS:
+        assert step in text, f"README missing Catalog Path command: {step}"
+        pos = text.index(step)
+        assert start < pos < end, f"Catalog Path command outside the section: {step}"
+        argv = [re.sub(r"^<(.+)>$", r"\1", a) for a in step.split()[1:]]
+        args = parser.parse_args(argv)
+        assert getattr(args, "handler", None) is not None, f"command does not parse: {step}"
+    # #300: the false fresh-clone offline claim must not come back.
+    assert "No network, no key" not in text
+
+
+def test_interface_decisions_recorded():
+    """#300: ADR 0010 is the normative record; the README no longer copies it."""
+    adr = REPO / "docs" / "adr" / "0010-cli-replaces-ui-parity-contract.md"
+    assert adr.exists(), "ADR 0010 must stay as the normative interface record"
+    text = _readme()
+    # The README links docs/reference/cli.md instead of re-recording the ADR;
+    # test_no_stale_surfaces_in_readme already guards resurrected-UI spellings.
+    assert "0010" not in text, "README must not carry a second copy of the interface decisions"
+    assert "docs/reference/cli.md" in text

@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
-# Throwaway prototype preview for #299. Serves site/ over plain HTTP so the
-# variant pages can be opened in a browser. No build step, no dependencies.
+# Local preview for site/. Serves the directory over plain HTTP so the page can
+# be opened in a browser before deploy. No build step, no dependencies.
 #
 #   ./site/preview.sh          # http://localhost:8000/
 #   ./site/preview.sh 8080     # pick a port

@@ -42,8 +42,7 @@ domain (the artifact ships without a `CNAME`).
   earlier run — the source flip in step 1 is the usual fix).
 - Wait for the `deploy` job to go green; its summary shows the page URL.
 - Open <https://soongguanleong.github.io/llm-discovery/> and confirm the page
-  renders with working assets and the links between `index.html` and the
-  variant pages resolve.
+  renders with working assets.
 
 If the run fails at **Validate site/**, the log names the offending file and
 reference — fix it in `site/` (root-absolute `href="/…"`, `src="/…"`,

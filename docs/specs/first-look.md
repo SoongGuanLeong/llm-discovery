@@ -8,7 +8,7 @@ ticket named in its heading; nothing here is speculative. Persisted prose, norma
 | #301 | Landing page deployment | Settled — see `docs/research/issue-301-github-pages-actions.md` (referenced from #298) |
 | #299 | Landing page look and copy | Settled — resolution comment on #299; production page rewrites the prototype |
 | #300 | README split, Catalog Path, reference docs | Settled — this file, below |
-| #303 | Repo metadata (description, topics, MIT license, homepage) | Not yet settled |
+| #303 | Repo metadata (description, topics, MIT license, homepage) | Settled — this file, below; `LICENSE` file landed with the resolution |
 | #302 | Pages deployment for `site/` | Settled — this file, below |
 | #304 | Assemble and finalise this spec | Open |
 
@@ -242,3 +242,50 @@ implementation time:
    `https://soongguanleong.github.io/llm-discovery/` and it renders with working assets.
 4. The production-page ticket (from #299's direction) removes the variant pages from
    `site/` before or with the deploy, leaving the artifact production-only.
+
+---
+
+## Repo metadata (#303)
+
+Exact values, settled with the maintainer, to be applied with no further decisions. Per
+the ticket, this section records values; only the `LICENSE` file has landed with this
+resolution (explicit maintainer instruction). Everything else applies in the metadata
+ticket.
+
+### The values
+
+1. **Description** (verbatim, 95 chars, within the 350 limit):
+   `Discovers and evaluates cloud LLM models, judges coding relevance, emits a curated keep-list.`
+2. **Topics** — exactly these 10, no extras (GitHub allows 20):
+   `llm`, `ai`, `cli`, `python`, `llm-evaluation`, `benchmarks`, `models-dev`,
+   `artificial-analysis`, `free-models`, `omniroute`.
+3. **License**: MIT. `LICENSE` landed with this resolution:
+   `Copyright (c) 2026-2027 Soong Guan Leong` (holder = the maintainer's git author
+   identity, confirmed in interview; year range 2026–2027). The text is the canonical
+   MIT wording, so GitHub licence detection picks it up automatically.
+4. **Homepage**: `https://soongguanleong.github.io/llm-discovery/` — the exact
+   project-page form: owner-pages host, `/llm-discovery/` path, trailing slash,
+   lowercase. Same URL #302's deploy publishes to.
+5. **Social preview image**: **deferred** to the landing page's meta layer (Open Graph
+   tags, favicon, preview image — deliberately unresolved in #298 until the production
+   page exists). GitHub falls back to the repo card until then.
+
+### Applying (metadata ticket)
+
+```bash
+gh repo edit --description "Discovers and evaluates cloud LLM models, judges coding relevance, emits a curated keep-list."
+gh repo edit --homepage "https://soongguanleong.github.io/llm-discovery/"
+gh repo edit --add-topic llm --add-topic ai --add-topic cli --add-topic python \
+  --add-topic llm-evaluation --add-topic benchmarks --add-topic models-dev \
+  --add-topic artificial-analysis --add-topic free-models --add-topic omniroute
+gh repo view --json description,homepageUrl,repositoryTopics,licenseInfo   # verify
+```
+
+### Acceptance criteria (implementation ticket)
+
+1. `gh repo view --json description` returns the exact string above.
+2. `repositoryTopics` is exactly the 10 locked topics, no extras.
+3. `licenseInfo` reports MIT; the #300 README badge's MIT link now resolves to a real
+   `LICENSE` blob.
+4. `homepageUrl` is the exact URL above; it serves the page once #302's deploy has run.
+5. Nothing set for the social preview; the landing-page meta-layer ticket owns it.

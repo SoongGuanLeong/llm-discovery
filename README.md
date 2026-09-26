@@ -6,6 +6,31 @@
 
 Discover and evaluate cloud LLMs across multiple providers. Enumerates provider `/models` endpoints, resolves each model against offline catalogs, judges coding relevance via LLM, and writes a curated keep-list per provider.
 
+## Alternative: skip the gateway entirely
+
+This repo exists to curate a model keep-list and push it into an OmniRoute
+gateway. If you do not want to run a gateway, you do not need this tool. Install
+[Orca](https://onOrca.dev) and add one or more CLI coding agents that have a free
+path. Orca runs them side by side, each in its own git worktree, and tracks the
+runs for you. It ships no models of its own, so the agent CLIs below are the
+actual source of free tokens.
+
+- **Freebuff**: `npm install -g freebuff`. Free forever, ad-supported, no
+  account and no API key. Runs DeepSeek, MiMo, and MiniMax. Full model set in 25+
+  countries; limited mode elsewhere.
+- **Kilo**: `npm install -g @kilocode/cli`. MIT-licensed fork of OpenCode. Has a
+  free model tier, and BYOK runs at provider cost with zero markup.
+- **OpenCode**: `npm install -g @opencode-ai/cli`. Free use depends on which
+  provider keys you add, so check `opencode models` after you connect one.
+- **Qoder CLI**: `curl -fsSL https://qoder.com/install | bash`. Sign-in on first
+  run. Free allowance not confirmed here; see <https://qoder.com/pricing>.
+- **CodeBuddy Code**: `npm install -g @tencent-ai/codebuddy-code`. Tencent, also
+  sign-in on first run. Free allowance not confirmed here; see the pricing page
+  at <https://www.codebuddy.ai>.
+
+Orca does not require a login and does not resell tokens. Free-tier terms change
+often, so verify the current limits before you depend on any of them.
+
 ## Catalog quickstart (no API key)
 
 The `catalog` commands read local snapshots of the model catalogs under `data/`.
